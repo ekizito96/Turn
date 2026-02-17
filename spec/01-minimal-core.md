@@ -15,15 +15,29 @@
 
 **Expressions and statements:** Enough to write real agents without friction.
 
-- **Literals:** number, string, `true`, `false`, `null`.
+- **Literals:** number, string, `true`, `false`, `null`, `[ list ]`, `{ map }`.
 - **Variables:** identifier (bound by `let`).
 - **Operators:** `+` (concatenation/addition), `==`, `!=` (equality), `and`, `or` (logical, short-circuit).
+- **Indexing:** `expr[index]` for lists and maps.
 - **Conditional:** `if expr block else block`.
 - **Loop:** `while expr block`.
 - **Block:** `{ stmt... }` with `let`, `return`, etc.
 - **Let:** `let id = expr;` (local binding).
 
-No list/map literals in v1; add when needed. `recall(key)` returns `null` when key is missing.
+`recall(key)` returns `null` when key is missing.
+
+## 6. Standard Library (v1)
+
+The runtime provides the following built-in tools:
+
+- `echo(val)`: Returns the value.
+- `sleep(seconds)`: Pauses execution.
+- `http_get(url)`: Performs GET request.
+- `http_post({url, body})`: Performs POST request with JSON body.
+- `llm_generate({messages, model})`: Calls LLM API (OpenAI compatible).
+- `json_parse(str)`: Parses JSON string to Value.
+- `json_stringify(val)`: Converts Value to JSON string.
+
 
 ---
 

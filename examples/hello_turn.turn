@@ -1,0 +1,22 @@
+turn {
+    let name = "Turn";
+    let greeting = "Hello, " + name + "!";
+    context.append(greeting);
+    
+    let url = "https://httpbin.org/get";
+    let response = call("http_get", url);
+    
+    if response == null {
+        return "Failed to fetch";
+    }
+
+    let parsed = call("json_parse", response);
+    
+    if parsed != null {
+        let origin = parsed["origin"];
+        context.append("My IP is: " + origin);
+        return "My IP is: " + origin;
+    }
+    
+    return greeting;
+}
