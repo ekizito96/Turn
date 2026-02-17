@@ -67,6 +67,20 @@ impl Parser {
         Ok(Program { stmts })
     }
 
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
+        let t = self.next().ok_or(ParseError::UnexpectedEof)?;
+        match t.token {
+            Token::TypeNum => Ok(Type::Num),
+            Token::TypeStr => Ok(Type::Str),
+            Token::TypeBool => Ok(Type::Bool),
+            Token::TypeList => Ok(Type::List),
+            Token::TypeMap => Ok(Type::Map),
+            Token::TypeAny => Ok(Type::Any),
+            Token::TypeVoid => Ok(Type::Void),
+            _ => Err(ParseError::UnexpectedToken(t.span)),
+        }
+    }
+
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         let span = self.span();
         match self.peek() {
@@ -80,10 +94,18 @@ impl Parser {
                 let Token::Id(name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
                     return Err(ParseError::UnexpectedToken(self.span()));
                 };
+                
+                let ty = if matches!(self.peek(), Some(Token::Colon)) {
+                    self.next();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+
                 self.expect(Token::Eq)?;
                 let init = self.parse_expr()?;
                 self.expect(Token::Semicolon)?;
-                Ok(Stmt::Let { name, init, span })
+                Ok(Stmt::Let { name, ty, init, span })
             }
             Some(Token::Context) => {
                 self.next();
@@ -350,8 +372,43 @@ impl Parser {
                 })
             }
             Token::Turn => {
+                let mut params = Vec::new();
+                if matches!(self.peek(), Some(Token::LParen)) {
+                    self.next(); // consume (
+                    while !matches!(self.peek(), Some(Token::RParen) | Some(Token::Eof)) {
+                         let name_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                         let (name, name_span) = match name_token.token {
+                             Token::Id(s) => (s, name_token.span),
+                             _ => return Err(ParseError::UnexpectedToken(name_token.span)),
+                         };
+                         
+                         let ty = if matches!(self.peek(), Some(Token::Colon)) {
+                             self.next();
+                             Some(self.parse_type()?)
+                         } else {
+                             None
+                         };
+                         
+                         params.push((name, name_span, ty));
+                         
+                         if matches!(self.peek(), Some(Token::Comma)) {
+                             self.next();
+                         } else {
+                             break;
+                         }
+                    }
+                    self.expect(Token::RParen)?;
+                }
+                
+                let ret_ty = if matches!(self.peek(), Some(Token::Arrow)) {
+                    self.next();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+
                 let body = self.parse_block()?;
-                Ok(Expr::Turn { body, span })
+                Ok(Expr::Turn { params, ret_ty, body, span })
             }
             Token::LParen => {
                 let inner = self.parse_expr()?;

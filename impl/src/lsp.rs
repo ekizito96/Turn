@@ -194,7 +194,7 @@ impl LanguageServer for Backend {
                 // Check if it's a definition itself
                 for scope in &analysis.scopes {
                     if scope.span.start <= span.start && span.end <= scope.span.end {
-                         if let Some(d_span) = scope.definitions.get(&name) {
+                         if let Some((d_span, _)) = scope.definitions.get(&name) {
                              if *d_span == span {
                                  def_span = Some(span);
                                  break;

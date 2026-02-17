@@ -2,6 +2,18 @@
 
 use crate::lexer::Span;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+    Num,
+    Str,
+    Bool,
+    List,
+    Map,
+    Any,
+    Void,
+    // We can add generics later: List(Box<Type>)
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub stmts: Vec<Stmt>,
@@ -15,6 +27,7 @@ pub enum Stmt {
     },
     Let {
         name: String,
+        ty: Option<Type>,
         init: Expr,
         span: Span,
     },
@@ -77,7 +90,12 @@ pub enum Expr {
     Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
     Use { module: Box<Expr>, span: Span },
     Index { target: Box<Expr>, index: Box<Expr>, span: Span },
-    Turn { body: Block, span: Span },
+    Turn {
+        params: Vec<(String, Span, Option<Type>)>,
+        ret_ty: Option<Type>,
+        body: Block,
+        span: Span,
+    },
     List {
         items: Vec<Expr>,
         span: Span,

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Scope {
-    pub definitions: HashMap<String, Span>,
+    pub definitions: HashMap<String, (Span, Option<Type>)>,
     pub parent: Option<usize>,
     pub span: Span, // The span covered by this scope
 }
@@ -52,14 +52,14 @@ impl Analysis {
         }
     }
 
-    fn add_definition(&mut self, name: &str, span: Span) {
-        self.scopes[self.active_scope_idx].definitions.insert(name.to_string(), span);
+    fn add_definition(&mut self, name: &str, span: Span, ty: Option<Type>) {
+        self.scopes[self.active_scope_idx].definitions.insert(name.to_string(), (span, ty));
     }
 
     fn record_usage(&mut self, name: &str, span: Span) {
         let mut current_idx = Some(self.active_scope_idx);
         while let Some(idx) = current_idx {
-            if let Some(def_span) = self.scopes[idx].definitions.get(name) {
+            if let Some((def_span, _)) = self.scopes[idx].definitions.get(name) {
                 self.usages.insert(span.start, *def_span);
                 return;
             }
@@ -69,20 +69,9 @@ impl Analysis {
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Let { name, init, span } => {
+            Stmt::Let { name, ty, init, span } => {
                 self.visit_expr(init);
-                // In Turn, let binding is visible after the init? 
-                // Or is it recursive? "let x = x + 1" -> x is undefined in init.
-                // So we visit init first, then add definition.
-                // The span for definition should probably be the identifier's span, 
-                // but Stmt::Let doesn't store Id span separately, just the whole stmt span.
-                // Ideally we'd parse the Id as an Expr::Id or Token to get its span.
-                // For now, let's use the stmt span or try to approximate?
-                // Actually, `Parser` parses `Token::Id(name)`. We lost the span of the ID in `Stmt::Let`.
-                // We should update `Stmt::Let` to store `id_span`.
-                // But to avoid breaking everything now, let's just use the `span` of the statement
-                // or maybe we can't support precise "rename" yet, but "goto def" to the let line is fine.
-                self.add_definition(name, *span);
+                self.add_definition(name, *span, ty.clone());
             }
             Stmt::Turn { body, .. } => {
                 // Turn is an expression usually, but here it's a statement (expression statement?)
@@ -114,7 +103,7 @@ impl Analysis {
                 self.enter_scope(catch_block.span);
                 // We don't have span for catch_var ID. Use block start?
                 let var_span = Span { start: catch_block.span.start, end: catch_block.span.start }; 
-                self.add_definition(catch_var, var_span);
+                self.add_definition(catch_var, var_span, Some(Type::Any)); // Catch var is Any (usually Error string)
                 self.visit_block(catch_block);
                 self.exit_scope();
             }
@@ -144,8 +133,11 @@ impl Analysis {
             Expr::Id { name, span } => {
                 self.record_usage(name, *span);
             }
-            Expr::Turn { body, span } => {
+            Expr::Turn { params, body, span, .. } => {
                 self.enter_scope(*span);
+                for (name, param_span, ty) in params {
+                     self.add_definition(name, *param_span, ty.clone());
+                }
                 self.visit_block(body);
                 self.exit_scope();
             }
@@ -224,8 +216,12 @@ impl Analysis {
                 let mut curr_idx = Some(best_idx);
                 while let Some(idx) = curr_idx {
                     let scope = &self.scopes[idx];
-                    for name in scope.definitions.keys() {
+                    for (name, (_, ty)) in &scope.definitions {
+                        // We can return type info too! But signature is Vec<String>.
+                        // For now just name.
                         items.push(name.clone());
+                        // TODO: Use ty for better completion icons/details
+                        let _ = ty; 
                     }
                     curr_idx = scope.parent;
                 }
