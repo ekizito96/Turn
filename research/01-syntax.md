@@ -4,11 +4,11 @@ What we’re unpacking: **lexing**, **parsing**, **grammar** (BNF and variants),
 
 ---
 
-## Open questions
+## Open questions (resolved in spec)
 
-- [ ] Turn: do we want S-expression–style (homoiconic) or more conventional infix/statement syntax?
-- [ ] How do we write grammar for “turn” and “context” as syntactic constructs?
-- [ ] Do we need multiple grammar layers (e.g. expressions vs turns vs top-level)?
+- [x] **Syntax style:** Conventional keyword/block, not S-expr. See [spec/02-grammar.md](../spec/02-grammar.md) §5 Rationale.
+- [x] **Grammar for turn and context:** Locked in spec §1–2 (turn Block, context.append, remember, recall, call).
+- [x] **Layers:** Program = Stmt*; Expr vs Stmt. One grammar. See spec/02-grammar.md.
 
 ---
 
