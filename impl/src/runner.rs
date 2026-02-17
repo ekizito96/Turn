@@ -26,13 +26,40 @@ impl<S: Store> Runner<S> {
 
     fn load_module(&mut self, path: &str, current_file: Option<&PathBuf>) -> Result<Value> {
         // Resolve path relative to current file if provided
-        let resolved_path = if let Some(base) = current_file {
+        let mut resolved_path = if let Some(base) = current_file {
             let parent = base.parent().unwrap_or(std::path::Path::new("."));
-            parent.join(path) // Don't canonicalize yet to keep relative paths simple?
-            // Actually canonicalize is good for unique keys.
+            parent.join(path) 
         } else {
             PathBuf::from(path)
         };
+        
+        // If file doesn't exist, and path looks like a package import (no path separators),
+        // try looking in .turn_modules by walking up the directory tree
+        if !resolved_path.exists() {
+             let is_package_import = !path.contains('/') && !path.contains('\\') && !path.starts_with('.');
+             if is_package_import {
+                 // Search up from current_file (or CWD if None)
+                 let mut search_dir = if let Some(base) = current_file {
+                     // Start from file's directory
+                     base.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+                 } else {
+                     std::env::current_dir().unwrap_or(PathBuf::from("."))
+                 };
+                 
+                 // Limit loop to avoid infinite loop on weird filesystems
+                 for _ in 0..20 {
+                     let pkg_path = search_dir.join(".turn_modules").join(format!("{}.turn", path));
+                     if pkg_path.exists() {
+                         resolved_path = pkg_path;
+                         break;
+                     }
+                     
+                     if !search_dir.pop() {
+                         break;
+                     }
+                 }
+             }
+        }
         
         // Canonicalize to absolute path for cache key
         let abs_path = match std::fs::canonicalize(&resolved_path) {

@@ -50,6 +50,15 @@ enum Commands {
 
     /// Start Turn LSP server (stdio)
     Lsp,
+
+    /// Add a package dependency
+    Add {
+        /// Package name (e.g. "std")
+        name: String,
+        
+        /// URL to source file (e.g. raw github link)
+        url: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -115,6 +124,20 @@ fn main() -> Result<()> {
                     eprintln!("Server error: {}", e);
                 }
             });
+        }
+        Commands::Add { name, url } => {
+            let modules_dir = PathBuf::from(".turn_modules");
+            if !modules_dir.exists() {
+                fs::create_dir(&modules_dir)?;
+            }
+            
+            println!("Fetching {} from {}...", name, url);
+            let response = reqwest::blocking::get(&url)?.error_for_status()?.text()?;
+            
+            let file_path = modules_dir.join(format!("{}.turn", name));
+            fs::write(&file_path, response)?;
+            
+            println!("Package '{}' installed to {}", name, file_path.display());
         }
     }
     Ok(())
