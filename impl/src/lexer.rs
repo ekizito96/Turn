@@ -27,12 +27,24 @@ pub enum Token {
     False,
     Null,
 
+    // Types
+    TypeNum,
+    TypeStr,
+    TypeBool,
+    TypeList,
+    TypeMap,
+    TypeAny,
+    TypeVoid,
+
     // Operators
     Plus,
+    Minus,
     Star,
+    Slash,
     Eq, // = (assignment)
     EqEq,
     Ne,
+    Arrow, // ->
 
     // Literals
     Num(f64),
@@ -90,6 +102,13 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("true", Token::True),
     ("false", Token::False),
     ("null", Token::Null),
+    ("Num", Token::TypeNum),
+    ("Str", Token::TypeStr),
+    ("Bool", Token::TypeBool),
+    ("List", Token::TypeList),
+    ("Map", Token::TypeMap),
+    ("Any", Token::TypeAny),
+    ("Void", Token::TypeVoid),
 ];
 
 pub struct Lexer<'a> {
@@ -233,7 +252,16 @@ impl<'a> Lexer<'a> {
                         self.skip_block_comment()?;
                         return self.next_token();
                     }
-                    _ => return Err(LexError::UnexpectedChar('/', start)),
+                    _ => Token::Slash,
+                }
+            }
+            Some('-') => {
+                self.next();
+                if self.peek() == Some('>') {
+                    self.next();
+                    Token::Arrow
+                } else {
+                    Token::Minus
                 }
             }
             Some('"') => self.read_string()?,
