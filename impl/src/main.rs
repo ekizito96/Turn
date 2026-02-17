@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
 use turn::{FileStore, Runner, ToolRegistry};
+use tower_lsp::{LspService, Server};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -43,11 +44,27 @@ enum Commands {
         #[arg(long, default_value = ".turn_store")]
         store: PathBuf,
     },
+
+    /// Start Turn LSP server (stdio)
+    Lsp,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Lsp => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            
+            rt.block_on(async {
+                let stdin = tokio::io::stdin();
+                let stdout = tokio::io::stdout();
+
+                let (service, socket) = LspService::new(|client| turn::lsp::Backend { client });
+                Server::new(stdin, stdout, socket).serve(service).await;
+            });
+        }
         Commands::Run { file, id, store } => {
             let source = fs::read_to_string(&file)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {}", file.display(), e))?;
