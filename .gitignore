@@ -1,2 +1,5 @@
 # Rust
 impl/target/
+
+# Cursor - do not commit
+.cursor/
