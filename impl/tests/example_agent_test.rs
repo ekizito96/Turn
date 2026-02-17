@@ -11,9 +11,9 @@ fn example_agent_tools() -> ToolRegistry {
         Box::new(|arg: Value| {
             let s = arg.to_string();
             if s.contains("San Francisco") {
-                Value::Str("sunny".to_string())
+                Ok(Value::Str("sunny".to_string()))
             } else {
-                Value::Str("rainy".to_string())
+                Ok(Value::Str("rainy".to_string()))
             }
         }) as ToolHandler,
     );
@@ -21,17 +21,17 @@ fn example_agent_tools() -> ToolRegistry {
         "parse_weather",
         Box::new(|arg: Value| {
             let s = arg.to_string();
-            Value::Str(if s == "sunny" { "true" } else { "false" }.to_string())
+            Ok(Value::Str(if s == "sunny" { "true" } else { "false" }.to_string()))
         }) as ToolHandler,
     );
     tools.register(
         "book_flight",
-        Box::new(|arg: Value| Value::Str(format!("Flight ABC123 booked to {}", arg)))
+        Box::new(|arg: Value| Ok(Value::Str(format!("Flight ABC123 booked to {}", arg))))
             as ToolHandler,
     );
     tools.register(
         "generate_summary",
-        Box::new(|arg: Value| Value::Str(format!("Summary: {}", arg))) as ToolHandler,
+        Box::new(|arg: Value| Ok(Value::Str(format!("Summary: {}", arg)))) as ToolHandler,
     );
     tools
 }

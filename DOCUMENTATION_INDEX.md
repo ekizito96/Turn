@@ -125,6 +125,10 @@
 | **Bounded Context** | 00, 01, 03 | 00 (Problem 1, 8), 07 | `runtime.rs` (MAX_CONTEXT_SIZE) |
 | **Deployment** | - | - | `server.rs` (HTTP API) |
 | **Persistence** | - | - | `store.rs` (FileStore) |
+| **Modules & Imports** | 08 | - | `compiler.rs`, `runner.rs` |
+| **Error Handling** | 09 | - | `compiler.rs`, `vm.rs` |
+| **LSP** | 10 | - | `lsp.rs` |
+| **Standard Library** | - | - | `tools.rs` (`fs`, `env`, `http`, `json`) |
 
 ---
 

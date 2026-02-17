@@ -65,14 +65,15 @@ pub fn run_with_tools(
                 arg,
                 continuation,
             } => {
-                // Execute tool (synchronously for now, but design allows async/pause)
-                let result = match tools.call(&tool_name, arg) {
-                    Some(v) => v,
-                    None => value::Value::Null,
-                };
-
-                // Resume execution with result
-                vm = vm::Vm::resume_with_result(continuation, &code, result);
+                // Execute tool
+                match tools.call(&tool_name, arg) {
+                    Ok(result) => {
+                        vm = vm::Vm::resume_with_result(continuation, result);
+                    },
+                    Err(e) => {
+                        vm = vm::Vm::resume_with_error(continuation, e);
+                    }
+                }
             }
         }
     }

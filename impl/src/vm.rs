@@ -53,7 +53,6 @@ impl Vm {
 
     pub fn resume_with_result(
         state: VmState,
-        _code: &[Instr], // Ignored
         tool_result: Value,
     ) -> Self {
         let mut vm = Self {
@@ -62,6 +61,46 @@ impl Vm {
             runtime: state.runtime,
         };
         vm.push(tool_result);
+        vm
+    }
+
+    pub fn resume_with_error(
+        state: VmState,
+        error_msg: String,
+    ) -> Self {
+        let mut vm = Self {
+            frames: state.frames,
+            stack: state.stack,
+            runtime: state.runtime,
+        };
+        
+        let err = Value::Str(error_msg);
+        
+        // Unwind stack looking for catch
+        loop {
+            if vm.frames.is_empty() {
+                // No frames left = uncaught exception.
+                // We push the error so that the next run() call returns it as result.
+                vm.push(err);
+                break;
+            }
+
+            let frame_idx = vm.frames.len() - 1;
+            // Check if current frame has a handler
+            if let Some(handler_offset) = vm.frames[frame_idx].handlers.pop() {
+                // Found handler!
+                vm.frames[frame_idx].ip = handler_offset as usize;
+                vm.push(err); // Push error object for catch block
+                break; // Resume execution at handler
+            } else {
+                // No handler in this frame, pop it
+                vm.frames.pop();
+                // Restore env if there is a caller
+                if let Some(caller) = vm.frames.last() {
+                    vm.runtime.env = caller.env.clone();
+                }
+            }
+        }
         vm
     }
 

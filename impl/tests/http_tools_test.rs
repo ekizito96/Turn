@@ -74,9 +74,9 @@ fn test_http_get_error() {
     let tools = tools::ToolRegistry::new();
     let result = run_with_tools(&source, &tools).unwrap();
     
-    // Should return null on error (404 or connection error)
+    // Should return error string on error (501 or 404 or connection error)
     match result {
-        Value::Null => {},
-        _ => panic!("Expected null, got {:?}", result),
+        Value::Str(s) => assert!(s.contains("HTTP request failed") || s.contains("HTTP request error")),
+        _ => panic!("Expected error string, got {:?}", result),
     }
 }
