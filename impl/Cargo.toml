@@ -1,0 +1,11 @@
+[package]
+name = "turn"
+version = "0.1.0"
+edition = "2021"
+description = "Object-oriented programming language for agentic software"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+anyhow = "1"

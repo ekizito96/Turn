@@ -1,0 +1,43 @@
+// Task Assistant Agent - from spec/06-example-agent.md
+// Run with: turn run tests/example_agent.turn
+// Note: requires tools get_weather, parse_weather, book_flight, generate_summary
+// The default runtime only has echo - use the test harness for full example
+
+turn {
+  let task = "Find the weather in San Francisco and book a flight if it's sunny";
+  remember("task", task);
+  context.append("Task: " + task);
+
+  let weather_result = call("get_weather", "San Francisco");
+  remember("weather", weather_result);
+  context.append("Weather: " + weather_result);
+
+  let weather_str = recall("weather");
+  let is_sunny = call("parse_weather", weather_str);
+  remember("is_sunny", is_sunny);
+
+  if is_sunny {
+    turn {
+      let flight_result = call("book_flight", "San Francisco");
+      remember("flight", flight_result);
+      context.append("Flight: " + flight_result);
+      return "Task complete: Weather is sunny, flight booked";
+    }
+  } else {
+    turn {
+      context.append("Weather not sunny, skipping flight");
+      return "Task complete: Weather not sunny, no flight booked";
+    }
+  }
+}
+
+turn {
+  let previous_task = recall("task");
+  let weather = recall("weather");
+  let flight = recall("flight");
+
+  let summary = call("generate_summary", previous_task);
+  context.append(summary);
+
+  return summary;
+}

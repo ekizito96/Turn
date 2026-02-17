@@ -1,0 +1,7 @@
+turn {
+  let name = "Turn";
+  remember("user", name);
+  context.append("Hello, " + name);
+  let out = call("echo", "Hello");
+  return out;
+}

@@ -25,8 +25,24 @@ Turn/
 │   ├── 04-foundations.md
 │   └── 05-turn-primitives.md
 ├── spec/               # 00-design-mandate, 01-minimal-core, 02-grammar, 03-runtime-model, 04-hello-turn, 05-types-and-errors
-└── impl/               # (Later) Interpreter / compiler
+└── impl/               # Rust bytecode VM (lexer, parser, compiler, VM, runtime)
 ```
+
+## Running
+
+```bash
+cd impl
+./run.sh test    # run tests
+./run.sh hello   # run hello_turn (prints "Hello")
+./run.sh build   # build release binary
+```
+
+Or directly:
+```bash
+cd impl && cargo run -- run tests/hello_turn.turn
+```
+
+**First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
 ## Research first
 
