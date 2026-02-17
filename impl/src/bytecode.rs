@@ -10,6 +10,8 @@ pub enum Instr {
     PushTrue,
     PushFalse,
     PushNull,
+    MakeList(usize),
+    MakeMap(usize),
 
     // Variables
     Load(String),
@@ -30,6 +32,7 @@ pub enum Instr {
     Remember,
     Recall,
     CallTool,
+    Index,
 
     // Control flow
     Jump(u32),

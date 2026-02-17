@@ -39,9 +39,12 @@ pub enum Token {
     // Punctuation
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     LParen,
     RParen,
     Comma,
+    Colon,
     Semicolon,
     Dot,
 
@@ -263,6 +266,14 @@ impl<'a> Lexer<'a> {
                 self.next();
                 Token::RBrace
             }
+            Some('[') => {
+                self.next();
+                Token::LBracket
+            }
+            Some(']') => {
+                self.next();
+                Token::RBracket
+            }
             Some('(') => {
                 self.next();
                 Token::LParen
@@ -274,6 +285,10 @@ impl<'a> Lexer<'a> {
             Some(',') => {
                 self.next();
                 Token::Comma
+            }
+            Some(':') => {
+                self.next();
+                Token::Colon
             }
             Some(';') => {
                 self.next();

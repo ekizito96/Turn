@@ -61,15 +61,17 @@ pub struct Block {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Literal(Literal),
-    Id(String),
-    Recall {
-        key: Box<Expr>,
+    Literal { value: Literal, span: Span },
+    Id { name: String, span: Span },
+    Recall { key: Box<Expr>, span: Span },
+    Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
+    Index { target: Box<Expr>, index: Box<Expr>, span: Span },
+    List {
+        items: Vec<Expr>,
         span: Span,
     },
-    Call {
-        name: Box<Expr>,
-        arg: Box<Expr>,
+    Map {
+        entries: Vec<(String, Expr)>,
         span: Span,
     },
     Binary {
@@ -79,6 +81,22 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
+}
+
+impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Literal { span, .. } => *span,
+            Expr::Id { span, .. } => *span,
+            Expr::Recall { span, .. } => *span,
+            Expr::Call { span, .. } => *span,
+            Expr::Index { span, .. } => *span,
+            Expr::List { span, .. } => *span,
+            Expr::Map { span, .. } => *span,
+            Expr::Binary { span, .. } => *span,
+            Expr::Paren(inner) => inner.span(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

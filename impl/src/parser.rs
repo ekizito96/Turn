@@ -225,11 +225,11 @@ impl Parser {
     }
 
     fn parse_add(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_primary()?;
+        let mut left = self.parse_postfix()?;
         let span = self.span();
         while matches!(self.peek(), Some(Token::Plus)) {
             self.next();
-            let right = self.parse_primary()?;
+            let right = self.parse_postfix()?;
             left = Expr::Binary {
                 op: BinOp::Add,
                 left: Box::new(left),
@@ -240,16 +240,37 @@ impl Parser {
         Ok(left)
     }
 
+    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_primary()?;
+        loop {
+            match self.peek() {
+                Some(Token::LBracket) => {
+                    self.next();
+                    let index = self.parse_expr()?;
+                    self.expect(Token::RBracket)?;
+                    let span = Span { start: expr.span().start, end: self.last_span.end };
+                    expr = Expr::Index {
+                        target: Box::new(expr),
+                        index: Box::new(index),
+                        span,
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let t = self.next().ok_or(ParseError::UnexpectedEof)?;
         let span = t.span;
         match t.token {
-            Token::Num(n) => Ok(Expr::Literal(Literal::Num(n))),
-            Token::Str(s) => Ok(Expr::Literal(Literal::Str(s))),
-            Token::True => Ok(Expr::Literal(Literal::True)),
-            Token::False => Ok(Expr::Literal(Literal::False)),
-            Token::Null => Ok(Expr::Literal(Literal::Null)),
-            Token::Id(name) => Ok(Expr::Id(name)),
+            Token::Num(n) => Ok(Expr::Literal { value: Literal::Num(n), span }),
+            Token::Str(s) => Ok(Expr::Literal { value: Literal::Str(s), span }),
+            Token::True => Ok(Expr::Literal { value: Literal::True, span }),
+            Token::False => Ok(Expr::Literal { value: Literal::False, span }),
+            Token::Null => Ok(Expr::Literal { value: Literal::Null, span }),
+            Token::Id(name) => Ok(Expr::Id { name, span }),
             Token::Recall => {
                 self.expect(Token::LParen)?;
                 let key = self.parse_expr()?;
@@ -275,6 +296,39 @@ impl Parser {
                 let inner = self.parse_expr()?;
                 self.expect(Token::RParen)?;
                 Ok(Expr::Paren(Box::new(inner)))
+            }
+            Token::LBracket => {
+                let mut items = Vec::new();
+                while !matches!(self.peek(), Some(Token::RBracket) | Some(Token::Eof)) {
+                    items.push(self.parse_expr()?);
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RBracket)?;
+                Ok(Expr::List { items, span })
+            }
+            Token::LBrace => {
+                let mut entries = Vec::new();
+                while !matches!(self.peek(), Some(Token::RBrace) | Some(Token::Eof)) {
+                    let key_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                    let key = match key_token.token {
+                        Token::Str(s) => s,
+                        _ => return Err(ParseError::UnexpectedToken(key_token.span)),
+                    };
+                    self.expect(Token::Colon)?;
+                    let val = self.parse_expr()?;
+                    entries.push((key, val));
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                Ok(Expr::Map { entries, span })
             }
             _ => Err(ParseError::UnexpectedToken(span)),
         }
