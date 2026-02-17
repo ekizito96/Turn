@@ -48,9 +48,16 @@ impl<S: Store> Runner<S> {
                  
                  // Limit loop to avoid infinite loop on weird filesystems
                  for _ in 0..20 {
-                     let pkg_path = search_dir.join(".turn_modules").join(format!("{}.turn", path));
-                     if pkg_path.exists() {
-                         resolved_path = pkg_path;
+                     // Try .tn first, then .turn
+                     let pkg_path_tn = search_dir.join(".turn_modules").join(format!("{}.tn", path));
+                     if pkg_path_tn.exists() {
+                         resolved_path = pkg_path_tn;
+                         break;
+                     }
+                     
+                     let pkg_path_turn = search_dir.join(".turn_modules").join(format!("{}.turn", path));
+                     if pkg_path_turn.exists() {
+                         resolved_path = pkg_path_turn;
                          break;
                      }
                      

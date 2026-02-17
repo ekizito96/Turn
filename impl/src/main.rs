@@ -25,7 +25,7 @@ struct Cli {
 enum Commands {
     /// Run a Turn program
     Run {
-        /// Path to .turn file
+        /// Path to .tn file
         file: PathBuf,
         
         /// Agent ID (for persistence)
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
             println!("Fetching {} from {}...", name, url);
             let response = reqwest::blocking::get(&url)?.error_for_status()?.text()?;
             
-            let file_path = modules_dir.join(format!("{}.turn", name));
+            let file_path = modules_dir.join(format!("{}.tn", name));
             fs::write(&file_path, response)?;
             
             println!("Package '{}' installed to {}", name, file_path.display());
