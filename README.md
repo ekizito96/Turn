@@ -56,8 +56,13 @@ cd impl
 
 Or directly:
 ```bash
-cd impl && cargo run -- run examples/hello.turn
+cd impl && cargo run -- run ../examples/hello_turn.turn
 ```
+
+**Features (v1):**
+- **Structured Data:** Lists `[1, 2]` and Maps `{"a": 1}`.
+- **Persistence:** Automatic state saving on tool calls (`.turn_store`).
+- **Standard Library:** `http_get`, `http_post`, `json_parse`, `llm_generate` (requires `OPENAI_API_KEY`).
 
 **First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
