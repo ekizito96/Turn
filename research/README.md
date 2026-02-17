@@ -1,6 +1,6 @@
 # Turn research index and plan
 
-We are doing deep research so we don’t make mistakes. This folder holds notes on **syntax**, **structure**, **algorithms**, and **foundational principles** from the best language creators, plus how they apply to Turn.
+We are doing deep research so we don’t make mistakes. Turn is **object-oriented** (agent with context and memory as objects). This folder holds notes on **syntax**, **structure**, **algorithms**, and **foundational principles** from the best language creators, plus how they apply to Turn.
 
 ---
 

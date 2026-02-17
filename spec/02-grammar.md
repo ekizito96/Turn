@@ -1,6 +1,6 @@
 # Turn grammar (v1)
 
-**Status:** Locked for v1. BNF for the minimal core. See [01-minimal-core.md](01-minimal-core.md) for primitives and [03-runtime-model.md](03-runtime-model.md) for runtime.
+**Status:** Locked for v1. Turn is object-oriented: the program is the behavior of one agent; `context` and `memory` are that agent's objects. The BNF below is for the minimal core. See [01-minimal-core.md](01-minimal-core.md) for primitives and [03-runtime-model.md](03-runtime-model.md) for runtime.
 
 ---
 
@@ -55,4 +55,4 @@ No infix operators in v1; no precedence table.
 - **CallStmt:** `call(tool_name, arg);` invokes the tool and discards the result.
 - **CallToolExpr:** `call(tool_name, arg)` as an expression invokes the tool, suspends until the handler returns, then evaluates to the result. So `let x = call("echo", "hi");` binds the tool result to `x`.
 - **CallExpr:** `name(arg1, ...)` is reserved for in-language functions (if added later).
-- **Context/memory:** Only the forms above; no other methods in v1.
+- **Context/memory:** The agent's context object supports `.append(...)`; the agent's memory supports `remember` and `recall`. No other methods in v1.

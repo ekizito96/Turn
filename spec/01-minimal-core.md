@@ -1,6 +1,6 @@
 # Turn minimal core (v1)
 
-**Status:** Locked for v1. This document defines the smallest set of primitives we implement first. Everything else is deferred to v1.1 or stdlib. The choice is justified: each primitive is necessary and not derivable from the others—see the "Why this minimal set" paragraph in [00-design-mandate.md](00-design-mandate.md).
+**Status:** Locked for v1. Turn is **object-oriented**: the program defines the behavior of an **agent** (one instance in v1). The agent has a **context** object (bounded buffer) and a **memory** object (key-value store), and it executes **turns** and **calls tools**. This document defines the smallest set of primitives we implement first. Everything else is deferred to v1.1 or stdlib. The choice is justified: each primitive is necessary and not derivable from the others—see [00-design-mandate.md](00-design-mandate.md).
 
 ---
 
@@ -9,9 +9,9 @@
 | Primitive | Operations | Rationale |
 |-----------|------------|-----------|
 | **Turn** | One form: `turn { body }` | The unit of execution. Body is a block of statements; at the end we have either a value or a suspension (tool call). |
-| **Context** | `context.append(expr)` ; bound is enforced by runtime (max size N) | Append is the only mutator. Bounded context is a runtime invariant; we don't expose `rewrite` or `window` in v1—just append and a fixed max. |
-| **Memory** | `remember(key, value)` ; `recall(key)` | Key-value only. No `forget` or `summarize` in v1—we can add when needed. |
-| **Tool** | `call(tool_name, args)` | Single form for invocation. Tool is looked up in the runtime tool registry. Execution suspends; runtime runs handler; execution resumes with result. |
+| **Context** | `context.append(expr)` ; bound enforced by runtime (max size N) | The agent's context **object**; append is the only mutator in v1. Bounded size is a runtime invariant; no `rewrite` or `window` in v1. |
+| **Memory** | `remember(key, value)` ; `recall(key)` | The agent's memory **object** (key-value store). No `forget` or `summarize` in v1—we can add when needed. |
+| **Tool** | `call(tool_name, args)` | Invocation on the agent's tool registry. Execution suspends; runtime runs handler; execution resumes with result. |
 
 **Expressions and statements (minimal):** We need enough to write a turn body and pass values to append/remember/call.
 
@@ -51,14 +51,14 @@ So: **no S-expressions** in v1. The grammar (see [02-grammar.md](02-grammar.md))
 
 ---
 
-## 4. Single program, single agent
+## 4. Single agent (v1)
 
-- One **program** = one **turn** (or a sequence of turns, see grammar). No modules; no multi-agent in v1.
-- One **context** and one **memory** per run (runtime provides them).
-- **Tool registry** is provided by the runtime (default: at least one built-in tool, e.g. `echo`, so "hello turn" can run).
+- One **program** = the behavior of **one agent instance**. The program is a sequence of statements (including turns); each turn is one unit of execution for that agent.
+- The agent has **one context object** and **one memory object** (provided by the runtime). No modules; no multi-agent in v1.
+- The agent has a **tool registry** (provided by the runtime; default: at least one built-in tool, e.g. `echo`).
 
 ---
 
 ## 5. Summary
 
-**v1 minimal core:** turn + context.append (bounded) + remember + recall + call(tool, args), with minimal expressions (literals, variables, application, if, block, let). No goal, no context rewrite/window, no memory forget/summarize, no modules, no types in syntax. One program, one context, one memory, one tool registry.
+**v1 minimal core (OOP):** One agent with turn + context object (append, bounded) + memory object (remember, recall) + call(tool, args), with minimal expressions (literals, variables, application, if, block, let). No goal, no context rewrite/window, no memory forget/summarize, no modules, no types in syntax. One agent instance, one context, one memory, one tool registry.

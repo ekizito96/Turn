@@ -1,6 +1,6 @@
 # Research: Problems Turn Solves — Deep Pain in Today’s Agentic Software
 
-**Purpose:** Go deep on the **scientific and technical problems** that arise when people use traditional languages (Python, TypeScript, C, etc.) to build agentic software. These are the pains Turn is designed to eliminate by making agentic abstractions first-class.
+**Purpose:** Go deep on the **scientific and technical problems** that arise when people use traditional languages (Python, TypeScript, C, etc.) to build agentic software. Turn is an **object-oriented** language: the agent and its context/memory are the core objects. These problems are what Turn is designed to eliminate by making those abstractions native.
 
 ---
 

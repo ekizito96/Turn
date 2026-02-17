@@ -1,19 +1,19 @@
 # Turn runtime model (v1)
 
-**Status:** Locked for v1. Defines the runtime "machine": configuration, one transition rule for executing one turn, and lifetimes. This is the spec that implementations and tools follow.
+**Status:** Locked for v1. Turn is object-oriented: execution is the **agent** running. The **configuration** is the full state of that agent at any point—its environment, its context object, its memory object, its tool registry, turn state, and remaining program. This document defines that state, one transition rule for executing one turn, and lifetimes. Implementations and tools must conform.
 
 ---
 
-## 1. Configuration
+## 1. Configuration (agent state)
 
-The **configuration** is the full state of the Turn runtime at any point. It is a single value (e.g. a record or struct) with the following components:
+The **configuration** is the full state of the **agent** at any point. It is a single value (e.g. a record or struct) with the following components. Conceptually: the agent has these objects and this execution state.
 
 | Component      | Type / meaning | Lifetime |
 |----------------|----------------|----------|
 | **env**        | Map from identifier to value. Current lexical bindings (variables, let-bound names). | Updated on `let`; pushed/popped on block entry/exit. |
-| **context**    | Bounded buffer of values (messages or state entries). Max size N (fixed for v1). | Per run (session). Updated by `context.append`. When at max, append either fails or evicts (see error model). |
-| **memory**     | Key-value store. Keys and values are values (e.g. strings). | Per run; may be persisted across runs (implementation-defined). Updated by `remember`; read by `recall`. |
-| **tool_registry** | Map from tool name (string) to tool implementation (handler). | Set at startup by runtime. Read when evaluating `call(name, arg)`. |
+| **context**    | The agent's **context object**: bounded buffer of values (messages or state entries). Max size N (fixed for v1). | Per agent (per run). Updated by `context.append`. When at max, append either fails or evicts (see error model). |
+| **memory**     | The agent's **memory object**: key-value store. Keys and values are values (e.g. strings). | Per agent; may be persisted across runs (implementation-defined). Updated by `remember`; read by `recall`. |
+| **tool_registry** | The agent's **tool registry**: map from tool name (string) to handler. | Set at startup. Used when evaluating `call(name, arg)`. |
 | **turn_state** | Current turn id (optional); pending suspension (if any). | Updated when entering a turn and when suspending/resuming on `call`. |
 | **program**    | Remaining program to execute (or current turn body). | For interpreter: pointer into AST or current statement. |
 
@@ -98,15 +98,15 @@ For v1 we specify a **default runtime** so that a Turn program can run without e
 - **Memory:** In-memory key-value map. No persistence by default.
 - **Tool registry:** At least one built-in tool, e.g. `echo`, so that `call("echo", "hello")` works. Handler: return the argument as the result (or print and return ok).
 
-So "run this Turn program" means: initialize env (empty), context (empty, max N), memory (empty), tool_registry (echo + any user-provided tools), turn_state (no turn); then run the program from the first statement.
+So "run this Turn program" means: create one **agent** with env (empty), context object (empty, max N), memory object (empty), tool registry (echo + any user-provided tools), turn_state (no turn); then run the program (the agent's behavior) from the first statement.
 
 ---
 
 ## 6. Summary
 
-- **Configuration** = (env, context, memory, tool_registry, turn_state, program).
+- **Configuration** = agent state = (env, context, memory, tool_registry, turn_state, program).
 - **One step** = small-step transition or suspension. **One turn** = run a turn body to completion or suspension.
-- **Serializable state** = (env, context, memory, turn_state) for checkpoint/replay.
-- **Default runtime** = in-memory context (bounded), in-memory memory, at least `echo` tool.
+- **Serializable state** = (env, context, memory, turn_state) for checkpoint/replay of the agent.
+- **Default runtime** = one agent with in-memory context object (bounded), in-memory memory object, at least `echo` tool.
 
 This document is the single source of truth for the runtime. Implementations (interpreter, debugger, trace viewer) must conform to this model.

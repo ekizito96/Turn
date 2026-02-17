@@ -8,11 +8,14 @@
 
 We design the **runtime and primitives** so that a later type system can assign sensible types without breaking changes.
 
+Turn is object-oriented; the type system should reflect that. In v1 we have one agent with untyped context and memory; future types assign sensible types to these objects and to the agent.
+
 | Concept | v1 (untyped) | Future typing |
 |--------|---------------|----------------|
-| **Context** | Bounded buffer of values. | `Context<T>` or `context: Buffer<Message>`. Append takes `T`; index/iteration (if added) yield `T`. |
-| **Memory** | Key-value store; keys and values are values. | `Memory<K, V>` or `memory: Map<K, V>`. `remember(k, v)` requires `k: K`, `v: V`; `recall(k)` returns `V` or `Option<V>`. |
-| **Tool call** | `call(name, arg)` → result value. | `call(name, arg): R` where the registry maps `name` to a type like `(A) => R`. Tool registry could be typed: `Map<string, (arg: A) => R>`. |
+| **Agent** | One instance; state = (env, context, memory, turn_state, program). | `Agent` type with attributes: `context: Context<T>`, `memory: Memory<K,V>`, and methods (turn, call). User-defined agent classes in later versions. |
+| **Context** | The agent's bounded buffer. | `Context<T>` or `context: Buffer<Message>`. Append takes `T`; index/iteration (if added) yield `T`. |
+| **Memory** | The agent's key-value store. | `Memory<K, V>` or `memory: Map<K, V>`. `remember(k, v)` requires `k: K`, `v: V`; `recall(k)` returns `V` or `Option<V>`. |
+| **Tool call** | `call(name, arg)` → result value. | `call(name, arg): R` where the registry maps `name` to a type like `(A) => R`. |
 | **Turn** | `turn { body }` produces a value or suspension. | `turn { body }: T` where body's return type is `T`; suspension is an effect. |
 | **Values** | Numbers, strings (and bool if we add it). | Primitives and product/sum types if we add them. |
 

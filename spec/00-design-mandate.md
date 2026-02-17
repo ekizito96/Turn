@@ -6,9 +6,9 @@
 
 ## 1. What Turn is
 
-**Turn is a new programming language for agentic software.**
+**Turn is a new, object-oriented programming language for agentic software.**
 
-We are not retrofitting an existing language. We are building a language whose primary abstractions are agentic: turn, context, memory, goal, tool. Traditional languages (Python, TypeScript, C, etc.) were built for a different execution model; retrofitting them for agentic software causes real pains. Turn exists to remove those pains by making agentic concepts native.
+We are not retrofitting an existing language. Turn’s execution model is **object-oriented**: the primary abstraction is the **agent**—an object with identity, state, and behavior. An agent has **context** (a bounded buffer object), **memory** (a persistent key-value object), and the ability to run **turns** (units of execution) and to **call tools** (suspend, invoke, resume). Traditional languages were built for a different model; retrofitting them for agentic software causes real pains. Turn exists to remove those pains by making the agent and its objects native.
 
 ---
 
@@ -23,7 +23,7 @@ When you build agentic software in current languages, you encode agentic behavio
 - **Wrong mental model** → you think in turns and context; you code in loops and lists
 - **Observability, cost, governance** → all bolted on; no first-class trace or policy
 
-Turn makes **turn, context, memory, goal, and tool** **primitive and explicit**—language-native, with a fixed API and runtime-enforced invariants—so that the language matches how agentic systems actually work. In v1 context and memory are **runtime-managed state** with a fixed interface, not first-class values (you cannot pass or store them); we reserve "first-class" for values that can be stored, passed, and returned. Full problem space and science: [research/00-problems-we-solve.md](../research/00-problems-we-solve.md).
+Turn makes the **agent** and its **context**, **memory**, **turn**, and **tool** primitives **primitive and explicit**—language-native objects with a fixed API and runtime-enforced invariants. In v1 the program is the behavior of **one agent instance**; that agent has one context object and one memory object (runtime-managed; not first-class values you can pass or store in v1). We reserve "first-class" for values that can be stored, passed, and returned. Full problem space and science: [research/00-problems-we-solve.md](../research/00-problems-we-solve.md).
 
 **Why this minimal set:** Each primitive earns its place. *Turn* = unit of execution and checkpointing; without it we cannot define "one step" or persist state. *Context* = bounded buffer the language can enforce (unbounded lists in other langs cannot). *Memory* = persistent store across turns; distinct from context ("send now" vs "keep"). *Tool call* = single suspension boundary for external effects. We cannot derive one from the others without losing expressiveness or invariants. So the minimal core is justified, not arbitrary.
 
@@ -53,4 +53,4 @@ We add more as we grow (e.g. multi-agent, richer types), but **minimal tokens, p
 - **Runtime (03):** One configuration, one transition; serializable state; default runtime with bounded context so token and cost are controllable.
 - **Types and errors (05):** Type-friendly design for future safety; clear error model for debugging and tooling.
 
-Future work (OOP shape, agent as value, multi-agent, modules, types) stays within this mandate: **new language for agentic software, solve retrofit pains, minimize tokens and compute, performance, security, boilerplate.**
+Future work (agent as value, multi-agent, user-defined agent classes, modules, types) stays within this mandate: **object-oriented language for agentic software, solve retrofit pains, minimize tokens and compute, performance, security, boilerplate.**

@@ -1,6 +1,6 @@
 # Turn
 
-**A new programming language for agentic software.** Turn is not a retrofit—it makes turn, context, memory, goals, and tools first-class so we solve the pains of building agentic systems in Python, TypeScript, or C. We optimize for minimal tokens, performance, security, less boilerplate, and clear observability.
+**A new, object-oriented programming language for agentic software.** Turn is not a retrofit. The primary abstraction is the **agent**—an object with context, memory, and the ability to run turns and call tools. We solve the pains of building agentic systems in Python, TypeScript, or C and optimize for minimal tokens, performance, security, less boilerplate, and clear observability.
 
 ## Status
 
