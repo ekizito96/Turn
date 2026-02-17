@@ -18,6 +18,24 @@ pub use tools::*;
 pub use value::*;
 pub use vm::*;
 
+/// Converts a byte offset into source to (line, column) for error messages.
+pub fn offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut col = 1;
+    for (i, c) in source.char_indices() {
+        if i >= offset {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
 pub fn run(source: &str) -> Result<value::Value, Box<dyn std::error::Error>> {
     run_with_tools(source, &tools::ToolRegistry::new())
 }

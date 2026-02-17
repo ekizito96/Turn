@@ -19,6 +19,15 @@ pub enum ParseError {
     UnexpectedEof,
 }
 
+impl ParseError {
+    pub fn offset(&self) -> usize {
+        match self {
+            Self::UnexpectedToken(span) => span.start,
+            Self::UnexpectedEof => 0,
+        }
+    }
+}
+
 impl Parser {
     pub fn new(tokens: Vec<SpannedToken>) -> Self {
         Self {

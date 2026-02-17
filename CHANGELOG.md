@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 - GitHub issue templates (bug report, feature request)
 - Cargo.toml metadata for crates.io (license, repository, keywords)
+- `--version` flag to CLI
+- Error messages with file:line:col for lex and parse errors
+- `offset_to_line_col()` helper
 
 ## [0.1.0] - 2026-02-17
 

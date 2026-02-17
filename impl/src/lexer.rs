@@ -321,6 +321,15 @@ pub enum LexError {
     UnclosedBlockComment,
 }
 
+impl LexError {
+    pub fn offset(&self) -> Option<usize> {
+        match self {
+            Self::UnexpectedChar(_, pos) | Self::InvalidEscape(_, pos) => Some(*pos),
+            Self::UnclosedString | Self::UnclosedBlockComment => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
