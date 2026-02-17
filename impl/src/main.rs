@@ -95,6 +95,18 @@ fn main() -> Result<()> {
                 }
             });
         }
+        Commands::Serve { port, store } => {
+            // Start async runtime for server
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            
+            rt.block_on(async {
+                if let Err(e) = turn::server::serve(port, store).await {
+                    eprintln!("Server error: {}", e);
+                }
+            });
+        }
     }
     Ok(())
 }
