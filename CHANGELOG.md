@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--version` flag to CLI
 - Error messages with file:line:col for lex and parse errors
 - `offset_to_line_col()` helper
+- `examples/` directory (hello, recall, conditionals)
+- Release workflow: build binaries on tag push (v*)
+- `rust-toolchain.toml` for consistent toolchain
 
 ## [0.1.0] - 2026-02-17
 

@@ -48,14 +48,15 @@ Turn/
 
 ```bash
 cd impl
-./run.sh test    # run tests
-./run.sh hello   # run hello_turn (prints "Hello")
-./run.sh build   # build release binary
+./run.sh test      # run tests
+./run.sh hello     # run hello_turn (prints "Hello")
+./run.sh examples  # run all examples
+./run.sh build     # build release binary
 ```
 
 Or directly:
 ```bash
-cd impl && cargo run -- run tests/hello_turn.turn
+cd impl && cargo run -- run examples/hello.turn
 ```
 
 **First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
