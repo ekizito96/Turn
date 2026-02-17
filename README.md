@@ -81,8 +81,14 @@ curl -X POST http://localhost:3000/run \
 **Features (v1):**
 - **Structured Data:** Lists `[1, 2]` and Maps `{"a": 1}`.
 - **Persistence:** Automatic state saving on tool calls (`.turn_store`).
-- **Standard Library:** `http_get`, `http_post`, `json_parse`, `llm_generate` (requires `OPENAI_API_KEY`).
+- **Standard Library:**
+    - HTTP: `http_get`, `http_post`
+    - JSON: `json_parse`, `json_stringify`
+    - AI: `llm_generate` (requires `OPENAI_API_KEY`)
+    - File System: `fs_read`, `fs_write`
+    - Environment: `env_get`, `env_set`
 - **Server Mode:** Built-in `turn serve` command.
+- **Error Handling:** `try/catch/throw` for resilient agent logic.
 
 **First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 

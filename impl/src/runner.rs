@@ -28,12 +28,19 @@ impl<S: Store> Runner<S> {
         // Resolve path relative to current file if provided
         let resolved_path = if let Some(base) = current_file {
             let parent = base.parent().unwrap_or(std::path::Path::new("."));
-            parent.join(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path))
+            parent.join(path) // Don't canonicalize yet to keep relative paths simple?
+            // Actually canonicalize is good for unique keys.
         } else {
             PathBuf::from(path)
         };
         
-        let key = resolved_path.to_string_lossy().to_string();
+        // Canonicalize to absolute path for cache key
+        let abs_path = match std::fs::canonicalize(&resolved_path) {
+            Ok(p) => p,
+            Err(_) => resolved_path.clone(), // Fallback if file doesn't exist (will fail read later)
+        };
+        
+        let key = abs_path.to_string_lossy().to_string();
         
         // Check cache
         if let Some(val) = self.module_cache.get(&key) {
@@ -41,18 +48,23 @@ impl<S: Store> Runner<S> {
         }
         
         // Read file
-        let source = std::fs::read_to_string(&resolved_path)
-            .map_err(|e| anyhow::anyhow!("failed to read module {}: {}", key, e))?;
+        let source = std::fs::read_to_string(&abs_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read module {}: {}", key, e))?;
             
         // Compile
-        let tokens = Lexer::new(&source).tokenize()?;
-        let program = Parser::new(tokens).parse()?;
+        let lexer = Lexer::new(&source);
+        let tokens = lexer.tokenize()
+            .map_err(|e| anyhow::anyhow!("Lexer error in module {}: {}", key, e))?;
+            
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse()
+            .map_err(|e| anyhow::anyhow!("Parser error in module {}: {}", key, e))?;
+            
         let mut compiler = Compiler::new();
         let code = compiler.compile(&program);
         
         // Run module in a fresh VM (recursive)
         let mut vm = Vm::new(&code);
-        // let module_id = format!("module:{}", key); // Virtual ID for module execution
         
         loop {
             match vm.run() {
@@ -64,21 +76,27 @@ impl<S: Store> Runner<S> {
                     // Recurse for imports inside modules!
                     if tool_name == "sys_import" {
                         let inner_path = match arg {
-                            Value::Str(s) => s,
+                            Value::Str(s) => s.clone(),
                             _ => "".to_string(),
                         };
-                        let val = self.load_module(&inner_path, Some(&resolved_path))?;
-                        vm = Vm::resume_with_result(continuation, &[], val);
+                        match self.load_module(&inner_path, Some(&abs_path)) {
+                            Ok(val) => {
+                                vm = Vm::resume_with_result(continuation, val);
+                            },
+                            Err(e) => {
+                                vm = Vm::resume_with_error(continuation, e.to_string());
+                            }
+                        }
                     } else {
                         // Normal tool call
-                        // Checkpointing inside module loading?
-                        // If we crash during module load, we probably just restart load.
-                        // So we might skip saving state for modules for now to avoid complexity.
-                        let result = match self.tools.call(&tool_name, arg) {
-                            Some(v) => v,
-                            None => Value::Null,
-                        };
-                        vm = Vm::resume_with_result(continuation, &[], result);
+                        match self.tools.call(&tool_name, arg) {
+                            Ok(val) => {
+                                vm = Vm::resume_with_result(continuation, val);
+                            },
+                            Err(e) => {
+                                vm = Vm::resume_with_error(continuation, e);
+                            }
+                        }
                     }
                 }
             }
@@ -87,18 +105,21 @@ impl<S: Store> Runner<S> {
 
     pub fn run(&mut self, id: &str, source: &str, path: Option<PathBuf>) -> Result<Value> {
         // 1. Load or Init
-        let loaded_state = self.store.load(id)?;
-        
-        // If we are starting fresh, we need to compile.
-        // If resuming, the code is in the frames.
-        // However, Vm::new needs a slice.
-        // And Vm::resume needs state.
-        
-        let mut vm = if let Some(state) = loaded_state {
-            Vm::resume_with_result(state, &[], Value::Null)
+        // If resuming, we load from store.
+        let mut vm = if let Ok(Some(state)) = self.store.load(id) {
+            // Check if state is valid?
+            // Resume with Null as "last result" - technically incorrect if we crashed mid-tool-return?
+            // But good enough for now.
+            Vm::resume_with_result(state, Value::Null)
         } else {
-            let tokens = Lexer::new(source).tokenize()?;
-            let program = Parser::new(tokens).parse()?;
+            let lexer = Lexer::new(source);
+            let tokens = lexer.tokenize()
+                 .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
+                 
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse()
+                 .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+                 
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
             Vm::new(&code)
@@ -108,6 +129,9 @@ impl<S: Store> Runner<S> {
         loop {
             match vm.run() {
                 VmResult::Complete(v) => {
+                    // Clear store on successful completion?
+                    // self.store.delete(id)?; 
+                    // Keeping it allows inspecting final state or re-running?
                     return Ok(v);
                 }
                 VmResult::Suspended { tool_name, arg, continuation } => {
@@ -118,22 +142,21 @@ impl<S: Store> Runner<S> {
                         
                         // 3b. Load Module
                         let import_path = match arg {
-                            Value::Str(s) => s,
+                            Value::Str(s) => s.clone(),
                             _ => "".to_string(),
                         };
                         
                         // Use the provided path as base, or CWD
                         let base_path = path.as_ref();
                         
-                        let result = match self.load_module(&import_path, base_path) {
-                            Ok(v) => v,
+                        match self.load_module(&import_path, base_path) {
+                            Ok(val) => {
+                                vm = Vm::resume_with_result(continuation, val);
+                            },
                             Err(e) => {
-                                eprintln!("Error loading module {}: {}", import_path, e);
-                                Value::Null
+                                vm = Vm::resume_with_error(continuation, e.to_string());
                             }
-                        };
-                        
-                        vm = Vm::resume_with_result(continuation, &[], result);
+                        }
                         continue;
                     }
 
@@ -141,13 +164,14 @@ impl<S: Store> Runner<S> {
                     self.store.save(id, &continuation)?;
                     
                     // 4. Execute tool
-                    let result = match self.tools.call(&tool_name, arg) {
-                        Some(v) => v,
-                        None => Value::Null,
-                    };
-                    
-                    // 5. Resume
-                    vm = Vm::resume_with_result(continuation, &[], result);
+                    match self.tools.call(&tool_name, arg) {
+                        Ok(val) => {
+                             vm = Vm::resume_with_result(continuation, val);
+                        },
+                        Err(e) => {
+                             vm = Vm::resume_with_error(continuation, e);
+                        }
+                    }
                 }
             }
         }

@@ -119,16 +119,6 @@ impl Compiler {
                 catch_block,
                 ..
             } => {
-                let catch_jump = self.emit(Instr::Jump(0)); // Placeholder for catch block address
-                let try_start = self.code.len() as u32;
-                
-                // We need to jump to catch block on error.
-                // But `try` isn't just a jump. It pushes a handler.
-                // Re-think: `PushHandler(catch_addr)` -> execute try -> `PopHandler` -> `Jump(after_catch)`
-                
-                // Rewind: remove the initial Jump(0).
-                self.code.pop(); 
-                
                 let push_handler_idx = self.emit(Instr::PushHandler(0)); // Placeholder
                 
                 self.compile_block(try_block);
@@ -138,9 +128,7 @@ impl Compiler {
                 // Catch block starts here
                 let catch_start = self.code.len() as u32;
                 // Patch PushHandler to point here
-                if let Instr::PushHandler(ref mut t) = self.code[push_handler_idx as usize] {
-                    *t = catch_start;
-                }
+                self.patch_jump(push_handler_idx, catch_start);
                 
                 // Catch block expects error on stack. Store it in catch_var.
                 self.emit(Instr::Store(catch_var.clone()));

@@ -5,8 +5,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::thread;
 use std::env;
+use std::fs;
 
-pub type ToolHandler = Box<dyn Fn(Value) -> Value + Send + Sync>;
+// Update ToolHandler to return Result<Value, String>
+pub type ToolHandler = Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>;
 
 pub struct ToolRegistry {
     tools: HashMap<String, ToolHandler>,
@@ -25,7 +27,7 @@ impl ToolRegistry {
         // echo: Identity function
         tools.insert(
             "echo".to_string(),
-            Box::new(|arg| arg) as ToolHandler,
+            Box::new(|arg| Ok(arg)) as ToolHandler,
         );
 
         // sleep: Pauses execution for N seconds
@@ -39,7 +41,86 @@ impl ToolRegistry {
                 if seconds > 0.0 {
                     thread::sleep(Duration::from_secs_f64(seconds));
                 }
-                Value::Null
+                Ok(Value::Null)
+            }) as ToolHandler,
+        );
+
+        // fs_read: Read file content
+        tools.insert(
+            "fs_read".to_string(),
+            Box::new(|arg| {
+                let path = match arg {
+                    Value::Str(s) => s,
+                    _ => return Err("Argument must be a string path".to_string()),
+                };
+                match fs::read_to_string(&path) {
+                    Ok(content) => Ok(Value::Str(content)),
+                    Err(e) => Err(format!("Failed to read file {}: {}", path, e)),
+                }
+            }) as ToolHandler,
+        );
+
+        // fs_write: Write file content (arg: { path, content })
+        tools.insert(
+            "fs_write".to_string(),
+            Box::new(|arg| {
+                let (path, content) = match arg {
+                    Value::Map(m) => {
+                        let path = match m.get("path") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'path' in argument map".to_string()),
+                        };
+                        let content = match m.get("content") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'content' in argument map".to_string()),
+                        };
+                        (path, content)
+                    },
+                    _ => return Err("Argument must be a map {path, content}".to_string()),
+                };
+                
+                match fs::write(&path, &content) {
+                    Ok(_) => Ok(Value::Null),
+                    Err(e) => Err(format!("Failed to write file {}: {}", path, e)),
+                }
+            }) as ToolHandler,
+        );
+
+        // env_get: Get environment variable
+        tools.insert(
+            "env_get".to_string(),
+            Box::new(|arg| {
+                let key = match arg {
+                    Value::Str(s) => s,
+                    _ => return Err("Argument must be a string key".to_string()),
+                };
+                match env::var(&key) {
+                    Ok(val) => Ok(Value::Str(val)),
+                    Err(_) => Ok(Value::Null), // Typical env behavior is null/undefined if missing
+                }
+            }) as ToolHandler,
+        );
+
+        // env_set: Set environment variable (arg: { key, value })
+        tools.insert(
+            "env_set".to_string(),
+            Box::new(|arg| {
+                let (key, val) = match arg {
+                    Value::Map(m) => {
+                        let k = match m.get("key") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'key' in argument map".to_string()),
+                        };
+                        let v = match m.get("value") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'value' in argument map".to_string()),
+                        };
+                        (k, v)
+                    },
+                    _ => return Err("Argument must be a map {key, value}".to_string()),
+                };
+                env::set_var(key, val);
+                Ok(Value::Null)
             }) as ToolHandler,
         );
 
@@ -49,21 +130,21 @@ impl ToolRegistry {
             Box::new(|arg| {
                 let url = match arg {
                     Value::Str(s) => s,
-                    _ => return Value::Null,
+                    _ => return Err("Argument must be a string URL".to_string()),
                 };
                 
                 match reqwest::blocking::get(&url) {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {
-                                Ok(text) => Value::Str(text),
-                                Err(_) => Value::Null,
+                                Ok(text) => Ok(Value::Str(text)),
+                                Err(e) => Err(format!("Failed to read response text: {}", e)),
                             }
                         } else {
-                            Value::Null
+                            Err(format!("HTTP request failed with status: {}", resp.status()))
                         }
                     },
-                    Err(_) => Value::Null,
+                    Err(e) => Err(format!("HTTP request error: {}", e)),
                 }
             }) as ToolHandler,
         );
@@ -76,12 +157,12 @@ impl ToolRegistry {
                     Value::Map(m) => {
                         let url = match m.get("url") {
                             Some(Value::Str(s)) => s.clone(),
-                            _ => return Value::Null,
+                            _ => return Err("Missing 'url'".to_string()),
                         };
                         let body = m.get("body").cloned().unwrap_or(Value::Null);
                         (url, body)
                     },
-                    _ => return Value::Null,
+                    _ => return Err("Argument must be a map {url, body}".to_string()),
                 };
 
                 let client = reqwest::blocking::Client::new();
@@ -91,26 +172,25 @@ impl ToolRegistry {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {
-                                Ok(text) => Value::Str(text),
-                                Err(_) => Value::Null,
+                                Ok(text) => Ok(Value::Str(text)),
+                                Err(e) => Err(format!("Failed to read response text: {}", e)),
                             }
                         } else {
-                            Value::Null
+                            Err(format!("HTTP request failed with status: {}", resp.status()))
                         }
                     },
-                    Err(_) => Value::Null,
+                    Err(e) => Err(format!("HTTP request error: {}", e)),
                 }
             }) as ToolHandler,
         );
 
         // llm_generate: Calls OpenAI Chat Completion
-        // Arg: Map { "messages": [...], "model": "..." }
         tools.insert(
             "llm_generate".to_string(),
             Box::new(|arg| {
                 let api_key = match env::var("OPENAI_API_KEY") {
                     Ok(k) => k,
-                    Err(_) => return Value::Null, // Fail silently if no key
+                    Err(_) => return Err("OPENAI_API_KEY environment variable not set".to_string()),
                 };
 
                 let (messages, model) = match arg {
@@ -122,7 +202,7 @@ impl ToolRegistry {
                         };
                         (msgs, model)
                     },
-                    _ => return Value::Null,
+                    _ => return Err("Argument must be a map {messages, model?}".to_string()),
                 };
 
                 let client = reqwest::blocking::Client::new();
@@ -142,44 +222,44 @@ impl ToolRegistry {
                             match resp.json::<serde_json::Value>() {
                                 Ok(json) => {
                                     if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
-                                        Value::Str(content.to_string())
+                                        Ok(Value::Str(content.to_string()))
                                     } else {
-                                        Value::Null
+                                        Err("Invalid response format from OpenAI".to_string())
                                     }
                                 },
-                                Err(_) => Value::Null,
+                                Err(e) => Err(format!("Failed to parse OpenAI response: {}", e)),
                             }
                         } else {
-                            Value::Null
+                            Err(format!("OpenAI API error: {}", resp.status()))
                         }
                     },
-                    Err(_) => Value::Null,
+                    Err(e) => Err(format!("OpenAI request failed: {}", e)),
                 }
             }) as ToolHandler,
         );
 
-        // json_parse: Parses JSON string to Value
+        // json_parse
         tools.insert(
             "json_parse".to_string(),
             Box::new(|arg| {
                 if let Value::Str(s) = arg {
                     match serde_json::from_str(&s) {
-                        Ok(v) => v,
-                        Err(_) => Value::Null,
+                        Ok(v) => Ok(v),
+                        Err(e) => Err(format!("JSON parse error: {}", e)),
                     }
                 } else {
-                    Value::Null
+                    Err("json_parse expects a string argument".to_string())
                 }
             }) as ToolHandler,
         );
 
-        // json_stringify: Converts Value to JSON string
+        // json_stringify
         tools.insert(
             "json_stringify".to_string(),
             Box::new(|arg| {
                 match serde_json::to_string(&arg) {
-                    Ok(s) => Value::Str(s),
-                    Err(_) => Value::Null,
+                    Ok(s) => Ok(Value::Str(s)),
+                    Err(e) => Err(format!("JSON stringify error: {}", e)),
                 }
             }) as ToolHandler,
         );
@@ -191,8 +271,11 @@ impl ToolRegistry {
         self.tools.insert(name.into(), handler);
     }
 
-    pub fn call(&self, name: &str, arg: Value) -> Option<Value> {
-        self.tools.get(name).map(|h| h(arg))
+    pub fn call(&self, name: &str, arg: Value) -> Result<Value, String> {
+        match self.tools.get(name) {
+            Some(h) => h(arg),
+            None => Err(format!("Tool not found: {}", name)),
+        }
     }
 
     pub fn has(&self, name: &str) -> bool {
