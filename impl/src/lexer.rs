@@ -25,7 +25,7 @@ pub enum Token {
 
     // Operators
     Plus,
-    Eq,   // = (assignment)
+    Eq, // = (assignment)
     EqEq,
     Ne,
 
@@ -154,17 +154,15 @@ impl<'a> Lexer<'a> {
         loop {
             match self.next() {
                 Some('"') => break,
-                Some('\\') => {
-                    match self.next() {
-                        Some('n') => s.push('\n'),
-                        Some('t') => s.push('\t'),
-                        Some('r') => s.push('\r'),
-                        Some('"') => s.push('"'),
-                        Some('\\') => s.push('\\'),
-                        Some(c) => return Err(LexError::InvalidEscape(c, start)),
-                        None => return Err(LexError::UnclosedString),
-                    }
-                }
+                Some('\\') => match self.next() {
+                    Some('n') => s.push('\n'),
+                    Some('t') => s.push('\t'),
+                    Some('r') => s.push('\r'),
+                    Some('"') => s.push('"'),
+                    Some('\\') => s.push('\\'),
+                    Some(c) => return Err(LexError::InvalidEscape(c, start)),
+                    None => return Err(LexError::UnclosedString),
+                },
                 Some(c) => s.push(c),
                 None => return Err(LexError::UnclosedString),
             }

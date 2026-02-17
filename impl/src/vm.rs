@@ -6,6 +6,7 @@ use crate::tools::ToolRegistry;
 use crate::value::Value;
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum VmResult {
     Complete(Value),
     Suspended {
@@ -31,6 +32,7 @@ pub struct Vm<'a> {
     return_addrs: Vec<usize>,
     result: Value,
     runtime: Runtime,
+    #[allow(dead_code)]
     tools: &'a ToolRegistry,
 }
 
@@ -66,7 +68,6 @@ impl<'a> Vm<'a> {
         vm
     }
 
-
     fn fetch(&self) -> Option<&Instr> {
         self.code.get(self.ip)
     }
@@ -90,11 +91,8 @@ impl<'a> Vm<'a> {
     }
 
     pub fn run(&mut self) -> VmResult {
-        loop {
-            let instr = match self.fetch() {
-                Some(i) => i.clone(),
-                None => break,
-            };
+        while let Some(i) = self.fetch() {
+            let instr = i.clone();
             self.ip += 1;
 
             match instr {

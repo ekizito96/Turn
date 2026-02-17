@@ -7,6 +7,12 @@ pub struct Compiler {
     code: Vec<Instr>,
 }
 
+impl Default for Compiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Compiler {
     pub fn new() -> Self {
         Self { code: Vec::new() }
@@ -42,7 +48,10 @@ impl Compiler {
                 let enter_turn_addr = self.emit(Instr::EnterTurn(0));
                 self.compile_block(body);
                 // Implicit return if not present
-                let has_return = body.stmts.last().map_or(false, |s| matches!(s, Stmt::Return { .. }));
+                let has_return = body
+                    .stmts
+                    .last()
+                    .is_some_and(|s| matches!(s, Stmt::Return { .. }));
                 if !has_return {
                     self.emit(Instr::PushNull);
                     self.emit(Instr::Return);
@@ -147,15 +156,27 @@ impl Compiler {
                 self.compile_expr(arg);
                 self.emit(Instr::CallTool);
             }
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
-                    BinOp::Add => { self.emit(Instr::Add); }
-                    BinOp::Eq => { self.emit(Instr::Eq); }
-                    BinOp::Ne => { self.emit(Instr::Ne); }
-                    BinOp::And => { self.emit(Instr::And); }
-                    BinOp::Or => { self.emit(Instr::Or); }
+                    BinOp::Add => {
+                        self.emit(Instr::Add);
+                    }
+                    BinOp::Eq => {
+                        self.emit(Instr::Eq);
+                    }
+                    BinOp::Ne => {
+                        self.emit(Instr::Ne);
+                    }
+                    BinOp::And => {
+                        self.emit(Instr::And);
+                    }
+                    BinOp::Or => {
+                        self.emit(Instr::Or);
+                    }
                 }
             }
             Expr::Paren(inner) => self.compile_expr(inner),

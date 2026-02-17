@@ -9,20 +9,48 @@ pub struct Program {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Turn { body: Block, span: Span },
-    Let { name: String, init: Expr, span: Span },
-    ContextAppend { expr: Expr, span: Span },
-    Remember { key: Expr, value: Expr, span: Span },
-    CallStmt { tool: Expr, arg: Expr, span: Span },
-    Return { expr: Expr, span: Span },
+    Turn {
+        body: Block,
+        span: Span,
+    },
+    Let {
+        name: String,
+        init: Expr,
+        span: Span,
+    },
+    ContextAppend {
+        expr: Expr,
+        span: Span,
+    },
+    Remember {
+        key: Expr,
+        value: Expr,
+        span: Span,
+    },
+    CallStmt {
+        tool: Expr,
+        arg: Expr,
+        span: Span,
+    },
+    Return {
+        expr: Expr,
+        span: Span,
+    },
     If {
         cond: Expr,
         then_block: Block,
         else_block: Option<Block>,
         span: Span,
     },
-    While { cond: Expr, body: Block, span: Span },
-    ExprStmt { expr: Expr, span: Span },
+    While {
+        cond: Expr,
+        body: Block,
+        span: Span,
+    },
+    ExprStmt {
+        expr: Expr,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -35,8 +63,15 @@ pub struct Block {
 pub enum Expr {
     Literal(Literal),
     Id(String),
-    Recall { key: Box<Expr>, span: Span },
-    Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
+    Recall {
+        key: Box<Expr>,
+        span: Span,
+    },
+    Call {
+        name: Box<Expr>,
+        arg: Box<Expr>,
+        span: Span,
+    },
     Binary {
         op: BinOp,
         left: Box<Expr>,

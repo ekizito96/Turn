@@ -44,7 +44,7 @@ pub fn run_with_tools(
                     Some(v) => v,
                     None => value::Value::Null,
                 };
-                
+
                 // Resume execution with result
                 vm = vm::Vm::resume_with_result(continuation, &code, tools, result);
             }

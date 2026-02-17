@@ -9,13 +9,16 @@ pub struct ToolRegistry {
     tools: HashMap<String, ToolHandler>,
 }
 
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         let mut tools = HashMap::new();
-        tools.insert(
-            "echo".to_string(),
-            Box::new(|arg| arg) as ToolHandler,
-        );
+        tools.insert("echo".to_string(), Box::new(|arg| arg) as ToolHandler);
         Self { tools }
     }
 

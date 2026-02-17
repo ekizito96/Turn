@@ -1,8 +1,8 @@
 //! Integration test: run example agent from spec/06-example-agent.md
 
-use turn::value::Value;
-use turn::tools::{ToolRegistry, ToolHandler};
 use turn::run_with_tools;
+use turn::tools::{ToolHandler, ToolRegistry};
+use turn::value::Value;
 
 fn example_agent_tools() -> ToolRegistry {
     let mut tools = ToolRegistry::new();
@@ -26,7 +26,8 @@ fn example_agent_tools() -> ToolRegistry {
     );
     tools.register(
         "book_flight",
-        Box::new(|arg: Value| Value::Str(format!("Flight ABC123 booked to {}", arg))) as ToolHandler,
+        Box::new(|arg: Value| Value::Str(format!("Flight ABC123 booked to {}", arg)))
+            as ToolHandler,
     );
     tools.register(
         "generate_summary",

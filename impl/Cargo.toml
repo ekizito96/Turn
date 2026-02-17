@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Object-oriented programming language for agentic software"
 authors = ["Muyukani Ephraim Kizito <muyukaniephraim@yahoo.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/ekizito96/Turn"
+keywords = ["agent", "language", "agentic", "llm"]
+categories = ["development-tools"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
