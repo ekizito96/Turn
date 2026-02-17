@@ -26,26 +26,25 @@ turn {
   // Receive initial task
   let task = "Find the weather in San Francisco and book a flight if it's sunny";
   remember("task", task);
-  context.append(task);
+  context.append("Task: " + task);
   
   // Step 1: Get weather
   let weather_result = call("get_weather", "San Francisco");
   remember("weather", weather_result);
-  context.append(weather_result);
+  context.append("Weather: " + weather_result);
   
   // Step 2: Parse weather result (tool returns "sunny" or "rainy")
   let weather_str = recall("weather");
   let is_sunny = call("parse_weather", weather_str);
   remember("is_sunny", is_sunny);
   
-  // Decision: book flight only if sunny
-  // Note: In v1, we compare strings. Assume parse_weather returns "true" or "false"
+  // Decision: book flight only if sunny (is_sunny is true or "true")
   if is_sunny {
     turn {
       // Book flight
       let flight_result = call("book_flight", "San Francisco");
       remember("flight", flight_result);
-      context.append(flight_result);
+      context.append("Flight: " + flight_result);
       return "Task complete: Weather is sunny, flight booked";
     }
   } else {
@@ -142,9 +141,9 @@ In a real implementation, these would be registered in the runtime's tool regist
 
 ## Notes
 
-- **v1 compliance:** This example uses only v1 syntax: no string concatenation (`+`), no infix operators. Tools handle formatting/concatenation if needed (e.g., `generate_summary` formats the output).
-- **Boolean values:** v1 has numbers and strings. The example uses `"true"`/`"false"` strings for booleans; `if` treats non-empty strings as truthy. Alternatively, use `"1"`/`"0"` or numbers.
+- **v1 syntax:** Uses `+` for string concatenation, `==`/`!=` for comparison, `and`/`or` for logic. `true`, `false`, `null` are literals. `recall` returns `null` when key is missing.
+- **Boolean values:** `parse_weather` can return `true` (boolean) or `"true"` (string); both are truthy. Non-empty strings and `true` are truthy; `false`, `null`, `""`, `0` are falsy.
 - **Nested turns:** The `if` branches contain turns. This is valid: a turn can contain statements, including other turns. The inner turn completes before the outer turn continues (or the outer turn completes if the inner turn returns).
-- **Context entries:** Each `context.append(...)` adds one entry. In a real agent, tools might format messages (e.g., `"Weather: sunny"`), but the agent code just appends values.
+- **Context entries:** Each `context.append(...)` adds one entry. Use `+` for readable messages: `"Task: " + task`, `"Weather: " + weather_result`.
 
 This example shows how Turn's primitives compose to build a working agent that uses tools, manages context and memory, and makes decisions across multiple turns.

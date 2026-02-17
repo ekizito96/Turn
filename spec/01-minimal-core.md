@@ -13,16 +13,17 @@
 | **Memory** | `remember(key, value)` ; `recall(key)` | The agent's memory **object** (key-value store). No `forget` or `summarize` in v1—we can add when needed. |
 | **Tool** | `call(tool_name, args)` | Invocation on the agent's tool registry. Execution suspends; runtime runs handler; execution resumes with result. |
 
-**Expressions and statements (minimal):** We need enough to write a turn body and pass values to append/remember/call.
+**Expressions and statements:** Enough to write real agents without friction.
 
-- **Literals:** number, string (and optionally bool).
-- **Variables:** identifier (bound by `let` or by parameter).
-- **Application:** `name(args...)` for function/tool call; we reserve `call(name, args)` for the built-in tool call.
-- **Conditional:** `if expr then block else block`.
-- **Block:** `{ stmt... }` with optional `let id = expr;` and `return expr;`.
-- **Let:** `let id = expr;` (local binding in block).
+- **Literals:** number, string, `true`, `false`, `null`.
+- **Variables:** identifier (bound by `let`).
+- **Operators:** `+` (concatenation/addition), `==`, `!=` (equality), `and`, `or` (logical, short-circuit).
+- **Conditional:** `if expr block else block`.
+- **Loop:** `while expr block`.
+- **Block:** `{ stmt... }` with `let`, `return`, etc.
+- **Let:** `let id = expr;` (local binding).
 
-No loops, no list/map literals in v1—we can add when we need them for real examples.
+No list/map literals in v1; add when needed. `recall(key)` returns `null` when key is missing.
 
 ---
 
@@ -61,4 +62,4 @@ So: **no S-expressions** in v1. The grammar (see [02-grammar.md](02-grammar.md))
 
 ## 5. Summary
 
-**v1 minimal core (OOP):** One agent with turn + context object (append, bounded) + memory object (remember, recall) + call(tool, args), with minimal expressions (literals, variables, application, if, block, let). No goal, no context rewrite/window, no memory forget/summarize, no modules, no types in syntax. One agent instance, one context, one memory, one tool registry.
+**v1 minimal core (OOP):** One agent with turn + context object (append, bounded) + memory object (remember, recall) + call(tool, args), with expressions (literals, `+` `==` `!=` `and` `or`), `if`, `while`, `let`, `return`. No goal, no context rewrite/window, no memory forget/summarize, no modules, no types in syntax. One agent instance, one context, one memory, one tool registry.

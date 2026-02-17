@@ -17,7 +17,7 @@ Turn is object-oriented; the type system should reflect that. In v1 we have one 
 | **Memory** | The agent's key-value store. | `Memory<K, V>` or `memory: Map<K, V>`. `remember(k, v)` requires `k: K`, `v: V`; `recall(k)` returns `V` or `Option<V>`. |
 | **Tool call** | `call(name, arg)` → result value. | `call(name, arg): R` where the registry maps `name` to a type like `(A) => R`. |
 | **Turn** | `turn { body }` produces a value or suspension. | `turn { body }: T` where body's return type is `T`; suspension is an effect. |
-| **Values** | Numbers, strings (and bool if we add it). | Primitives and product/sum types if we add them. |
+| **Values** | Numbers, strings, booleans (`true`, `false`), `null`. | Primitives and product/sum types if we add them. |
 
 **Optional annotations (v1.1+):** If we add types to the syntax, we want to support optional annotations, e.g. `let x: string = "hi";` and `remember("k": string, v: int);` without requiring annotations everywhere. So the grammar and AST should leave room for an optional `: Type` after identifiers or in formal parameters.
 
@@ -43,7 +43,7 @@ We classify errors and define **recoverable** vs **fatal** and what the implemen
 
 ### 2.3 Memory errors
 
-- **recall(key)** when key is missing: return a distinguished value (e.g. `null`, `nil`, or a type-safe option) **or** fail. v1: implementation may choose; if fail, **recoverable** (caller can avoid by checking) or **fatal** (abort). Spec recommends: return a **missing** sentinel so programs can branch (recoverable).
+- **recall(key)** when key is missing: return `null`. This is **recoverable**—programs can check `if x == null` or `if x` (null is falsy) before using the value.
 - **remember(k, v)** when store is full or read-only: **fatal** with message, e.g. `"memory full"` or `"memory read-only"`.
 
 ### 2.4 Other
@@ -58,7 +58,7 @@ We classify errors and define **recoverable** vs **fatal** and what the implemen
 |-------|---------------------|--------------------|
 | Context full | Fatal or evict (impl-defined) | `"context full (max N)"` |
 | Tool not found | Fatal | `"tool not found: <name>"` |
-| recall missing key | Prefer recoverable (return sentinel) | — |
+| recall missing key | Recoverable (returns `null`) | — |
 | Memory full / read-only | Fatal | `"memory full"` / `"memory read-only"` |
 | Undefined variable | Fatal | `"undefined variable: <id>"` |
 | Invalid call/append form | Fatal | Descriptive message |

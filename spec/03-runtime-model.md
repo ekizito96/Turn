@@ -39,8 +39,9 @@ Implementations must maintain these invariants. The transition relation is defin
 
 ## 2. Values (v1)
 
-- **Literal values:** numbers, strings.
-- **No first-class functions in v1** (no closures). So env maps ids to literals or to internal representations (e.g. "current context" if we expose it as a value).
+- **Literal values:** numbers, strings, booleans (`true`, `false`), `null`.
+- **Operators:** `+` (concatenation/addition), `==`, `!=` (equality), `and`, `or` (logical, short-circuit). See [02-grammar.md](02-grammar.md) §7 for semantics.
+- **No first-class functions in v1** (no closures). So env maps ids to literals or to internal representations.
 - **Tool call result:** When we resume from a tool call, the result is a value (e.g. string or number) that the runtime provides. That value is what the `call` statement "returns" to the program (e.g. bound to a variable by a following let, or discarded).
 
 We leave "what is a value" minimal: numbers, strings, and possibly a dedicated "suspension" or "tool_pending" token when we are suspended.
@@ -64,7 +65,8 @@ We define a **small-step** transition: one step takes the configuration to a new
    - If `stmt` is `remember(k, v)`: evaluate `k` and `v`; update memory with `k → v`; continue with `rest`.
    - If `stmt` is `call(tool_name, arg)`: evaluate `tool_name` and `arg`; produce **Suspension(tool_name, arg, continuation)**. The continuation holds the rest of the program and current env/context/memory/turn_state.
    - If `stmt` is `return expr`: evaluate `expr`; the turn completes with that value. (No more steps for this turn.)
-   - If `stmt` is `if expr block1 else block2`: evaluate `expr`; if truthy, next program is `block1`; else `block2`. Then continue.
+   - If `stmt` is `if expr block1 else block2`: evaluate `expr`; if truthy (non-falsy), next program is `block1`; else `block2`. Then continue.
+   - If `stmt` is `while expr block`: evaluate `expr`; if truthy, next program is `block` followed by the same `while` (loop); else continue with `rest`.
    - If `stmt` is `expr;`: evaluate `expr`; discard result; continue with `rest`.
    - If `stmt` is `turn block`: enter the turn—next program is the block body; turn_state updated (e.g. turn_id incremented). Continue.
 

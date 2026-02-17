@@ -12,7 +12,7 @@ One turn in which the agent: binds a variable, writes to its memory, appends to 
 turn {
   let name = "Turn";
   remember("user", name);
-  context.append("Hello");
+  context.append("Hello, " + name);
   let out = call("echo", "Hello");
   return out;
 }
@@ -25,14 +25,14 @@ turn {
 1. **Enter turn:** Runtime sets turn_state (e.g. turn_id = 1); program is the block body.
 2. **let name = "Turn":** env becomes `{ name → "Turn" }`.
 3. **remember("user", name):** memory becomes `{ "user" → "Turn" }`.
-4. **context.append("Hello"):** context buffer gets one entry, e.g. `["Hello"]`.
+4. **context.append("Hello, " + name):** Evaluates `"Hello, " + name` → `"Hello, Turn"`; context buffer gets one entry, e.g. `["Hello, Turn"]`.
 5. **let out = call("echo", "Hello"):** Execution suspends with `Suspension("echo", "Hello", continuation)`. Runtime runs the `echo` handler (e.g. returns `"Hello"`). Runtime resumes; continuation runs with result; `out` is bound to `"Hello"`.
 6. **return out:** Turn completes with value `"Hello"`.
 
 **Final state (conceptual):**
 
 - env: had `name`, `out` during the turn; after turn, scope is gone (block exited).
-- context: `["Hello"]`.
+- context: `["Hello, Turn"]`.
 - memory: `{ "user" → "Turn" }`.
 - Turn result: `"Hello"`.
 
@@ -64,10 +64,10 @@ Here the turn result is `"Turn"` (the value we remembered). So we have two refer
 | 0 | enter turn | {} | [] | {} |
 | 1 | let name = "Turn" | {name→"Turn"} | [] | {} |
 | 2 | remember("user", name) | ... | [] | {"user"→"Turn"} |
-| 3 | context.append("Hello") | ... | ["Hello"] | ... |
+| 3 | context.append("Hello, " + name) | ... | ["Hello, Turn"] | ... |
 | 4 | suspend call("echo", "Hello") | ... | ... | ... |
-| 5 | resume with "Hello", let out = result | {..., out→"Hello"} | ["Hello"] | ... |
-| 6 | return out | — | ["Hello"] | {"user"→"Turn"} |
+| 5 | resume with "Hello", let out = result | {..., out→"Hello"} | ["Hello, Turn"] | ... |
+| 6 | return out | — | ["Hello, Turn"] | {"user"→"Turn"} |
 
 Turn result: `"Hello"`.
 

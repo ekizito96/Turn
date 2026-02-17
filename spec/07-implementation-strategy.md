@@ -218,8 +218,8 @@ impl/
 ├── Cargo.toml        # Rust project config
 ├── src/
 │   ├── main.rs      # CLI entry point
-│   ├── lexer.rs     # Tokenize Turn source
-│   ├── parser.rs    # Parse tokens → AST
+│   ├── lexer.rs     # Tokenize Turn source (keywords, operators, identifiers, literals)
+│   ├── parser.rs    # Parse tokens → AST (precedence-climbing for `+` `==` `!=` `and` `or`)
 │   ├── ast.rs       # AST node definitions
 │   ├── compiler.rs  # AST → bytecode
 │   ├── bytecode.rs  # Instruction definitions, serialization
@@ -229,6 +229,8 @@ impl/
 └── tests/
     └── hello_turn.turn  # Test with spec/04-hello-turn.md
 ```
+
+**Grammar:** v1 includes `+`, `==`, `!=`, `and`, `or`, `true`, `false`, `null`, `while`. See [02-grammar.md](02-grammar.md).
 
 **Dependencies:** Minimal Rust stdlib. Maybe `serde` for bytecode serialization, `clap` for CLI.
 
