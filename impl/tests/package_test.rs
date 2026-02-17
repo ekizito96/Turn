@@ -12,7 +12,7 @@ fn test_package_import() {
     fs::create_dir(&modules_dir).unwrap();
     
     // 2. Create a package 'math_pkg'
-    let pkg_path = modules_dir.join("math_pkg.turn");
+    let pkg_path = modules_dir.join("math_pkg.tn");
     fs::write(&pkg_path, r#"
     let add = turn {
         let a = recall("a");
@@ -23,7 +23,7 @@ fn test_package_import() {
 "#).unwrap();
 
     // 3. Create main script that uses it
-    let main_path = root.join("main.turn");
+    let main_path = root.join("main.tn");
     fs::write(&main_path, r#"
 let math = use "math_pkg";
 let sum = call(math["add"], { "a": 10, "b": 20 });

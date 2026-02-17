@@ -34,7 +34,7 @@ impl Store for MemoryStore {
 #[test]
 fn test_module_import() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let module_path = temp_dir.path().join("math.turn");
+    let module_path = temp_dir.path().join("math.tn");
     
     // Create a module file
     let module_source = r#"
@@ -77,10 +77,10 @@ fn test_module_import() {
 #[test]
 fn test_recursive_import() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let util_path = temp_dir.path().join("util.turn");
-    let main_path = temp_dir.path().join("main.turn");
+    let util_path = temp_dir.path().join("util.tn");
+    let main_path = temp_dir.path().join("main.tn");
     
-    // util.turn
+    // util.tn
     fs::write(&util_path, r#"return "util";"#).unwrap();
     
     // main.turn imports util
