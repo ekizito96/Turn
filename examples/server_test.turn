@@ -1,0 +1,4 @@
+turn {
+    let greeting = "Hello from Server!";
+    return greeting;
+}

@@ -1,5 +1,6 @@
 # Rust
 impl/target/
+.turn_store/
 
 # Cursor - do not commit
 .cursor/

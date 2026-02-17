@@ -59,10 +59,30 @@ Or directly:
 cd impl && cargo run -- run ../examples/hello_turn.turn
 ```
 
+## Deployment (Server Mode)
+
+Turn includes a built-in HTTP server for deploying agents as microservices.
+
+```bash
+cd impl && cargo run -- serve --port 3000
+```
+
+Then run an agent via API:
+
+```bash
+curl -X POST http://localhost:3000/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "my-agent",
+    "source": "turn { return \"Hello from API!\"; }"
+  }'
+```
+
 **Features (v1):**
 - **Structured Data:** Lists `[1, 2]` and Maps `{"a": 1}`.
 - **Persistence:** Automatic state saving on tool calls (`.turn_store`).
 - **Standard Library:** `http_get`, `http_post`, `json_parse`, `llm_generate` (requires `OPENAI_API_KEY`).
+- **Server Mode:** Built-in `turn serve` command.
 
 **First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 

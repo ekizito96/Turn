@@ -67,7 +67,10 @@
 | Runtime | `src/runtime.rs` | Agent state (context, memory, env) |
 | Tools | `src/tools.rs` | Tool registry and handlers |
 | Value | `src/value.rs` | Runtime value representation |
-| CLI | `src/main.rs` | `turn run <file>` command |
+| Server | `src/server.rs` | HTTP API for deployment |
+| Store | `src/store.rs` | Persistence layer |
+| Runner | `src/runner.rs` | Execution engine (VM + Store + Tools) |
+| CLI | `src/main.rs` | `turn run` and `turn serve` commands |
 
 **Key tests:**
 - `tests/integration_test.rs` — End-to-end hello_turn
@@ -120,7 +123,8 @@
 | **Suspension** | 03, 07 | 00 (Effect handlers) | `vm.rs` (VmResult::Suspended) |
 | **Agent** | 00, 01, 03 | 00, 07 | `runtime.rs` (Runtime struct) |
 | **Bounded Context** | 00, 01, 03 | 00 (Problem 1, 8), 07 | `runtime.rs` (MAX_CONTEXT_SIZE) |
-| **Determinism** | 00, 03 | 00 (Problem 10) | `vm.rs` (deterministic transitions) |
+| **Deployment** | - | - | `server.rs` (HTTP API) |
+| **Persistence** | - | - | `store.rs` (FileStore) |
 
 ---
 
