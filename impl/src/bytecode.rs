@@ -43,6 +43,10 @@ pub enum Instr {
     JumpIfFalse(u32),
     JumpIfTrue(u32),
 
+    PushHandler(u32), // offset to catch block
+    PopHandler,
+    Throw,
+
     // Turn
     EnterTurn(u32), // address to jump to when turn returns
     Return,

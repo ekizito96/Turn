@@ -51,6 +51,16 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
+    TryCatch {
+        try_block: Block,
+        catch_var: String,
+        catch_block: Block,
+        span: Span,
+    },
+    Throw {
+        expr: Expr,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
