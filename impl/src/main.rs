@@ -6,6 +6,9 @@ use std::fs;
 use std::path::PathBuf;
 use turn::{FileStore, Runner, ToolRegistry};
 use tower_lsp::{LspService, Server};
+use std::sync::RwLock;
+use turn::analysis::Analysis;
+use std::collections::HashMap;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -61,12 +64,16 @@ fn main() -> Result<()> {
                 let stdin = tokio::io::stdin();
                 let stdout = tokio::io::stdout();
 
-                let (service, socket) = LspService::new(|client| turn::lsp::Backend { client });
+                let (service, socket) = LspService::new(|client| turn::lsp::Backend { 
+                    client,
+                    analysis: RwLock::new(Analysis::new()),
+                    documents: RwLock::new(HashMap::new()),
+                });
                 Server::new(stdin, stdout, socket).serve(service).await;
             });
         }
         Commands::Run { file, id, store } => {
-            let source = fs::read_to_string(&file)
+            let source_content = fs::read_to_string(&file)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {}", file.display(), e))?;
             
             // Setup Store and Tools
@@ -77,15 +84,15 @@ fn main() -> Result<()> {
             let mut runner = Runner::new(store, tools);
             
             // Run
-            match runner.run(&id, &source, Some(file.clone())) {
+            match runner.run(&id, &source_content, Some(file.clone())) {
                 Ok(result) => println!("{}", result),
                 Err(e) => {
                     // Try to format error nicely if it's a lex/parse error
                     let msg = e.to_string();
                     let loc = if let Some(lex_err) = e.downcast_ref::<turn::lexer::LexError>() {
-                        lex_err.offset().map(|o| turn::offset_to_line_col(&source, o))
+                        lex_err.offset().map(|o| turn::offset_to_line_col(&source_content, o))
                     } else if let Some(parse_err) = e.downcast_ref::<turn::parser::ParseError>() {
-                        Some(turn::offset_to_line_col(&source, parse_err.offset()))
+                        Some(turn::offset_to_line_col(&source_content, parse_err.offset()))
                     } else {
                         None
                     };

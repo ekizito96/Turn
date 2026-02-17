@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;
@@ -12,6 +13,7 @@ pub mod value;
 pub mod vm;
 pub mod lsp;
 
+pub use analysis::*;
 pub use ast::*;
 pub use bytecode::*;
 pub use compiler::*;
@@ -42,6 +44,34 @@ pub fn offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {
         }
     }
     (line, col)
+}
+
+/// Converts (line, column) to byte offset.
+pub fn line_col_to_offset(source: &str, line: usize, col: usize) -> Option<usize> {
+    let mut current_line = 1;
+    let mut current_col = 1;
+    let mut offset = 0;
+    
+    for c in source.chars() {
+        if current_line == line && current_col == col {
+            return Some(offset);
+        }
+        
+        offset += c.len_utf8();
+        
+        if c == '\n' {
+            current_line += 1;
+            current_col = 1;
+        } else {
+            current_col += 1;
+        }
+    }
+    
+    if current_line == line && current_col == col {
+        return Some(offset);
+    }
+    
+    None
 }
 
 pub fn run(source: &str) -> Result<value::Value, Box<dyn std::error::Error>> {
