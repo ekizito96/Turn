@@ -1,0 +1,14 @@
+---
+description: Git commit author - never use Cursor or AI as author
+alwaysApply: true
+---
+
+# Commit Author
+
+**NEVER** use "Cursor", "Cursor Agent", "AI", or any automated agent as the author of commits, package metadata, or documentation.
+
+- **Git commits**: Use the repository owner's identity. Author must be a human (e.g. Muyukani Ephraim Kizito).
+- **Cargo.toml / package.json authors**: Use the project owner, never Cursor or AI.
+- **AUTHORS / CONTRIBUTORS**: Do not list Cursor, AI assistants, or agents.
+
+When making commits or suggesting author metadata, use the human repository owner only.

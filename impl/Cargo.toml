@@ -3,6 +3,7 @@ name = "turn"
 version = "0.1.0"
 edition = "2021"
 description = "Object-oriented programming language for agentic software"
+authors = ["Muyukani Ephraim Kizito <muyukaniephraim@yahoo.com>"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
