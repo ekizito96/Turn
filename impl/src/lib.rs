@@ -54,7 +54,7 @@ pub fn run_with_tools(
     let program = parser::Parser::new(tokens).parse()?;
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
-    let mut vm = vm::Vm::new(&code, tools);
+    let mut vm = vm::Vm::new(&code);
     loop {
         match vm.run() {
             vm::VmResult::Complete(v) => return Ok(v),
@@ -70,7 +70,7 @@ pub fn run_with_tools(
                 };
 
                 // Resume execution with result
-                vm = vm::Vm::resume_with_result(continuation, &code, tools, result);
+                vm = vm::Vm::resume_with_result(continuation, &code, result);
             }
         }
     }

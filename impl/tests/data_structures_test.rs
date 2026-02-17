@@ -14,7 +14,7 @@ fn test_list_creation() {
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let tools = tools::ToolRegistry::new();
-    let mut vm = Vm::new(&code, &tools);
+    let mut vm = Vm::new(&code);
     
     match vm.run() {
         VmResult::Complete(val) => {
@@ -45,7 +45,7 @@ fn test_map_creation() {
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let tools = tools::ToolRegistry::new();
-    let mut vm = Vm::new(&code, &tools);
+    let mut vm = Vm::new(&code);
     
     match vm.run() {
         VmResult::Complete(val) => {
@@ -75,7 +75,7 @@ fn test_nested_structures() {
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let tools = tools::ToolRegistry::new();
-    let mut vm = Vm::new(&code, &tools);
+    let mut vm = Vm::new(&code);
     
     match vm.run() {
         VmResult::Complete(val) => {

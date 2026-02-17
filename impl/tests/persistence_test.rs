@@ -58,7 +58,7 @@ fn test_persistence_crash_recovery() {
     let mut runner = Runner::new(store.clone(), tools);
 
     // 2. Run -> Should fail
-    let result = runner.run("agent1", source);
+    let result = runner.run("agent1", source, None);
     assert!(result.is_err());
     assert_eq!(result.unwrap_err().to_string(), "Simulated crash on save 2");
 
@@ -73,7 +73,7 @@ fn test_persistence_crash_recovery() {
     let mut runner = Runner::new(new_store, tools);
 
     // 5. Run again -> Should resume and complete
-    let result = runner.run("agent1", source).unwrap();
+    let result = runner.run("agent1", source, None).unwrap();
     
     // 6. Verify result
     // "step1" + "step2" = "step1step2"

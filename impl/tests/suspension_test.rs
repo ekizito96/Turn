@@ -19,7 +19,7 @@ fn test_manual_suspension_resume_cycle() {
     let tools = tools::ToolRegistry::new(); // empty registry is fine as we handle call manually
 
     // 3. Start VM
-    let mut vm = Vm::new(&code, &tools);
+    let mut vm = Vm::new(&code);
 
     // 4. Run -> Suspend
     let continuation = match vm.run() {
@@ -42,7 +42,7 @@ fn test_manual_suspension_resume_cycle() {
     // 6. Resume with Result "pong"
     println!("Resuming with result 'pong'...");
     let mut resumed_vm =
-        Vm::resume_with_result(continuation, &code, &tools, Value::Str("pong".to_string()));
+        Vm::resume_with_result(continuation, &code, Value::Str("pong".to_string()));
 
     // 7. Run -> Complete
     match resumed_vm.run() {

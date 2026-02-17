@@ -1,0 +1,11 @@
+turn {
+    let math = use "./math_lib.turn";
+    
+    let r = 10;
+    let a = call(math["area"], { "r": r });
+    
+    let msg = "Area of circle with radius " + r + " is " + a;
+    call("echo", msg);
+    
+    return msg;
+}

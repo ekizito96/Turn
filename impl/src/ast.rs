@@ -65,7 +65,9 @@ pub enum Expr {
     Id { name: String, span: Span },
     Recall { key: Box<Expr>, span: Span },
     Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
+    Use { module: Box<Expr>, span: Span },
     Index { target: Box<Expr>, index: Box<Expr>, span: Span },
+    Turn { body: Block, span: Span },
     List {
         items: Vec<Expr>,
         span: Span,
@@ -80,27 +82,42 @@ pub enum Expr {
         right: Box<Expr>,
         span: Span,
     },
+    Unary {
+        op: UnOp,
+        expr: Box<Expr>,
+        span: Span,
+    },
     Paren(Box<Expr>),
 }
 
-impl Expr {
+    impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Literal { span, .. } => *span,
             Expr::Id { span, .. } => *span,
             Expr::Recall { span, .. } => *span,
             Expr::Call { span, .. } => *span,
+            Expr::Use { span, .. } => *span,
             Expr::Index { span, .. } => *span,
+            Expr::Turn { span, .. } => *span,
             Expr::List { span, .. } => *span,
             Expr::Map { span, .. } => *span,
             Expr::Binary { span, .. } => *span,
+            Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    Not,
+    Neg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
+    Mul,
     Add,
     Eq,
     Ne,

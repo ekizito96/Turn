@@ -8,6 +8,7 @@ pub enum Token {
     // Keywords
     Turn,
     Let,
+    Use,
     Context,
     Append,
     Remember,
@@ -25,6 +26,7 @@ pub enum Token {
 
     // Operators
     Plus,
+    Star,
     Eq, // = (assignment)
     EqEq,
     Ne,
@@ -67,6 +69,7 @@ pub struct Span {
 const KEYWORDS: &[(&str, Token)] = &[
     ("turn", Token::Turn),
     ("let", Token::Let),
+    ("use", Token::Use),
     ("context", Token::Context),
     ("append", Token::Append),
     ("remember", Token::Remember),
@@ -235,6 +238,10 @@ impl<'a> Lexer<'a> {
             Some(c) if c.is_ascii_alphabetic() || c == '_' => {
                 let c = self.next().unwrap();
                 self.read_identifier(c)
+            }
+            Some('*') => {
+                self.next();
+                Token::Star
             }
             Some('+') => {
                 self.next();

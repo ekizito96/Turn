@@ -225,13 +225,29 @@ impl Parser {
     }
 
     fn parse_add(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_postfix()?;
+        let mut left = self.parse_mul()?;
         let span = self.span();
         while matches!(self.peek(), Some(Token::Plus)) {
             self.next();
-            let right = self.parse_postfix()?;
+            let right = self.parse_mul()?;
             left = Expr::Binary {
                 op: BinOp::Add,
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_mul(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_postfix()?;
+        let span = self.span();
+        while matches!(self.peek(), Some(Token::Star)) {
+            self.next();
+            let right = self.parse_postfix()?;
+            left = Expr::Binary {
+                op: BinOp::Mul,
                 left: Box::new(left),
                 right: Box::new(right),
                 span,
@@ -291,6 +307,17 @@ impl Parser {
                     arg: Box::new(arg),
                     span,
                 })
+            }
+            Token::Use => {
+                let module = self.parse_expr()?;
+                Ok(Expr::Use {
+                    module: Box::new(module),
+                    span,
+                })
+            }
+            Token::Turn => {
+                let body = self.parse_block()?;
+                Ok(Expr::Turn { body, span })
             }
             Token::LParen => {
                 let inner = self.parse_expr()?;

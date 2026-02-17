@@ -1,0 +1,17 @@
+let pi = 3.14159;
+
+let square = turn {
+    let x = recall("x");
+    return x * x;
+};
+
+let area = turn {
+    let r = recall("r");
+    let sq = call(square, { "x": r });
+    return pi * sq;
+};
+
+return {
+    "PI": pi,
+    "area": area
+};
