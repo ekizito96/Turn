@@ -2,10 +2,11 @@
 
 use crate::value::Value;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 const MAX_CONTEXT_SIZE: usize = 100;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Runtime {
     pub env: HashMap<String, Value>,
     pub context: Vec<Value>,
@@ -63,6 +64,7 @@ fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         Value::Num(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Err(RuntimeError::InvalidMemoryKey),
+        Value::List(_) | Value::Map(_) => Err(RuntimeError::InvalidMemoryKey),
     }
 }
 

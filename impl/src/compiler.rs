@@ -127,7 +127,7 @@ impl Compiler {
 
     fn compile_expr(&mut self, expr: &Expr) {
         match expr {
-            Expr::Literal(lit) => match lit {
+            Expr::Literal { value, .. } => match value {
                 Literal::Num(n) => {
                     self.emit(Instr::PushNum(*n));
                 }
@@ -144,7 +144,7 @@ impl Compiler {
                     self.emit(Instr::PushNull);
                 }
             },
-            Expr::Id(name) => {
+            Expr::Id { name, .. } => {
                 self.emit(Instr::Load(name.clone()));
             }
             Expr::Recall { key, .. } => {
@@ -156,9 +156,28 @@ impl Compiler {
                 self.compile_expr(arg);
                 self.emit(Instr::CallTool);
             }
-            Expr::Binary {
-                op, left, right, ..
-            } => {
+            Expr::Index { target, index, .. } => {
+                self.compile_expr(target);
+                self.compile_expr(index);
+                self.emit(Instr::Index);
+            }
+            Expr::List { items, .. } => {
+                let len = items.len();
+                for item in items {
+                    self.compile_expr(item);
+                }
+                self.emit(Instr::MakeList(len));
+            }
+            Expr::Map { entries, .. } => {
+                let len = entries.len();
+                for (key, val) in entries {
+                    self.emit(Instr::PushStr(key.clone()));
+                    self.compile_expr(val);
+                }
+                self.emit(Instr::MakeMap(len));
+            }
+            Expr::Binary { op, left, right, .. } => {
+
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
