@@ -1,0 +1,13 @@
+// Conditionals: if/else with == and recall
+// Run: cargo run -- run examples/conditionals.turn
+
+turn {
+  let weather = call("echo", "sunny");
+  remember("weather", weather);
+  let w = recall("weather");
+  if w == "sunny" {
+    return "Nice day!";
+  } else {
+    return "Stay dry!";
+  }
+}

@@ -43,16 +43,24 @@ case "${1:-}" in
   hello)
     cargo run --quiet -- run tests/hello_turn.turn
     ;;
+  examples)
+    echo "Running examples..."
+    for f in examples/*.turn; do
+      echo "--- $f ---"
+      cargo run --quiet -- run "$f" 2>/dev/null || true
+    done
+    ;;
   install-rust)
     echo "Rust should be installed. Run: source \$HOME/.cargo/env"
     echo "Then: ./run.sh test"
     ;;
   *)
-    echo "Usage: ./run.sh [test|build|hello|install-rust]"
+    echo "Usage: ./run.sh [test|build|hello|examples|install-rust]"
     echo ""
     echo "  test         - run all tests"
     echo "  build        - build release binary"
     echo "  hello        - run hello_turn.turn (prints 'Hello')"
+    echo "  examples     - run all examples"
     echo "  install-rust - install Rust (if cargo not found)"
     echo ""
     echo "Or: cargo run -- run <file.turn>"

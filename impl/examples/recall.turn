@@ -1,0 +1,11 @@
+// Memory: remember and recall
+// Run: cargo run -- run examples/recall.turn
+
+turn {
+  let name = "Turn";
+  remember("user", name);
+  context.append("Hello");
+  call("echo", "Hello");
+  let who = recall("user");
+  return who;
+}
