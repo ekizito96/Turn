@@ -72,9 +72,9 @@ async fn run_handler(
     let result = tokio::task::spawn_blocking(move || {
         let store = FileStore::new(store_path);
         let tools = ToolRegistry::new();
-        let mut runner = Runner::new(store, tools);
-        runner.run(&id, &source)
-    })
+                let mut runner = Runner::new(store, tools);
+                runner.run(&id, &source, None)
+            })
     .await
     .map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,

@@ -45,9 +45,6 @@ enum Commands {
     },
 }
 
-#[cfg(feature = "server")]
-mod server;
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -63,7 +60,7 @@ fn main() -> Result<()> {
             let mut runner = Runner::new(store, tools);
             
             // Run
-            match runner.run(&id, &source) {
+            match runner.run(&id, &source, Some(file.clone())) {
                 Ok(result) => println!("{}", result),
                 Err(e) => {
                     // Try to format error nicely if it's a lex/parse error
@@ -82,18 +79,6 @@ fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             }
-        }
-        Commands::Serve { port, store } => {
-            // Start async runtime for server
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
-            
-            rt.block_on(async {
-                if let Err(e) = turn::server::serve(port, store).await {
-                    eprintln!("Server error: {}", e);
-                }
-            });
         }
         Commands::Serve { port, store } => {
             // Start async runtime for server

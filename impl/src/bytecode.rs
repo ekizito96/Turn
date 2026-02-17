@@ -19,10 +19,12 @@ pub enum Instr {
 
     // Binary ops
     Add,
+    Mul,
     Eq,
     Ne,
     And,
     Or,
+    Not,
 
     // Control
     Pop, // discard top of stack
@@ -32,7 +34,9 @@ pub enum Instr {
     Remember,
     Recall,
     CallTool,
+    LoadModule,
     Index,
+    MakeTurn(u32),
 
     // Control flow
     Jump(u32),

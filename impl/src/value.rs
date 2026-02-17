@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 use indexmap::IndexMap;
+use std::sync::Arc;
+use crate::bytecode::Instr;
+
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -12,6 +16,11 @@ pub enum Value {
     Str(String),
     List(Vec<Value>),
     Map(IndexMap<String, Value>),
+    Closure {
+        code: Arc<Vec<Instr>>,
+        ip: usize,
+        env: HashMap<String, Value>,
+    },
 }
 
 impl Value {
@@ -23,6 +32,7 @@ impl Value {
             Value::Num(n) => *n == 0.0 || *n == -0.0,
             Value::List(l) => l.is_empty(),
             Value::Map(m) => m.is_empty(),
+            Value::Closure { .. } => false,
         }
     }
 
@@ -38,6 +48,7 @@ impl std::fmt::Display for Value {
             Value::Str(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Null => write!(f, "null"),
+            Value::Closure { ip, .. } => write!(f, "<closure at {}>", ip),
             Value::List(l) => {
                 write!(f, "[")?;
                 for (i, v) in l.iter().enumerate() {

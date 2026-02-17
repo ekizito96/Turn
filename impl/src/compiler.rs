@@ -156,6 +156,24 @@ impl Compiler {
                 self.compile_expr(arg);
                 self.emit(Instr::CallTool);
             }
+            Expr::Use { module, .. } => {
+                self.compile_expr(module);
+                self.emit(Instr::LoadModule);
+            }
+            Expr::Turn { body, .. } => {
+                let jump_over = self.emit(Instr::Jump(0));
+                let start_addr = self.code.len() as u32;
+                self.compile_block(body);
+                // Implicit return
+                let has_return = body.stmts.last().map_or(false, |s| matches!(s, Stmt::Return { .. }));
+                if !has_return {
+                    self.emit(Instr::PushNull);
+                    self.emit(Instr::Return);
+                }
+                let after_addr = self.code.len() as u32;
+                self.patch_jump(jump_over, after_addr);
+                self.emit(Instr::MakeTurn(start_addr));
+            }
             Expr::Index { target, index, .. } => {
                 self.compile_expr(target);
                 self.compile_expr(index);
@@ -177,12 +195,14 @@ impl Compiler {
                 self.emit(Instr::MakeMap(len));
             }
             Expr::Binary { op, left, right, .. } => {
-
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
                     BinOp::Add => {
                         self.emit(Instr::Add);
+                    }
+                    BinOp::Mul => {
+                        self.emit(Instr::Mul);
                     }
                     BinOp::Eq => {
                         self.emit(Instr::Eq);
@@ -195,6 +215,20 @@ impl Compiler {
                     }
                     BinOp::Or => {
                         self.emit(Instr::Or);
+                    }
+                }
+            }
+            Expr::Unary { op, expr, .. } => {
+                self.compile_expr(expr);
+                match op {
+                    UnOp::Not => {
+                        self.emit(Instr::Not);
+                    }
+                    UnOp::Neg => {
+                        // Negation is mul by -1? Or Instr::Neg?
+                        // For simplicity, let's use Mul -1
+                        self.emit(Instr::PushNum(-1.0));
+                        self.emit(Instr::Mul);
                     }
                 }
             }
