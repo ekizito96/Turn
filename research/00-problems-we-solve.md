@@ -259,6 +259,7 @@ The paper's terminology aligns with Turn: **context** = input to the LLM; **stat
 | 7 | Observability ad-hoc | Non-determinism; trace = turn + context + tools; divergence point | No standard trace shape; replay is custom | Turn/context in spec → standard trace; defined state serialization |
 | 8 | Cost and budget invisible | Token metering; death by accumulation; context budgeting | No first-class budget or cost; trimming and caching scattered | Bounded context; optional cost/token visibility and policy |
 | 9 | Governance bolted on | AGENTSAFE, AgentSpec; runtime policy over actions; audit | Policies as scattered conditionals; audit from ad-hoc logs | Policy in runtime/spec; tool registry + enforcement; defined audit trail |
+| 10 | Computation power overhead | Two-layer cost: semantic (tokens, turns) + runtime (interpreter overhead). At scale, every CPU cycle matters. | Python: 10–100× slower, high memory, GIL. TS: V8 overhead, Node runtime. No separation of "agent work" vs "runtime work". | Semantic: bounded context, explicit turn, memory discipline. Runtime: Rust VM = native speed, minimal overhead, single binary. Deterministic semantics enable replay/audit. |
 
 ---
 
@@ -267,9 +268,53 @@ The paper's terminology aligns with Turn: **context** = input to the LLM; **stat
 
 **Checklist:** We have grounded the need for a new language in (1) **context** (attention, position, boundedness, priority), (2) **memory** (STM/LTM, store–retrieve–apply), (3) **turn and tool** (suspend/resume, effect handlers), (4) **state** (workflow, operational, cognitive; drift), (5) **semantics** (no spec for one step), (6) **mental model** (plan vs loop), (7) **observability**, (8) **cost/budget**, (9) **governance**. That covers the main physical, cognitive, and engineering constraints from the literature and production.
 
-**Possible gaps** (candidates for "Problem 10" or for v2):
+## 7d. Problem 10: Computation power and runtime overhead
 
-- **Reproducibility and testing** — Agents are non-deterministic; same input → different output. Traditional languages assume deterministic or mockable execution. We have "replay" under observability, but **reproducible testing** (seeding, deterministic tool stubs, "run turn N with this exact state") may deserve a first-class story. If Turn has a defined configuration and one-turn transition, replay and testing fall out; we can call that covered by 4 + 5 + 7 unless we want an explicit "test mode" in the spec.
+### The science
+
+**Two-layer cost structure:**
+1. **Semantic cost** (big wins): Token accumulation (2.1K → 47K tokens), unbounded context growth, redundant tool calls, inefficient state management. This is **architectural**—the language model doesn't prevent waste.
+2. **Runtime cost** (steady wins): Interpreter overhead, memory bloat, GC pauses, serialization cost, policy check overhead. This is **mechanical**—the host language adds friction.
+
+**Physics perspective:** If tokens/LLM calls are the "energy" cost, then:
+- **Semantic reduction** = reducing required energy (fewer tokens, fewer turns, bounded context)
+- **Runtime reduction** = reducing friction (minimal overhead per unit of work)
+
+**At scale:** $500+/day at 1K users. Every CPU cycle and memory byte matters. If the runtime adds 10–100× overhead (Python/TypeScript), that multiplies cost.
+
+### How traditional languages handle it (the pain)
+
+- **Python:** 10–100× slower than native, high memory overhead (~10–50MB baseline), GIL limits parallelism, slow startup (100–500ms imports). Building agentic systems on Python means **every turn is slow**; checkpointing, context append, memory read become Python function calls. Cost multiplies.
+- **TypeScript/Node:** V8 JIT overhead, Node.js runtime overhead (~10–30MB), async/Promise overhead per suspension, npm dependency hell. Better than Python but still **overhead per turn**.
+- **No separation:** The language doesn't distinguish "agent work" (tokens, tool calls) from "runtime work" (interpreter overhead). You can't optimize one without the other.
+
+### What Turn does
+
+**Semantic solutions (Turn's design):**
+- **Bounded context** = prevents unbounded growth (semantic reduction)
+- **Explicit turn** = checkpointable unit (semantic reduction)
+- **Memory discipline** = explicit read/write (semantic reduction)
+- **Tool output control** = structured results, not verbose strings (semantic reduction)
+
+**Runtime solutions (Rust implementation):**
+- **Native speed** = minimal overhead per turn (runtime reduction)
+- **Minimal memory** = no GC pauses, predictable memory (runtime reduction)
+- **Fast serialization** = cheap checkpointing (runtime reduction)
+- **Single binary** = no runtime dependencies, fast startup (runtime reduction)
+
+**Key insight:** Turn solves the **semantic problems** (bounded context, explicit turn, memory discipline). Rust enables those solutions to run **fast and cheap** (native speed, minimal overhead). Building Turn on Python/TypeScript contradicts our goals—we'd solve semantic problems but add runtime friction.
+
+**Deterministic semantics:** Turn's core language is deterministic (given config + external inputs, execution is reproducible). Non-determinism is quarantined at effect boundaries (tool calls, LLM calls). This enables debugging, audit, replay: same inputs → same state transitions. Physics: \(S_{t+1} = F(S_t, e_t)\) where \(e_t\) are external events. Well-defined and reproducible.
+
+---
+
+## 8a. Completeness: have we identified all deep science issues?
+
+**Checklist:** We have grounded the need for a new language in (1) **context** (attention, position, boundedness, priority), (2) **memory** (STM/LTM, store–retrieve–apply), (3) **turn and tool** (suspend/resume, effect handlers), (4) **state** (workflow, operational, cognitive; drift), (5) **semantics** (no spec for one step), (6) **mental model** (plan vs loop), (7) **observability**, (8) **cost/budget**, (9) **governance**, (10) **computation power** (semantic + runtime overhead). That covers the main physical, cognitive, and engineering constraints from the literature and production.
+
+**Possible gaps** (candidates for v2):
+
+- **Reproducibility and testing** — Covered by deterministic semantics (Problem 10) + observability (Problem 7). Turn's deterministic core + effect boundaries enable replay and testing.
 - **Composability** — In trad languages you compose functions and modules. In agentic code the unit of reuse (turn, agent, workflow) is not a first-class citizen; you copy-paste loops and registries. **Composition of agents or sub-workflows** (one agent's output as another's context, shared memory) might be a gap. We have "tool" and "context"; we don't yet have "agent as a composable value" or "sub-turn." Worth adding when we design modules/agents.
 - **Time and latency** — Turns take seconds; tool calls can take minutes. The model of "call and return" doesn't encode "this may take 30s" or timeouts. We have suspend/resume; we haven't made **timeouts, backpressure, or SLA** first-class. Could stay as library/runtime policy for v1.
 - **Multi-agent and distribution** — CAP for agents, eventual consistency, "multiple agents with divergent worldviews." We cited it (Physics doc) but didn't make it a full problem. A language could have "agent" and "message between agents" as primitives; for v1 we can treat multi-agent as composition on top of turn/context/memory.

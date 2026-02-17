@@ -4,7 +4,7 @@
 
 ## Status
 
-**Spec locked for v1 minimal core.** Design mandate and primitives are fixed; no implementation yet.
+**Spec locked for v1 minimal core.** Design mandate and primitives are fixed. **Implementation:** Rust bytecode VM from day one (see [spec/07-implementation-strategy.md](spec/07-implementation-strategy.md)). Not Python/TypeScript—those languages' overhead contradicts Turn's goals (fast, cost-efficient).
 
 ## Design mandate
 

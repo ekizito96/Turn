@@ -76,6 +76,22 @@ We define a **small-step** transition: one step takes the configuration to a new
 
 **Big-step (optional):** We can also define a **big-step** relation for a whole turn: `(config, turn_body) ⇓ (config', result)` or `(config, turn_body) ⇓ Suspension(...)`. The small-step relation defines the same behavior; big-step is a convenient abstraction for "run this turn to completion or suspension."
 
+### Deterministic Semantics
+
+Turn's core language is **deterministic**: given a configuration and a sequence of external inputs (tool results, LLM outputs), execution is **reproducible**. The transition relation `Config → Config'` is a function: same config + same inputs → same next config.
+
+**Non-determinism is quarantined at effect boundaries:**
+- **Tool calls:** `call(tool_name, arg)` suspends; the tool handler may be non-deterministic (network timing, stochastic APIs). When we resume with a result, that result becomes part of the **input sequence** for reproducibility.
+- **LLM calls:** (Future) LLM calls are also effects; their outputs are non-deterministic but become inputs for replay.
+
+**Why this matters:**
+- **Debugging:** Replay the same input sequence → reproduce the bug.
+- **Audit:** Log the input sequence → reconstruct what happened.
+- **Testing:** Provide deterministic inputs → test agent behavior.
+- **Physics/math:** Execution is a function \(S_{t+1} = F(S_t, e_t)\) where \(e_t\) are external events. This is **well-defined** and **reproducible**.
+
+**Implementation:** The runtime must log external inputs (tool results) as part of the trace. Replay = restore configuration + replay input sequence.
+
 ---
 
 ## 4. Lifetimes and scope
