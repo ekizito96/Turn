@@ -1,6 +1,7 @@
 # Turn design mandate
 
 **Status:** Locked. This is the mission and design constraints for Turn. All spec and implementation decisions must align with it.
+Empirical validation from production agent systems (integration agents, research agents) confirms these mandates (see [research/07-empirical-analysis.md](../research/07-empirical-analysis.md)).
 
 ---
 

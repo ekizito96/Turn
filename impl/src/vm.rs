@@ -20,6 +20,7 @@ pub struct VmState {
     pub code: Vec<Instr>,
     pub ip: usize,
     pub stack: Vec<Value>,
+    pub return_addrs: Vec<usize>,
     pub runtime: Runtime,
 }
 
@@ -45,6 +46,26 @@ impl<'a> Vm<'a> {
             tools,
         }
     }
+
+    pub fn resume_with_result(
+        state: VmState,
+        code: &'a [Instr],
+        tools: &'a ToolRegistry,
+        result: Value,
+    ) -> Self {
+        let mut vm = Self {
+            code,
+            ip: state.ip,
+            stack: state.stack,
+            return_addrs: state.return_addrs,
+            result: Value::Null,
+            runtime: state.runtime,
+            tools,
+        };
+        vm.push(result);
+        vm
+    }
+
 
     fn fetch(&self) -> Option<&Instr> {
         self.code.get(self.ip)
@@ -152,11 +173,21 @@ impl<'a> Vm<'a> {
                         Value::Num(n) => n.to_string(),
                         _ => "".to_string(),
                     };
-                    if let Some(result) = self.tools.call(&name, arg) {
-                        self.push(result);
-                    } else {
-                        self.push(Value::Null);
-                    }
+
+                    // Suspend execution so host can run the tool (async/sync)
+                    let continuation = VmState {
+                        code: self.code.to_vec(),
+                        ip: self.ip,
+                        stack: self.stack.clone(),
+                        return_addrs: self.return_addrs.clone(),
+                        runtime: self.runtime.clone(),
+                    };
+
+                    return VmResult::Suspended {
+                        tool_name: name,
+                        arg,
+                        continuation,
+                    };
                 }
 
                 Instr::Jump(target) => {

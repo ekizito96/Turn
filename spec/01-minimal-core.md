@@ -31,7 +31,8 @@ No list/map literals in v1; add when needed. `recall(key)` returns `null` when k
 
 | Concept | Deferred to | Note |
 |---------|-------------|------|
-| **Goal** | v1.1 or stdlib | No `goal`, `set_goal`, `replan` in grammar or runtime. |
+| **Goal** | v1.1 or stdlib | No `goal` or `mission` primitive yet. Empirical analysis shows this is critical (see `ContextManager` priority stack), so v1.1 will likely elevate it. |
+| **Structured Context** | v1.1 | v1 has flat context. Empirical analysis shows real agents need "pinned" vs "sliding" context. v1.1 may add `context.pin(val)`. |
 | **Context rewrite / window** | v1.1 or stdlib | Only append + runtime-bound. No `context.rewrite`, `context.window`. |
 | **Memory forget / summarize** | v1.1 or stdlib | Only remember + recall. |
 | **Modules** | v1.1 | Single program only. No import/export. |

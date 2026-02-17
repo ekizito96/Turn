@@ -31,10 +31,23 @@ pub fn run_with_tools(
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = vm::Vm::new(&code, tools);
-    match vm.run() {
-        vm::VmResult::Complete(v) => Ok(v),
-        vm::VmResult::Suspended { .. } => {
-            Err("Suspension not yet implemented (tool call)".into())
+    loop {
+        match vm.run() {
+            vm::VmResult::Complete(v) => return Ok(v),
+            vm::VmResult::Suspended {
+                tool_name,
+                arg,
+                continuation,
+            } => {
+                // Execute tool (synchronously for now, but design allows async/pause)
+                let result = match tools.call(&tool_name, arg) {
+                    Some(v) => v,
+                    None => value::Value::Null,
+                };
+                
+                // Resume execution with result
+                vm = vm::Vm::resume_with_result(continuation, &code, tools, result);
+            }
         }
     }
 }

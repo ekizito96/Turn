@@ -29,6 +29,7 @@ We are doing deep research so we don’t make mistakes. Turn is **object-oriente
 | [04-foundations.md](04-foundations.md) | Foundations: principles from great creators; formal semantics (operational, denotational, axiomatic) | Seed content |
 | [05-turn-primitives.md](05-turn-primitives.md) | Turn-specific: mapping agentic primitives to syntax/structure/semantics; open questions | Placeholder |
 | [06-critique-and-gaps.md](06-critique-and-gaps.md) | **Critique and gaps:** doc-by-doc review; C / TypeScript / Python creator lens; consolidated gaps; recommended order of work | Full |
+| [07-empirical-analysis.md](07-empirical-analysis.md) | **Empirical validation:** Real-world production agent codebases analyzed to validate Turn's design mandate | Full |
 
 ---
 

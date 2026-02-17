@@ -2,6 +2,12 @@
 
 **A new, object-oriented programming language for agentic software.** Turn is not a retrofit. The primary abstraction is the **agent**—an object with context, memory, and the ability to run turns and call tools. We solve the pains of building agentic systems in Python, TypeScript, or C and optimize for minimal tokens, performance, security, less boilerplate, and clear observability.
 
+**Quick Links:**
+- 📖 [Complete Documentation Index](DOCUMENTATION_INDEX.md) — Guided reading paths
+- 📋 [Project Summary](PROJECT_SUMMARY.md) — Executive overview for stakeholders
+- 🎯 [First Program](spec/04-hello-turn.md) — Hello Turn example
+- 🔬 [Why Turn?](research/00-problems-we-solve.md) — Deep science (10 problems, 50+ citations)
+
 ## Status
 
 **Spec locked for v1 minimal core.** Design mandate and primitives are fixed. **Implementation:** Rust bytecode VM from day one (see [spec/07-implementation-strategy.md](spec/07-implementation-strategy.md)). Not Python/TypeScript—those languages' overhead contradicts Turn's goals (fast, cost-efficient).
@@ -10,23 +16,33 @@
 
 Mission, design goals, and first-principles justification: [spec/00-design-mandate.md](spec/00-design-mandate.md).
 
-High-level design and rationale: [Prescott-Data-Applications/ai-engineering-blog/docs/agentic-programming-language-design.md](../Prescott-Data-Applications/ai-engineering-blog/docs/agentic-programming-language-design.md)
+High-level design and rationale: [Internal Design Document](spec/00-design-mandate.md)
+
+Empirical validation and industry pains analysis: [research/07-empirical-analysis.md](research/07-empirical-analysis.md)
 
 ## Project layout
 
 ```
 Turn/
-├── README.md           # This file
-├── research/           # Research notes and references
-│   ├── README.md       # Research index and plan
-│   ├── 01-syntax.md
-│   ├── 02-structure.md
-│   ├── 03-algorithms.md
-│   ├── 04-foundations.md
-│   └── 05-turn-primitives.md
-├── spec/               # 00-design-mandate, 01-minimal-core, 02-grammar, 03-runtime-model, 04-hello-turn, 05-types-and-errors
-└── impl/               # Rust bytecode VM (lexer, parser, compiler, VM, runtime)
+├── README.md                    # This file
+├── DOCUMENTATION_INDEX.md       # Complete navigation guide
+├── research/                    # Deep science and first-principles
+│   ├── 00-problems-we-solve.md  # 10 pains in Python/TS/C agents
+│   ├── 07-empirical-analysis.md # Production codebase validation
+│   └── ...                      # Syntax, structure, algorithms, foundations
+├── spec/                        # Language specification (locked for v1)
+│   ├── 00-design-mandate.md     # Mission and design goals
+│   ├── 01-minimal-core.md       # Turn, context, memory, tool primitives
+│   ├── 02-grammar.md            # BNF, lexer, operators
+│   ├── 03-runtime-model.md      # Configuration, transitions, semantics
+│   ├── 04-hello-turn.md         # First program example
+│   └── 07-implementation-strategy.md  # Rust VM architecture
+└── impl/                        # Rust bytecode VM implementation
+    ├── src/                     # Lexer, parser, compiler, VM, runtime
+    └── tests/                   # Integration and suspension tests
 ```
+
+**New to Turn?** Start with [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for guided reading paths.
 
 ## Running
 

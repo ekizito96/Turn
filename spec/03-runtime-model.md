@@ -128,3 +128,18 @@ So "run this Turn program" means: create one **agent** with env (empty), context
 - **Default runtime** = one agent with in-memory context object (bounded), in-memory memory object, at least `echo` tool.
 
 This document is the single source of truth for the runtime. Implementations (interpreter, debugger, trace viewer) must conform to this model.
+
+## 7. The Universal Loop (Implementation Pattern)
+
+To achieve the "Universal Agent" capability (durable, pausable, resumable), implementations should follow this loop pattern:
+
+1.  **Load:** Initialize VM with Program + State (or fresh).
+2.  **Run:** Execute until `Complete` or `Suspended`.
+3.  **Handle Suspension:**
+    *   If `Suspended(tool, arg, continuation)`:
+    *   **Persist:** Save `continuation` to durable storage (DB/Disk).
+    *   **Execute:** Run the tool (async, human-in-the-loop, etc.).
+    *   **Resume:** Load `continuation`, inject `result`, and goto Step 2.
+4.  **Complete:** Return final value.
+
+This loop ensures that the agent is never "blocked" on a thread, but rather "suspended" in state. This is the key to scalable, long-running agentic software.
