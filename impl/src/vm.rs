@@ -11,6 +11,7 @@ pub struct Frame {
     pub code: Arc<Vec<Instr>>,
     pub ip: usize,
     pub env: HashMap<String, Value>,
+    pub handlers: Vec<u32>, // Stack of catch block offsets relative to code start
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -41,6 +42,7 @@ impl Vm {
             code: Arc::new(code.to_vec()),
             ip: 0,
             env: HashMap::new(),
+            handlers: Vec::new(),
         };
         Self {
             frames: vec![root_frame],
@@ -190,7 +192,49 @@ impl Vm {
                         code,
                         ip: current_ip,
                         env,
+                        handlers: Vec::new(), // New frame starts with empty handlers? Yes, try/catch is scoped to block?
+                        // Actually, if we are in a block, we might want to inherit handlers?
+                        // But EnterTurn is for "Turn" blocks which are closures/scopes.
+                        // Exceptions don't propagate *out* of a Turn block to the parent automatically?
+                        // Wait, they should bubble up the call stack.
+                        // So if this frame has no handler, we pop frame and check caller.
+                        // So `handlers` here is strictly *local* handlers in this frame.
                     });
+                }
+                Instr::PushHandler(offset) => {
+                    self.frames[frame_idx].handlers.push(offset);
+                }
+                Instr::PopHandler => {
+                    self.frames[frame_idx].handlers.pop();
+                }
+                Instr::Throw => {
+                    let err = self.pop().unwrap_or(Value::Null);
+                    // Unwind
+                    loop {
+                        if self.frames.is_empty() {
+                            // Uncaught exception at top level
+                            // For now, return the error as the result (or wrap in Error?)
+                            // Ideally we'd return VmResult::Error(err).
+                            // But signature is VmResult::Complete(Value).
+                            // Let's return the error value.
+                            return VmResult::Complete(err);
+                        }
+                        
+                        let frame_idx = self.frames.len() - 1;
+                        if let Some(handler_offset) = self.frames[frame_idx].handlers.pop() {
+                            // Found handler in current frame
+                            self.frames[frame_idx].ip = handler_offset as usize;
+                            self.push(err);
+                            break;
+                        } else {
+                            // No handler in this frame, pop frame
+                            self.frames.pop();
+                            // Restore env if there is a caller
+                            if let Some(caller) = self.frames.last() {
+                                self.runtime.env = caller.env.clone();
+                            }
+                        }
+                    }
                 }
                 Instr::CallTool => {
                     let arg = self.pop().unwrap_or(Value::Null);
@@ -234,6 +278,7 @@ impl Vm {
                                 code,
                                 ip,
                                 env: self.runtime.env.clone(),
+                                handlers: Vec::new(),
                             });
                         }
                         _ => {

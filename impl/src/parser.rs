@@ -144,6 +144,40 @@ impl Parser {
                 let body = self.parse_block()?;
                 Ok(Stmt::While { cond, body, span })
             }
+            Some(Token::Try) => {
+                self.next();
+                let try_block = self.parse_block()?;
+                self.expect(Token::Catch)?;
+                self.expect(Token::LParen)?;
+                let catch_var = match self.next() {
+                    Some(SpannedToken { token: Token::Id(s), .. }) => s,
+                    _ => return Err(ParseError::UnexpectedToken(self.span())),
+                };
+                self.expect(Token::RParen)?;
+                let catch_block = self.parse_block()?;
+                let end = catch_block.span.end;
+                Ok(Stmt::TryCatch {
+                    try_block,
+                    catch_var,
+                    catch_block,
+                    span: Span {
+                        start: span.start,
+                        end,
+                    },
+                })
+            }
+            Some(Token::Throw) => {
+                self.next();
+                let expr = self.parse_expr()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::Throw {
+                    expr,
+                    span: Span {
+                        start: span.start,
+                        end: self.last_span.end,
+                    },
+                })
+            }
             _ => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::Semicolon)?;

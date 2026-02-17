@@ -31,6 +31,7 @@ impl Compiler {
             Instr::JumpIfFalse(ref mut t) => *t = target,
             Instr::JumpIfTrue(ref mut t) => *t = target,
             Instr::EnterTurn(ref mut t) => *t = target,
+            Instr::PushHandler(ref mut t) => *t = target,
             _ => {}
         }
     }
@@ -111,6 +112,46 @@ impl Compiler {
                 self.compile_block(body);
                 self.emit(Instr::Jump(loop_start));
                 self.patch_jump(exit_jump, self.code.len() as u32);
+            }
+            Stmt::TryCatch {
+                try_block,
+                catch_var,
+                catch_block,
+                ..
+            } => {
+                let catch_jump = self.emit(Instr::Jump(0)); // Placeholder for catch block address
+                let try_start = self.code.len() as u32;
+                
+                // We need to jump to catch block on error.
+                // But `try` isn't just a jump. It pushes a handler.
+                // Re-think: `PushHandler(catch_addr)` -> execute try -> `PopHandler` -> `Jump(after_catch)`
+                
+                // Rewind: remove the initial Jump(0).
+                self.code.pop(); 
+                
+                let push_handler_idx = self.emit(Instr::PushHandler(0)); // Placeholder
+                
+                self.compile_block(try_block);
+                self.emit(Instr::PopHandler);
+                let jump_after_catch = self.emit(Instr::Jump(0));
+                
+                // Catch block starts here
+                let catch_start = self.code.len() as u32;
+                // Patch PushHandler to point here
+                if let Instr::PushHandler(ref mut t) = self.code[push_handler_idx as usize] {
+                    *t = catch_start;
+                }
+                
+                // Catch block expects error on stack. Store it in catch_var.
+                self.emit(Instr::Store(catch_var.clone()));
+                self.compile_block(catch_block);
+                
+                let after_catch = self.code.len() as u32;
+                self.patch_jump(jump_after_catch, after_catch);
+            }
+            Stmt::Throw { expr, .. } => {
+                self.compile_expr(expr);
+                self.emit(Instr::Throw);
             }
             Stmt::ExprStmt { expr, .. } => {
                 self.compile_expr(expr);
