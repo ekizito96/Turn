@@ -17,9 +17,13 @@ pub struct Frame {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VmState {
+    pub pid: u64,
     pub frames: Vec<Frame>,
     pub stack: Vec<Value>,
     pub runtime: Runtime,
+    pub mailbox: VecDeque<Value>,
+    pub scheduler: VecDeque<Process>,
+    pub next_pid: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -74,45 +78,40 @@ impl Vm {
     }
 
     pub fn resume_with_result(state: VmState, tool_result: Value) -> Self {
-        // Reconstruct process from VmState (lossy: assumes pid 1, empty mailbox)
-        let process = Process {
-            pid: 1,
+        let mut process = Process {
+            pid: state.pid,
             frames: state.frames,
             stack: state.stack,
             runtime: state.runtime,
-            mailbox: VecDeque::new(),
+            mailbox: state.mailbox,
         };
         
-        let mut scheduler = VecDeque::new();
+        process.stack.push(tool_result);
+        
+        let mut scheduler = state.scheduler;
         scheduler.push_back(process);
         
-        let mut vm = Self {
+        Self {
             scheduler,
-            next_pid: 2,
-        };
-        
-        if let Some(p) = vm.scheduler.front_mut() {
-            p.stack.push(tool_result);
+            next_pid: state.next_pid,
         }
-        
-        vm
     }
 
     pub fn resume_with_error(state: VmState, error_msg: String) -> Self {
         let process = Process {
-            pid: 1,
+            pid: state.pid,
             frames: state.frames,
             stack: state.stack,
             runtime: state.runtime,
-            mailbox: VecDeque::new(),
+            mailbox: state.mailbox,
         };
         
-        let mut scheduler = VecDeque::new();
+        let mut scheduler = state.scheduler;
         scheduler.push_back(process);
         
         let mut vm = Self {
             scheduler,
-            next_pid: 2,
+            next_pid: state.next_pid,
         };
 
         let err = Value::Str(error_msg);
@@ -164,9 +163,13 @@ impl Vm {
                 VmResult::Suspended { tool_name, arg, continuation: _ } => {
                     // Reconstruct VmState for legacy support
                     let state = VmState {
+                        pid: process.pid,
                         frames: process.frames.clone(),
                         stack: process.stack.clone(),
                         runtime: process.runtime.clone(),
+                        mailbox: process.mailbox.clone(),
+                        scheduler: self.scheduler.clone(),
+                        next_pid: self.next_pid,
                     };
                     return VmResult::Suspended {
                         tool_name,
@@ -213,22 +216,23 @@ impl Vm {
             match instr {
                 Instr::Spawn => {
                     let target = process.stack.pop().unwrap_or(Value::Null);
-                    if let Value::Closure { code, env, .. } = target {
+                    if let Value::Closure { code, ip, env, .. } = target {
                          let new_pid = self.next_pid;
                          self.next_pid += 1;
                          
-                         let new_process = Process {
+                         let mut new_process = Process {
                              pid: new_pid,
                              frames: vec![Frame {
                                  code,
-                                 ip: 0,
-                                 env,
+                                 ip,
+                                 env: env.clone(),
                                  handlers: Vec::new(),
                              }],
                              stack: Vec::new(),
                              runtime: Runtime::new(),
                              mailbox: VecDeque::new(),
                          };
+                         new_process.runtime.env = env;
                          
                          self.scheduler.push_back(new_process);
                          process.stack.push(Value::Pid(new_pid));
@@ -274,25 +278,62 @@ impl Vm {
                         _ => process.stack.push(Value::Num(1.0)), // Certainty
                     }
                 }
+                Instr::Suspend => {
+                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    let state = VmState {
+                        pid: process.pid,
+                        frames: process.frames.clone(),
+                        stack: process.stack.clone(),
+                        runtime: process.runtime.clone(),
+                        mailbox: process.mailbox.clone(),
+                        scheduler: self.scheduler.clone(),
+                        next_pid: self.next_pid,
+                    };
+                    return VmResult::Suspended {
+                        tool_name: "sys_suspend".to_string(),
+                        arg: Value::Null,
+                        continuation: state,
+                    };
+                }
                 Instr::Infer(ty) => {
                     let prompt_val = process.stack.pop().unwrap_or(Value::Null);
-                    let ty_str = format!("{:?}", ty);
+                    // Resolve named struct placeholders (Struct("Name", {}))
+                    // against runtime-registered struct definitions before prompting LLM.
+                    let resolved_ty = match ty {
+                        Type::Struct(name, fields) if fields.is_empty() => {
+                            if let Some(known_fields) = process.runtime.structs.get(&name) {
+                                Type::Struct(name, known_fields.clone())
+                            } else {
+                                Type::Struct(name, fields)
+                            }
+                        }
+                        other => other,
+                    };
+                    let ty_str = format!("{:?}", resolved_ty);
                     
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
                     map.insert("schema".to_string(), Value::Str(ty_str));
+                    map.insert("context".to_string(), Value::List(process.runtime.context.clone()));
                     
                     process.frames[frame_idx].env = process.runtime.env.clone();
                     let state = VmState {
+                        pid: process.pid,
                         frames: process.frames.clone(),
                         stack: process.stack.clone(),
                         runtime: process.runtime.clone(),
+                        mailbox: process.mailbox.clone(),
+                        scheduler: self.scheduler.clone(),
+                        next_pid: self.next_pid,
                     };
                     return VmResult::Suspended {
                         tool_name: "llm_infer".to_string(),
                         arg: Value::Map(map),
                         continuation: state,
                     };
+                }
+                Instr::DefineStruct(name, fields) => {
+                    process.runtime.register_struct(name, fields);
                 }
                 Instr::PushNull => process.stack.push(Value::Null),
                 Instr::PushTrue => process.stack.push(Value::Bool(true)),
@@ -456,9 +497,13 @@ impl Vm {
                         Value::Str(name) => {
                             process.frames[frame_idx].env = process.runtime.env.clone();
                             let state = VmState {
+                                pid: process.pid,
                                 frames: process.frames.clone(),
                                 stack: process.stack.clone(),
                                 runtime: process.runtime.clone(),
+                                mailbox: process.mailbox.clone(),
+                                scheduler: self.scheduler.clone(),
+                                next_pid: self.next_pid,
                             };
                             return VmResult::Suspended {
                                 tool_name: name,
@@ -548,9 +593,13 @@ impl Vm {
                         Value::Str(name) => {
                             process.frames[frame_idx].env = process.runtime.env.clone();
                             let state = VmState {
+                                pid: process.pid,
                                 frames: process.frames.clone(),
                                 stack: process.stack.clone(),
                                 runtime: process.runtime.clone(),
+                                mailbox: process.mailbox.clone(),
+                                scheduler: self.scheduler.clone(),
+                                next_pid: self.next_pid,
                             };
                             return VmResult::Suspended {
                                 tool_name: name,
@@ -702,6 +751,16 @@ impl Vm {
                             let k = match idx { Value::Str(s) => s, Value::Num(n) => n.to_string(), _ => "".to_string() };
                             m.get(&k).cloned().unwrap_or(Value::Null)
                         },
+                        Value::Uncertain(inner, _) => {
+                             // Auto-unwrap uncertain for property access
+                             match inner.as_ref() {
+                                 Value::Map(m) | Value::Struct(_, m) => {
+                                     let k = match idx { Value::Str(s) => s, Value::Num(n) => n.to_string(), _ => "".to_string() };
+                                     m.get(&k).cloned().unwrap_or(Value::Null)
+                                 },
+                                 _ => Value::Null
+                             }
+                        },
                         _ => Value::Null,
                     };
                     process.stack.push(res);
@@ -715,7 +774,15 @@ impl Vm {
                     let p_val = process.stack.pop().unwrap_or(Value::Null);
                     let path = match p_val { Value::Str(s) => s, _ => "".to_string() };
                     process.frames[frame_idx].env = process.runtime.env.clone();
-                    let state = VmState { frames: process.frames.clone(), stack: process.stack.clone(), runtime: process.runtime.clone() };
+                    let state = VmState {
+                        pid: process.pid,
+                        frames: process.frames.clone(),
+                        stack: process.stack.clone(),
+                        runtime: process.runtime.clone(),
+                        mailbox: process.mailbox.clone(),
+                        scheduler: self.scheduler.clone(),
+                        next_pid: self.next_pid,
+                    };
                     return VmResult::Suspended { tool_name: "sys_import".to_string(), arg: Value::Str(path), continuation: state };
                 }
                 Instr::CheckType(ref ty) => {

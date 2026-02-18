@@ -1,4 +1,4 @@
-# Error Handling (v1)
+# Error Handling (Alpha + Planned)
 
 **Status:** Draft.
 

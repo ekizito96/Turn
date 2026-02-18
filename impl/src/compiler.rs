@@ -148,10 +148,11 @@ impl Compiler {
                 self.compile_expr(expr);
                 self.emit(Instr::Pop);
             }
-            Stmt::StructDef { .. } => {
-                // Struct definition is purely static info for now. No runtime effect.
-                // Or we could register it in runtime if we want runtime type tags.
-                // For now, no-op in bytecode.
+            Stmt::Suspend { .. } => {
+                self.emit(Instr::Suspend);
+            }
+            Stmt::StructDef { name, fields, .. } => {
+                self.emit(Instr::DefineStruct(name.clone(), fields.clone()));
             }
             Stmt::ImplDef { methods, .. } => {
                 // Compile methods so they exist as functions in the scope

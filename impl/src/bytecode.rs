@@ -39,6 +39,9 @@ pub enum Instr {
     Not,
     Similarity, // ~>
     
+    // Structs
+    DefineStruct(String, indexmap::IndexMap<String, Type>),
+    
     // Control
     Pop, // discard top of stack
 
@@ -58,6 +61,7 @@ pub enum Instr {
     Receive,
     Confidence, // NEW
     Infer(Type), // NEW
+    Suspend, // NEW
     
     // Control flow
     Jump(u32),

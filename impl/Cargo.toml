@@ -1,8 +1,8 @@
 [package]
 name = "turn"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-description = "Object-oriented programming language for agentic software"
+description = "Systems language for agentic computation"
 authors = ["Muyukani Ephraim Kizito <muyukaniephraim@yahoo.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/ekizito96/Turn"

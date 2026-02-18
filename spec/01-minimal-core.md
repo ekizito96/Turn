@@ -1,6 +1,8 @@
-# Turn minimal core (v1)
+# Turn minimal core (v0.4 Alpha)
 
-**Status:** Locked for v1. Turn is **object-oriented**: the program defines the behavior of an **agent** (one instance in v1). The agent has a **context** object (bounded buffer) and a **memory** object (key-value store), and it executes **turns** and **calls tools**. This document defines the smallest set of primitives we implement first. Everything else is deferred to v1.1 or stdlib. The choice is justified: each primitive is necessary and not derivable from the others—see [00-design-mandate.md](00-design-mandate.md).
+**Status:** Public alpha spec. This document defines the smallest set of primitives Turn must implement to support durable, long-running agentic computation. The program defines the behavior of a single **Turn process** (one instance in v0.4). That process has runtime-managed **context** and **memory**, and it executes in bounded **control cycles** with explicit **effect boundaries**.
+
+The choice of primitives is justified: each primitive is necessary and not derivable from the others—see [00-design-mandate.md](00-design-mandate.md).
 
 ---
 
@@ -8,27 +10,32 @@
 
 | Primitive | Operations | Rationale |
 |-----------|------------|-----------|
-| **Turn** | One form: `turn { body }` | The unit of execution. Body is a block of statements; at the end we have either a value or a suspension (tool call). |
-| **Context** | `context.append(expr)` ; bound enforced by runtime (max size N) | The agent's context **object**; append is the only mutator in v1. Bounded size is a runtime invariant; no `rewrite` or `window` in v1. |
-| **Memory** | `remember(key, value)` ; `recall(key)` | The agent's memory **object** (key-value store). No `forget` or `summarize` in v1—we can add when needed. |
-| **Tool** | `call(tool_name, args)` | Invocation on the agent's tool registry. Execution suspends; runtime runs handler; execution resumes with result. |
+| **Turn (closure)** | `turn { ... }` ; `turn(args...) -> Type { ... }` | First-class unit of behavior for spawning and composition. |
+| **Context (managed)** | `context.append(expr)` | Bounded working context managed by the runtime. Mutation is explicit; policies/higher-level strategies are deferred. |
+| **Memory (managed)** | `remember(key, value)` ; `recall(key)` | Persistent process memory as a primitive store. Retrieval is explicit; higher-level structures are libraries. |
+| **Effect boundary** | `call(tool_name, arg)` | External effects suspend execution and resume with a value. Enables deterministic replay given the same effect results. |
+| **Native inference** | `infer Type { prompt_expr; }` | Probabilistic effect returning a typed value. Type validation is part of the runtime contract (cognitive type safety). |
+| **Explicit checkpoint** | `suspend;` | Forces a durable checkpoint boundary (orthogonal persistence). |
+| **Concurrency (actor)** | `spawn turn() { ... };` | Spawn concurrent processes with isolated state; communication primitives are part of the runtime model. |
 
 **Expressions and statements:** Enough to write real agents without friction.
 
 - **Literals:** number, string, `true`, `false`, `null`, `[ list ]`, `{ map }`.
 - **Variables:** identifier (bound by `let`).
-- **Operators:** `+` (concatenation/addition), `==`, `!=` (equality), `and`, `or` (logical, short-circuit).
+- **Operators:** `+` (concatenation/addition), `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `!`.
 - **Indexing:** `expr[index]` for lists and maps.
+- **Member access:** `expr.field` for structs/maps (runtime-defined for each value kind).
 - **Conditional:** `if expr block else block`.
 - **Loop:** `while expr block`.
 - **Block:** `{ stmt... }` with `let`, `return`, etc.
 - **Let:** `let id = expr;` (local binding).
+- **Structs:** `struct Name { field: Type, ... };` for cognitive type safety and schema definitions.
 
 `recall(key)` returns `null` when key is missing.
 
-## 6. Standard Library (v1)
+## 2. Built-in tools (alpha)
 
-The runtime provides the following built-in tools:
+Turn includes a default tool registry for bootstrap and testing. These are **tools**, not language primitives.
 
 - `echo(val)`: Returns the value.
 - `sleep(seconds)`: Pauses execution.
@@ -38,23 +45,21 @@ The runtime provides the following built-in tools:
 - `json_parse(str)`: Parses JSON string to Value.
 - `json_stringify(val)`: Converts Value to JSON string.
 
-
 ---
 
-## 2. What is deferred (not in v1)
+## 3. What is deferred (not in the alpha minimal core)
 
 | Concept | Deferred to | Note |
 |---------|-------------|------|
-| **Goal** | v1.1 or stdlib | No `goal` or `mission` primitive yet. Empirical analysis shows this is critical (see `ContextManager` priority stack), so v1.1 will likely elevate it. |
-| **Structured Context** | v1.1 | v1 has flat context. Empirical analysis shows real agents need "pinned" vs "sliding" context. v1.1 may add `context.pin(val)`. |
-| **Context rewrite / window** | v1.1 or stdlib | Only append + runtime-bound. No `context.rewrite`, `context.window`. |
-| **Memory forget / summarize** | v1.1 or stdlib | Only remember + recall. |
-| **Modules** | v1.1 | Single program only. No import/export. |
-| **Types** | v1 untyped | No type annotations in syntax. Type-friendly design documented in [05-types-and-errors.md](05-types-and-errors.md). |
+| **Structured Context** | Next | Alpha has flat context. Priority stacks and structured rendering are planned. |
+| **Context rewrite / window** | Next | Only append + runtime bound in core. No `context.rewrite`, `context.window`. |
+| **Memory forget / summarize** | Next | Only remember + recall in core. |
+| **Supervisor trees** | Next | `link`/`monitor` and restart strategies. |
+| **Networking / remote PIDs** | Future | Distributed messaging is outside alpha minimal core. |
 
 ---
 
-## 3. Syntax surface (conventional, not S-expr)
+## 4. Syntax surface (conventional, not S-expr)
 
 We choose **conventional keyword/block syntax** (like Python/JS) for readability and one obvious way:
 
@@ -63,18 +68,18 @@ We choose **conventional keyword/block syntax** (like Python/JS) for readability
 - `remember(key, value);` and `recall(key)` (statement and expression).
 - `call(tool_name, args);` for tool call (statement; we get result when resumed).
 
-So: **no S-expressions** in v1. The grammar (see [02-grammar.md](02-grammar.md)) is statement- and expression-based with keywords and blocks.
+So: **no S-expressions** in the alpha core. The grammar (see [02-grammar.md](02-grammar.md)) is statement- and expression-based with keywords and blocks.
 
 ---
 
-## 4. Single agent (v1)
+## 5. Single process (alpha)
 
-- One **program** = the behavior of **one agent instance**. The program is a sequence of statements (including turns); each turn is one unit of execution for that agent.
-- The agent has **one context object** and **one memory object** (provided by the runtime). No modules; no multi-agent in v1.
-- The agent has a **tool registry** (provided by the runtime; default: at least one built-in tool, e.g. `echo`).
+- One **program** = the behavior of **one Turn process**. The program is a sequence of statements (including `turn` closures and spawned turns).
+- The process has runtime-managed **context** and **memory** objects.
+- The process has a **tool registry** (provided by the runtime; default: at least one built-in tool, e.g. `echo`).
 
 ---
 
-## 5. Summary
+## 6. Summary
 
-**v1 minimal core (OOP):** One agent with turn + context object (append, bounded) + memory object (remember, recall) + call(tool, args), with expressions (literals, `+` `==` `!=` `and` `or`), `if`, `while`, `let`, `return`. No goal, no context rewrite/window, no memory forget/summarize, no modules, no types in syntax. One agent instance, one context, one memory, one tool registry.
+**Alpha minimal core:** One process with turn closures, managed context (`context.append`), managed memory (`remember`/`recall`), explicit effect boundaries (`call`, `infer`, `suspend`), and actor-style concurrency (`spawn`). Everything else (structured context, richer policies, supervision, distribution) is layered on later.

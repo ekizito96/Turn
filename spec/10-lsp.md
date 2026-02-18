@@ -1,4 +1,4 @@
-# Turn Language Server Protocol (LSP) (v1)
+# Turn Language Server Protocol (LSP) (Planned)
 
 **Status:** Draft.
 
@@ -23,7 +23,7 @@ This simplifies distribution. The VSCode extension simply spawns `turn lsp` and 
 *   **Transport:** Stdio (Standard Input/Output)
 *   **Library:** `tower-lsp` (Rust)
 
-## 3. Features (v1)
+## 3. Features (planned)
 
 ### 3.1 Diagnostics (Linting)
 *   **Trigger:** `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`.

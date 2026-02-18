@@ -12,6 +12,7 @@ pub enum Token {
     Vec,
     Turn,
     Let,
+    Suspend, // NEW
     Confidence, // NEW
     Use,
     Context,
@@ -105,6 +106,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
+    ("suspend", Token::Suspend), // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
     ("try", Token::Try),

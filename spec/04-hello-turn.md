@@ -1,6 +1,6 @@
-# Hello Turn — minimal program (v1)
+# Hello Turn — minimal program (v0.4 Alpha)
 
-**Status:** Reference program for readability and spec validation. Turn is object-oriented: this program is the behavior of **one agent** using its context object, memory object, and tool call. Uses only the v1 minimal core (grammar [02-grammar.md](02-grammar.md), runtime [03-runtime-model.md](03-runtime-model.md)).
+**Status:** Reference program for readability and spec validation. This program is the behavior of **one Turn process** using managed context, managed memory, and an effect boundary (`call`). Uses the minimal core (grammar [02-grammar.md](02-grammar.md), runtime [03-runtime-model.md](03-runtime-model.md)).
 
 ---
 
@@ -75,5 +75,5 @@ Turn result: `"Hello"`.
 
 ## 5. Purpose
 
-- **Readability:** Minimal program that shows one agent doing one turn: using its memory, context, and tools.
-- **Spec target:** Implementations and tests can use this program to validate parsing, runtime (agent state, suspension/resumption), and final state.
+- **Readability:** Minimal program that shows one process doing one turn: using its memory, context, and tools.
+- **Spec target:** Implementations and tests can use this program to validate parsing, runtime state, suspension/resumption, and final state.

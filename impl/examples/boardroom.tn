@@ -1,0 +1,55 @@
+// examples/boardroom.tn
+// The Autonomous Committee: 3 Agents debating a topic in parallel.
+// Demonstrates: Concurrency (spawn), Context, and Native Intelligence (infer).
+
+let time = use "std/time";
+
+// 1. Define the Topic
+let topic = "Should we rewrite our backend in Rust?";
+call("echo", "📢 BOARDROOM SESSION STARTED: " + topic);
+
+// 2. Define the Agent Logic
+let run_debater = turn(role: Str, bias: Str) -> Void {
+    call("echo", "👤 " + role + " is thinking...");
+    
+    // Simulate thinking time to show concurrency
+    time.sleep(1.0);
+    
+    // Private context for this agent (Native Intelligence Memory)
+    context.append("You are the " + role + " of a tech company.");
+    context.append("Topic: " + topic);
+    context.append("Your bias: " + bias);
+    context.append("Provide a short, 1-sentence opinion.");
+
+    let opinion = infer Str { "What is your opinion?"; };
+    
+    call("echo", "💬 " + role + " says: " + opinion);
+    
+    return null;
+};
+
+// 3. Spawn the Committee (Parallel Execution)
+// We wrap calls in closures passed to spawn
+spawn turn() { call(run_debater, ["CTO", "Loves performance and safety. Pro-Rust."]); };
+spawn turn() { call(run_debater, ["Product Manager", "Cares about shipping speed. Anti-rewrite."]); };
+spawn turn() { call(run_debater, ["Junior Dev", "Just wants to learn cool stuff. Neutral but excited."]); };
+
+// 4. Give spawned debaters time to finish
+call("echo", "⏳ Chairperson is waiting for expert takes...");
+time.sleep(6.0);
+
+// 5. Final Decision
+call("echo", "⚖️  ALL VOTES IN. DECIDING...");
+
+// Build context for CEO (known role biases)
+context.append("You are the CEO deciding on this topic: " + topic);
+context.append("CTO perspective: strongly pro-Rust for safety and performance.");
+context.append("Product Manager perspective: cautious due to delivery speed and roadmap risk.");
+context.append("Junior Dev perspective: excited by learning and maintainability opportunities.");
+
+let verdict = infer Str { "Summarize the consensus and make a final decision."; };
+
+call("echo", "---------------------------------------------------");
+call("echo", "🏆 FINAL VERDICT: " + verdict);
+call("echo", "---------------------------------------------------");
+return verdict;

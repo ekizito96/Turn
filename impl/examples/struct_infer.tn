@@ -1,0 +1,27 @@
+// examples/struct_infer.tn
+// Demonstrates Cognitive Type Safety: inferring a structured type.
+
+// 1. Define the shape of thought
+struct Sentiment {
+    score: Num,
+    reasoning: Str
+};
+
+call("echo", "Analyzing sentiment...");
+
+// 2. Compile-time Intelligence (Runtime schema generation)
+let result = infer Sentiment { 
+    "I love this new language! It makes building agents so much easier."; 
+};
+
+// 3. Type-safe access
+call("echo", "Score: " + result.score);
+call("echo", "Reasoning: " + result.reasoning);
+
+if result.score > 0.8 {
+    call("echo", "Verdict: POSITIVE");
+} else {
+    call("echo", "Verdict: NEGATIVE/NEUTRAL");
+}
+
+return result;

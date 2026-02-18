@@ -1,6 +1,6 @@
-# Turn grammar and syntax design (v1)
+# Turn grammar and syntax design (v0.4 Alpha)
 
-**Status:** Locked for v1. Turn is object-oriented: the program is the behavior of one agent; `context` and `memory` are that agent's objects. This document gives the BNF, lexer rules, precedence, design rationale, and style. The syntax is designed for **power and delight**—enough to write real agents without friction, with a clean, consistent surface. See [01-minimal-core.md](01-minimal-core.md) for primitives and [03-runtime-model.md](03-runtime-model.md) for runtime.
+**Status:** Public alpha spec. Turn is process-centric: the program defines the behavior of a Turn process with runtime-managed `context` and `memory`. This document gives the BNF, lexer rules, precedence, design rationale, and style for the alpha surface syntax. See [01-minimal-core.md](01-minimal-core.md) for primitives and [03-runtime-model.md](03-runtime-model.md) for runtime.
 
 ---
 
@@ -9,9 +9,14 @@
 ```
 Program  := Stmt*
 
-Stmt     := Turn | LetStmt | ContextAppend | RememberStmt | CallStmt | ReturnStmt | IfStmt | WhileStmt | ExprStmt
+Stmt     := StructDef | UseStmt | SpawnStmt | SuspendStmt | TurnStmt | LetStmt | ContextAppend | RememberStmt | CallStmt | ReturnStmt | IfStmt | WhileStmt | ExprStmt
 
-Turn         := "turn" Block
+StructDef    := "struct" Id "{" FieldDef* "}" ";"
+FieldDef     := Id ":" Type (",")?
+UseStmt      := "let" Id "=" "use" String ";"
+SpawnStmt    := "spawn" TurnExpr ";"
+SuspendStmt  := "suspend" ";"
+TurnStmt     := "turn" Block
 LetStmt      := "let" Id "=" Expr ";"
 ContextAppend:= "context" "." "append" "(" Expr ")" ";"
 RememberStmt := "remember" "(" Expr "," Expr ")" ";"
@@ -35,26 +40,40 @@ Expr     := OrExpr
 
 OrExpr   := AndExpr ( "or" AndExpr )*
 AndExpr  := EqExpr ( "and" EqExpr )*
-EqExpr   := AddExpr ( ( "==" | "!=" ) AddExpr )*
-AddExpr  := Primary ( "+" Primary )*
+EqExpr   := CmpExpr ( ( "==" | "!=" ) CmpExpr )*
+CmpExpr  := AddExpr ( ( "<" | ">" | "<=" | ">=" ) AddExpr )*
+AddExpr  := Unary ( "+" Unary )*
+Unary    := ( "!" )* Postfix
 
-Primary  := Literal | Id | RecallExpr | CallExpr | CallToolExpr | "(" Expr ")"
+Postfix  := Primary ( Index | Member | CallArgs )*
+Index    := "[" Expr "]"
+Member   := "." Id
+CallArgs := "(" (Expr ("," Expr)*)? ")"
+
+Primary      := Literal
+            | Id
+            | RecallExpr
+            | InferExpr
+            | TurnExpr
+            | "(" Expr ")"
 
 RecallExpr   := "recall" "(" Expr ")"
-CallExpr     := Id "(" Expr* ")"
-CallToolExpr := "call" "(" Expr "," Expr ")"
+InferExpr    := "infer" Type "{" Expr ";" "}"
+TurnExpr     := "turn" "(" ParamList? ")" ("->" Type)? Block
+ParamList    := Param ("," Param)*
+Param        := Id ":" Type
 Literal      := Num | String | "true" | "false" | "null"
 Id           := identifier
 ```
 
-**Precedence (highest to lowest):** `+` > `==` `!=` > `and` > `or`
+**Precedence (highest to lowest):** postfix > `!` > `+` > comparisons > `==` `!=` > `and` > `or`
 
 ---
 
 ## 3. Terminals
 
-- **Keywords:** `turn`, `let`, `context`, `append`, `remember`, `recall`, `call`, `return`, `if`, `else`, `while`, `and`, `or`, `true`, `false`, `null`.
-- **Operators:** `+`, `==`, `!=`.
+- **Keywords:** `struct`, `use`, `turn`, `spawn`, `suspend`, `infer`, `let`, `context`, `append`, `remember`, `recall`, `call`, `return`, `if`, `else`, `while`, `and`, `or`, `true`, `false`, `null`.
+- **Operators:** `+`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `!`, `->`, `:`.
 - **identifier:** non-keyword, letter or `_` then alphanumeric or `_`.
 - **Num:** integer or decimal number.
 - **String:** `"..."` with escapes (e.g. `\"`, `\n`, `\t`).
@@ -68,7 +87,7 @@ The lexer produces a stream of tokens from source text. Rules:
 
 1. **Whitespace:** Spaces, tabs, and newlines separate tokens and are otherwise ignored. No significant newlines (indentation is for style only).
 2. **Keywords:** Reserved words above; matched as whole identifiers. `turn` is one token, not `t` + `urn`.
-3. **Operators:** `+`, `==`, `!=`. For `==` and `!=`, match two characters as one token (so `==` is not `=` + `=`).
+3. **Operators:** `+`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `!`, `->`, `:`. Multi-character operators must be matched as a single token.
 4. **identifier:** Longest match: start with letter or `_`, then zero or more letters, digits, or `_`. Must not be a keyword.
 5. **Num:** Integer (`0`, `42`, `100`) or decimal (`3.14`). Longest match.
 6. **String:** Open with `"`; consume until unescaped `"`. Escapes: `\\`, `\"`, `\n`, `\t`. No newline in string unless escaped.
@@ -89,7 +108,7 @@ Token order: keywords before identifier; operators before punctuation. Longest m
 
 **`turn { body }`.** Domain-specific keyword; block delimiter `{ }` is sufficient. No extra parentheses.
 
-**`context.append(expr);`** OOP: the agent's context object; dot notation. Rejected `context += expr` (suggests unbounded).
+**`context.append(expr);`** The process's managed context object; dot notation. Rejected `context += expr` (suggests unbounded).
 
 **`remember(key, value);` and `recall(key)`.** Verb-style; clear. `recall` returns `null` when key is missing (see [05-types-and-errors.md](05-types-and-errors.md)).
 

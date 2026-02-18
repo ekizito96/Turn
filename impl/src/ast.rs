@@ -84,6 +84,9 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
+    Suspend {
+        span: Span,
+    },
     TryCatch {
         try_block: Block,
         catch_var: String,

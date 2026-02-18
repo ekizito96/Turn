@@ -269,6 +269,11 @@ impl Parser {
                 let body = self.parse_block()?;
                 Ok(Stmt::While { cond, body, span })
             }
+            Some(Token::Suspend) => {
+                self.next();
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::Suspend { span })
+            }
             Some(Token::Try) => {
                 self.next();
                 let try_block = self.parse_block()?;

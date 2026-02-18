@@ -14,7 +14,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
 #[command(name = "turn")]
-#[command(about = "Turn - object-oriented programming language for agentic software")]
+#[command(about = "Turn - systems language for agentic computation")]
 #[command(version = VERSION)]
 struct Cli {
     #[command(subcommand)]
