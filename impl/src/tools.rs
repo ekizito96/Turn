@@ -11,6 +11,7 @@ use std::fs;
 
 fn call_openai_chat(
     api_key: &str,
+    base_url: &str,
     model: &str,
     messages: &serde_json::Value
 ) -> Result<String, String> {
@@ -20,7 +21,9 @@ fn call_openai_chat(
         "messages": messages
     });
 
-    match client.post("https://api.openai.com/v1/chat/completions")
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    match client.post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&payload)
         .send() {
@@ -31,16 +34,16 @@ fn call_openai_chat(
                         if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
                             Ok(content.to_string())
                         } else {
-                            Err("Invalid response format from OpenAI".to_string())
+                            Err("Invalid response format from OpenAI-compatible API".to_string())
                         }
                     },
-                    Err(e) => Err(format!("Failed to parse OpenAI response: {}", e)),
+                    Err(e) => Err(format!("Failed to parse response: {}", e)),
                 }
             } else {
-                Err(format!("OpenAI API error: {}", resp.status()))
+                Err(format!("API error: {}", resp.status()))
             }
         },
-        Err(e) => Err(format!("OpenAI request failed: {}", e)),
+        Err(e) => Err(format!("Request failed: {}", e)),
     }
 }
 
@@ -51,7 +54,6 @@ fn call_anthropic_chat(
 ) -> Result<String, String> {
     let client = reqwest::blocking::Client::new();
     
-    // Anthropic requires system prompt to be separate parameter or filtered.
     let mut system_prompt = String::new();
     let mut anthropic_msgs = Vec::new();
     
@@ -91,7 +93,6 @@ fn call_anthropic_chat(
             if resp.status().is_success() {
                 match resp.json::<serde_json::Value>() {
                     Ok(json) => {
-                        // Response format: { content: [{ text: "..." }] }
                         if let Some(content_arr) = json["content"].as_array() {
                             if let Some(text) = content_arr.first().and_then(|item| item["text"].as_str()) {
                                 Ok(text.to_string())
@@ -114,13 +115,84 @@ fn call_anthropic_chat(
     }
 }
 
+fn call_google_chat(
+    api_key: &str,
+    model: &str,
+    messages: &serde_json::Value
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::new();
+    
+    // Google Gemini API: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+    
+    let mut contents = Vec::new();
+    let mut system_instruction = None;
+
+    if let Some(arr) = messages.as_array() {
+        for msg in arr {
+            let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            let text = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            
+            if role == "system" {
+                // Gemini supports system_instruction at top level
+                system_instruction = Some(serde_json::json!({
+                    "parts": [{ "text": text }]
+                }));
+            } else {
+                // Map roles: user -> user, assistant -> model
+                let gemini_role = if role == "assistant" { "model" } else { "user" };
+                contents.push(serde_json::json!({
+                    "role": gemini_role,
+                    "parts": [{ "text": text }]
+                }));
+            }
+        }
+    }
+
+    let mut payload = serde_json::json!({
+        "contents": contents
+    });
+    
+    if let Some(sys) = system_instruction {
+        payload["system_instruction"] = sys;
+    }
+
+    let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, api_key);
+
+    match client.post(&url)
+        .json(&payload)
+        .send() {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        // Response: { candidates: [ { content: { parts: [ { text: "..." } ] } } ] }
+                        if let Some(candidates) = json["candidates"].as_array() {
+                            if let Some(first) = candidates.first() {
+                                if let Some(parts) = first["content"]["parts"].as_array() {
+                                    if let Some(text) = parts.first().and_then(|p| p["text"].as_str()) {
+                                        return Ok(text.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        Err("Invalid response format from Gemini".to_string())
+                    },
+                    Err(e) => Err(format!("Failed to parse Gemini response: {}", e)),
+                }
+            } else {
+                Err(format!("Gemini API error: {}", resp.status()))
+            }
+        },
+        Err(e) => Err(format!("Gemini request failed: {}", e)),
+    }
+}
+
 fn call_ollama_chat(
     model: &str,
     messages: &serde_json::Value
 ) -> Result<String, String> {
     let client = reqwest::blocking::Client::new();
     
-    // Ollama URL can be configured via env var OLLAMA_HOST, defaults to localhost:11434
     let host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let url = format!("{}/api/chat", host);
 
@@ -157,29 +229,45 @@ fn call_llm_dispatch(
     model_hint: Option<&str>,
     messages: &serde_json::Value
 ) -> Result<String, String> {
-    // 1. Determine Provider
     let provider = env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string()).to_lowercase();
-    
-    // 2. Determine Model (Command arg > Env var > Default)
     let env_model = env::var("TURN_LLM_MODEL").ok();
     let model = model_hint.or(env_model.as_deref());
 
     match provider.as_str() {
         "anthropic" => {
-            let api_key = env::var("ANTHROPIC_API_KEY")
-                .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
+            let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
             let final_model = model.unwrap_or("claude-3-opus-20240229");
             call_anthropic_chat(&api_key, final_model, messages)
+        },
+        "google" | "gemini" => {
+            let api_key = env::var("GEMINI_API_KEY").or_else(|_| env::var("GOOGLE_API_KEY"))
+                .map_err(|_| "GEMINI_API_KEY or GOOGLE_API_KEY not set".to_string())?;
+            let final_model = model.unwrap_or("gemini-1.5-pro");
+            call_google_chat(&api_key, final_model, messages)
+        },
+        "grok" => {
+            let api_key = env::var("GROK_API_KEY").or_else(|_| env::var("XAI_API_KEY"))
+                .map_err(|_| "GROK_API_KEY or XAI_API_KEY not set".to_string())?;
+            let final_model = model.unwrap_or("grok-1");
+            call_openai_chat(&api_key, "https://api.x.ai/v1", final_model, messages)
+        },
+        "vllm" | "openrouter" | "deepseek" | "openai-generic" => {
+            let api_key = env::var("LLM_API_KEY").or_else(|_| env::var("OPENAI_API_KEY"))
+                .map_err(|_| "LLM_API_KEY or OPENAI_API_KEY not set".to_string())?;
+            
+            // Default to local vLLM if no base url
+            let base_url = env::var("TURN_LLM_API_BASE").unwrap_or_else(|_| "http://localhost:8000/v1".to_string());
+            let final_model = model.unwrap_or("default");
+            call_openai_chat(&api_key, &base_url, final_model, messages)
         },
         "ollama" => {
             let final_model = model.unwrap_or("llama3");
             call_ollama_chat(final_model, messages)
         },
         "openai" | _ => {
-            let api_key = env::var("OPENAI_API_KEY")
-                .map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+            let api_key = env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
             let final_model = model.unwrap_or("gpt-4o-mini");
-            call_openai_chat(&api_key, final_model, messages)
+            call_openai_chat(&api_key, "https://api.openai.com/v1", final_model, messages)
         }
     }
 }
@@ -365,9 +453,6 @@ impl ToolRegistry {
         tools.insert(
             "llm_generate".to_string(),
             Box::new(|arg| {
-                // If API Keys are missing, this might fail unless Ollama is used.
-                // call_llm_dispatch checks keys per provider.
-
                 let (messages, model_opt) = match arg {
                     Value::Map(m) => {
                         let msgs = m.get("messages").cloned().unwrap_or(Value::List(vec![]));
@@ -423,9 +508,6 @@ impl ToolRegistry {
                      let schema = m.get("schema").unwrap_or(&Value::Null);
                      let prompt = m.get("prompt").unwrap_or(&Value::Null);
                      
-                     // Try to dispatch. If keys missing, fallback to mock.
-                     // call_llm_dispatch returns Err if key missing.
-                     
                      let system_msg = serde_json::json!({
                          "role": "system",
                          "content": "You are a Turn Language Runtime. The user wants a value matching the provided schema. Output ONLY JSON object: { \"value\": <value>, \"confidence\": <0.0-1.0> }."
@@ -440,7 +522,6 @@ impl ToolRegistry {
                      
                      match call_llm_dispatch(None, &messages) {
                          Ok(content) => {
-                             // Clean markdown
                              let clean = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
                              match serde_json::from_str::<serde_json::Value>(clean) {
                                  Ok(json) => {
@@ -453,8 +534,7 @@ impl ToolRegistry {
                              }
                          },
                          Err(_) => {
-                             // Fallback to Mock if Dispatch failed (e.g. no key)
-                             // This ensures tests pass without API keys
+                             // Fallback to Mock
                              match schema {
                                  Value::Str(s) if s.contains("Num") => {
                                      Ok(Value::Uncertain(Box::new(Value::Num(42.0)), 0.85))
