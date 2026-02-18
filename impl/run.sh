@@ -41,11 +41,11 @@ case "${1:-}" in
     cargo build --release
     ;;
   hello)
-    cargo run --quiet -- run tests/hello_turn.turn
+    cargo run --quiet -- run tests/hello_turn.tn
     ;;
   examples)
     echo "Running examples..."
-    for f in examples/*.turn; do
+    for f in examples/*.tn; do
       echo "--- $f ---"
       cargo run --quiet -- run "$f" 2>/dev/null || true
     done
@@ -59,11 +59,11 @@ case "${1:-}" in
     echo ""
     echo "  test         - run all tests"
     echo "  build        - build release binary"
-    echo "  hello        - run hello_turn.turn (prints 'Hello')"
+    echo "  hello        - run hello_turn.tn (prints 'Hello')"
     echo "  examples     - run all examples"
     echo "  install-rust - install Rust (if cargo not found)"
     echo ""
-    echo "Or: cargo run -- run <file.turn>"
+    echo "Or: cargo run -- run <file.tn>"
     exit 1
     ;;
 esac
