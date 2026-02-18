@@ -231,6 +231,35 @@ impl Compiler {
                 self.patch_jump(jump_over, after_addr);
                 self.emit(Instr::MakeTurn(start_addr));
             }
+            Expr::Infer { target_ty, body, .. } => {
+                // Compile body as an expression (leave result on stack)
+                let len = body.stmts.len();
+                if len == 0 {
+                    self.emit(Instr::PushNull);
+                } else {
+                    for (i, stmt) in body.stmts.iter().enumerate() {
+                        if i == len - 1 {
+                            match stmt {
+                                Stmt::ExprStmt { expr, .. } => {
+                                    self.compile_expr(expr);
+                                    // Do NOT pop
+                                }
+                                _ => {
+                                    self.compile_stmt(stmt);
+                                    // Result is Null if stmt is not an expression
+                                    // But wait, if stmt was `Let`, stack is empty (Let pops).
+                                    // So we must push Null to satisfy `Infer` instruction expectation.
+                                    // But `compile_stmt` keeps stack balanced (0 net change usually).
+                                    self.emit(Instr::PushNull); 
+                                }
+                            }
+                        } else {
+                            self.compile_stmt(stmt);
+                        }
+                    }
+                }
+                self.emit(Instr::Infer(target_ty.clone()));
+            }
             Expr::Index { target, index, .. } => {
                 self.compile_expr(target);
                 self.compile_expr(index);

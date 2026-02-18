@@ -427,6 +427,16 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::Infer) => {
+                self.next();
+                let target_ty = self.parse_type()?;
+                let body = self.parse_block()?;
+                Ok(Expr::Infer {
+                    target_ty,
+                    body,
+                    span,
+                })
+            }
             Some(Token::Send) => {
                 self.next();
                 // send <pid>, <msg>

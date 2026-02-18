@@ -25,6 +25,7 @@ pub enum Token {
     Impl,
     Type, // 'type' keyword for aliases
     Return,
+    Infer, // NEW
     Struct,
     If,
     Else,
@@ -113,6 +114,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("recall", Token::Recall),
     ("call", Token::Call),
     ("return", Token::Return),
+    ("infer", Token::Infer), // NEW
     ("struct", Token::Struct),
     ("impl", Token::Impl),
     ("type", Token::Type),
