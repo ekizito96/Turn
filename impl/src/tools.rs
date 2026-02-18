@@ -1,8 +1,9 @@
 //! Tool registry and handlers. Per spec: at least `echo` built-in.
 
 use crate::value::Value;
+use regex::Regex;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::env;
 use std::fs;
@@ -497,6 +498,69 @@ impl ToolRegistry {
                     Ok(s) => Ok(Value::Str(s)),
                     Err(e) => Err(format!("JSON stringify error: {}", e)),
                 }
+            }) as ToolHandler,
+        );
+
+        // time_now
+        tools.insert(
+            "time_now".to_string(),
+            Box::new(|_arg| {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| format!("System time error: {}", e))?;
+                Ok(Value::Num(now.as_secs_f64()))
+            }) as ToolHandler,
+        );
+
+        // regex_match
+        tools.insert(
+            "regex_match".to_string(),
+            Box::new(|arg| {
+                let (pattern, text) = match arg {
+                    Value::Map(m) => {
+                        let pattern = match m.get("pattern") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'pattern' in argument map".to_string()),
+                        };
+                        let text = match m.get("text") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'text' in argument map".to_string()),
+                        };
+                        (pattern, text)
+                    }
+                    _ => return Err("Argument must be a map {pattern, text}".to_string()),
+                };
+
+                let re = Regex::new(&pattern).map_err(|e| format!("Invalid regex pattern: {}", e))?;
+                Ok(Value::Bool(re.is_match(&text)))
+            }) as ToolHandler,
+        );
+
+        // regex_replace
+        tools.insert(
+            "regex_replace".to_string(),
+            Box::new(|arg| {
+                let (pattern, text, replacement) = match arg {
+                    Value::Map(m) => {
+                        let pattern = match m.get("pattern") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'pattern' in argument map".to_string()),
+                        };
+                        let text = match m.get("text") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'text' in argument map".to_string()),
+                        };
+                        let replacement = match m.get("replacement") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'replacement' in argument map".to_string()),
+                        };
+                        (pattern, text, replacement)
+                    }
+                    _ => return Err("Argument must be a map {pattern, text, replacement}".to_string()),
+                };
+
+                let re = Regex::new(&pattern).map_err(|e| format!("Invalid regex pattern: {}", e))?;
+                Ok(Value::Str(re.replace_all(&text, replacement.as_str()).to_string()))
             }) as ToolHandler,
         );
 

@@ -21,6 +21,7 @@ pub enum Value {
         code: Arc<Vec<Instr>>,
         ip: usize,
         env: HashMap<String, Value>,
+        params: Vec<String>,
     },
     Pid(u64), // Process ID
     Vec(Vec<f64>),

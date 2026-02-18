@@ -229,7 +229,8 @@ impl Compiler {
                 }
                 let after_addr = self.code.len() as u32;
                 self.patch_jump(jump_over, after_addr);
-                self.emit(Instr::MakeTurn(start_addr));
+                let param_names = params.iter().map(|(n, _, _)| n.clone()).collect();
+                self.emit(Instr::MakeTurn(start_addr, param_names));
             }
             Expr::Infer { target_ty, body, .. } => {
                 // Compile body as an expression (leave result on stack)
@@ -291,27 +292,19 @@ impl Compiler {
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
-                    BinOp::Add => {
-                        self.emit(Instr::Add);
-                    }
-                    BinOp::Mul => {
-                        self.emit(Instr::Mul);
-                    }
-                    BinOp::Eq => {
-                        self.emit(Instr::Eq);
-                    }
-                    BinOp::Ne => {
-                        self.emit(Instr::Ne);
-                    }
-                    BinOp::And => {
-                        self.emit(Instr::And);
-                    }
-                    BinOp::Or => {
-                        self.emit(Instr::Or);
-                    }
-                    BinOp::Similarity => {
-                        self.emit(Instr::Similarity);
-                    }
+                    BinOp::Add => { self.emit(Instr::Add); }
+                    BinOp::Sub => { self.emit(Instr::Sub); }
+                    BinOp::Mul => { self.emit(Instr::Mul); }
+                    BinOp::Div => { self.emit(Instr::Div); }
+                    BinOp::Eq => { self.emit(Instr::Eq); }
+                    BinOp::Ne => { self.emit(Instr::Ne); }
+                    BinOp::Lt => { self.emit(Instr::Lt); }
+                    BinOp::Gt => { self.emit(Instr::Gt); }
+                    BinOp::Le => { self.emit(Instr::Le); }
+                    BinOp::Ge => { self.emit(Instr::Ge); }
+                    BinOp::And => { self.emit(Instr::And); }
+                    BinOp::Or => { self.emit(Instr::Or); }
+                    BinOp::Similarity => { self.emit(Instr::Similarity); }
                 }
             }
             Expr::Unary { op, expr, .. } => {
@@ -355,22 +348,9 @@ impl Compiler {
                 self.emit(Instr::MakeStruct(name.clone(), len));
             }
             Expr::MethodCall { target, name, arg, .. } => {
-                // Lower `obj.method(arg)` to `call(method, arg)` logic.
-                // If `arg` is Null (no args), pass `target` as the argument.
-                // If `arg` is present, pass `arg` (and `target` is effectively ignored by current runtime, 
-                // unless we implement multi-arg calling convention or `self`).
-                self.emit(Instr::Load(name.clone()));
-                
-                // Check if arg is literal Null (from parser empty parens)
-                let is_null_arg = matches!(**arg, Expr::Literal { value: Literal::Null, .. });
-                
-                if is_null_arg {
-                    self.compile_expr(target);
-                } else {
-                    self.compile_expr(arg);
-                }
-                
-                self.emit(Instr::CallTool);
+                self.compile_expr(target);
+                self.compile_expr(arg);
+                self.emit(Instr::CallMethod(name.clone()));
             }
         }
     }

@@ -58,6 +58,8 @@ pub enum Token {
     Ne,
     Less,
     Greater,
+    LessEq,
+    GreaterEq,
     Arrow, // ->
     Bang, // !
 
@@ -376,11 +378,21 @@ impl<'a> Lexer<'a> {
             }
             Some('<') => {
                 self.next();
-                Token::Less
+                if self.peek() == Some('=') {
+                    self.next();
+                    Token::LessEq
+                } else {
+                    Token::Less
+                }
             }
             Some('>') => {
                 self.next();
-                Token::Greater
+                if self.peek() == Some('=') {
+                    self.next();
+                    Token::GreaterEq
+                } else {
+                    Token::Greater
+                }
             }
             Some(c) => return Err(LexError::UnexpectedChar(c, start)),
         };

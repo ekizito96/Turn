@@ -4,11 +4,10 @@
 use indexmap::IndexMap;
 use crate::ast::*;
 use crate::lexer::{Span, SpannedToken, Token};
-use std::iter::Peekable;
-use std::vec::IntoIter;
 
 pub struct Parser {
-    tokens: Peekable<IntoIter<SpannedToken>>,
+    tokens: Vec<SpannedToken>,
+    pos: usize,
     last_span: Span,
 }
 
@@ -32,19 +31,29 @@ impl ParseError {
 impl Parser {
     pub fn new(tokens: Vec<SpannedToken>) -> Self {
         Self {
-            tokens: tokens.into_iter().peekable(),
+            tokens,
+            pos: 0,
             last_span: Span { start: 0, end: 0 },
         }
     }
 
-    fn peek(&mut self) -> Option<&Token> {
-        self.tokens.peek().map(|t| &t.token)
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos).map(|t| &t.token)
+    }
+
+    fn peek_at(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.pos + offset).map(|t| &t.token)
     }
 
     fn next(&mut self) -> Option<SpannedToken> {
-        let t = self.tokens.next()?;
-        self.last_span = t.span;
-        Some(t)
+        if self.pos < self.tokens.len() {
+            let t = self.tokens[self.pos].clone();
+            self.pos += 1;
+            self.last_span = t.span;
+            Some(t)
+        } else {
+            None
+        }
     }
 
     fn expect(&mut self, expected: Token) -> Result<Span, ParseError> {
@@ -354,13 +363,36 @@ impl Parser {
     }
 
     fn parse_eq(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_add()?;
+        let mut left = self.parse_rel()?;
         let span = self.span();
         loop {
             let op = match self.peek() {
                 Some(Token::EqEq) => BinOp::Eq,
                 Some(Token::Ne) => BinOp::Ne,
                 Some(Token::Similarity) => BinOp::Similarity,
+                _ => break,
+            };
+            self.next();
+            let right = self.parse_rel()?;
+            left = Expr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_rel(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_add()?;
+        let span = self.span();
+        loop {
+            let op = match self.peek() {
+                Some(Token::Less) => BinOp::Lt,
+                Some(Token::Greater) => BinOp::Gt,
+                Some(Token::LessEq) => BinOp::Le,
+                Some(Token::GreaterEq) => BinOp::Ge,
                 _ => break,
             };
             self.next();
@@ -378,11 +410,16 @@ impl Parser {
     fn parse_add(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_mul()?;
         let span = self.span();
-        while matches!(self.peek(), Some(Token::Plus)) {
+        loop {
+            let op = match self.peek() {
+                Some(Token::Plus) => BinOp::Add,
+                Some(Token::Minus) => BinOp::Sub,
+                _ => break,
+            };
             self.next();
             let right = self.parse_mul()?;
             left = Expr::Binary {
-                op: BinOp::Add,
+                op,
                 left: Box::new(left),
                 right: Box::new(right),
                 span,
@@ -394,11 +431,16 @@ impl Parser {
     fn parse_mul(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_unary()?;
         let span = self.span();
-        while matches!(self.peek(), Some(Token::Star)) {
+        loop {
+            let op = match self.peek() {
+                Some(Token::Star) => BinOp::Mul,
+                Some(Token::Slash) => BinOp::Div,
+                _ => break,
+            };
             self.next();
             let right = self.parse_unary()?;
             left = Expr::Binary {
-                op: BinOp::Mul,
+                op,
                 left: Box::new(left),
                 right: Box::new(right),
                 span,
@@ -496,15 +538,31 @@ impl Parser {
                     
                     if matches!(self.peek(), Some(Token::LParen)) {
                         self.next(); // consume (
-                        let arg = if matches!(self.peek(), Some(Token::RParen)) {
+                        let mut args = Vec::new();
+                        while !matches!(self.peek(), Some(Token::RParen) | Some(Token::Eof)) {
+                            args.push(self.parse_expr()?);
+                            if matches!(self.peek(), Some(Token::Comma)) {
+                                self.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                        
+                        let arg = if args.is_empty() {
                             Expr::Literal {
                                 value: Literal::Null,
                                 span: self.last_span,
                             }
+                        } else if args.len() == 1 {
+                            args.into_iter().next().unwrap()
                         } else {
-                            self.parse_expr()?
+                            Expr::List {
+                                items: args,
+                                span: self.last_span,
+                            }
                         };
-                        self.expect(Token::RParen)?;
+
                         let span = Span { start: expr.span().start, end: self.last_span.end };
                         expr = Expr::MethodCall {
                             target: Box::new(expr),
@@ -542,12 +600,23 @@ impl Parser {
             Token::Null => Ok(Expr::Literal { value: Literal::Null, span }),
             Token::Id(name) => {
                  // Check if it's a struct instantiation: Foo { x: 1 }
+                 let mut is_struct_init = false;
                  if matches!(self.peek(), Some(Token::LBrace)) {
-                     // Check if it's a known struct name? Or just parse as struct init speculatively?
+                     // Lookahead to distinguish from block: if x { ... }
+                     // StructInit must be: { <ID> : ... } or { }
+                     match self.peek_at(1) {
+                         Some(Token::RBrace) => is_struct_init = true, // Foo {}
+                         Some(Token::Id(_)) => {
+                             if matches!(self.peek_at(2), Some(Token::Colon)) {
+                                 is_struct_init = true; // Foo { x: ... }
+                             }
+                         }
+                         _ => {}
+                     }
+                 }
+
+                 if is_struct_init {
                      // If it's Foo { ... }, it's struct init.
-                     // But wait, what if `Foo` is a variable holding a Map, and `{...}` is a block?
-                     // Expressions can't be followed by blocks like that except for `turn` or control flow.
-                     // So `Foo { ... }` is unique enough.
                      
                      self.next(); // consume LBrace
                      let mut fields = IndexMap::new();

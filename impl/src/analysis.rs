@@ -61,6 +61,21 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
         Box::new(Type::Str),
         Box::new(Type::List(Box::new(Type::Str)))
     ));
+    // time_now: (Any) -> Num
+    map.insert("time_now".to_string(), Type::Function(
+        Box::new(Type::Any),
+        Box::new(Type::Num)
+    ));
+    // regex_match: (Map<Str>) -> Bool
+    map.insert("regex_match".to_string(), Type::Function(
+        Box::new(Type::Map(Box::new(Type::Str))),
+        Box::new(Type::Bool)
+    ));
+    // regex_replace: (Map<Str>) -> Str
+    map.insert("regex_replace".to_string(), Type::Function(
+        Box::new(Type::Map(Box::new(Type::Str))),
+        Box::new(Type::Str)
+    ));
     map
 }
 
@@ -327,6 +342,26 @@ impl Analysis {
                             }
                         }
                     }
+                    BinOp::Sub => {
+                        if left_ty == Some(Type::Num) && right_ty == Some(Type::Num) {
+                            Some(Type::Num)
+                        } else if left_ty == Some(Type::Vec) && right_ty == Some(Type::Vec) {
+                            Some(Type::Vec)
+                        } else if left_ty == Some(Type::Any) || right_ty == Some(Type::Any) {
+                            Some(Type::Any)
+                        } else {
+                            None
+                        }
+                    }
+                    BinOp::Div => {
+                        if left_ty == Some(Type::Num) && right_ty == Some(Type::Num) {
+                            Some(Type::Num)
+                        } else if left_ty == Some(Type::Any) || right_ty == Some(Type::Any) {
+                            Some(Type::Any)
+                        } else {
+                            None
+                        }
+                    }
                     BinOp::Mul => {
                         if left_ty == Some(Type::Num) && right_ty == Some(Type::Num) {
                             Some(Type::Num)
@@ -344,7 +379,7 @@ impl Analysis {
                         }
                     }
                     BinOp::Similarity => Some(Type::Num),
-                    BinOp::Eq | BinOp::Ne | BinOp::And | BinOp::Or => Some(Type::Bool),
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::And | BinOp::Or => Some(Type::Bool),
                 }
             }
             Expr::Turn { params, ret_ty, .. } => {

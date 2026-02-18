@@ -25,6 +25,72 @@ impl<S: Store> Runner<S> {
     }
 
     fn load_module(&mut self, path: &str, current_file: Option<&PathBuf>) -> Result<Value> {
+        // 1. Check embedded Standard Library
+        if let Some(source) = crate::std_lib::get_module_source(path) {
+            let key = format!("std::{}", path);
+            if let Some(val) = self.module_cache.get(&key) {
+                return Ok(val.clone());
+            }
+            
+            // Compile std lib module
+            let lexer = Lexer::new(source);
+            let tokens = lexer.tokenize()
+                .map_err(|e| anyhow::anyhow!("Lexer error in std module {}: {}", path, e))?;
+            
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse()
+                .map_err(|e| {
+                    let offset = e.offset();
+                    let snippet = if offset < source.len() {
+                        &source[offset..std::cmp::min(offset + 20, source.len())]
+                    } else {
+                        "EOF"
+                    };
+                    anyhow::anyhow!("Parser error in std module {}: {} at offset {} near '{}'", path, e, offset, snippet)
+                })?;
+            
+            let mut compiler = Compiler::new();
+            let code = compiler.compile(&program);
+            
+            // Run in fresh VM
+            let mut vm = Vm::new(&code);
+            loop {
+                match vm.run() {
+                    VmResult::Complete(v) => {
+                        self.module_cache.insert(key, v.clone());
+                        return Ok(v);
+                    }
+                    VmResult::Suspended { tool_name, arg, continuation } => {
+                        if tool_name == "sys_import" {
+                            let inner_path = match arg {
+                                Value::Str(s) => s.clone(),
+                                _ => "".to_string(),
+                            };
+                            // Std lib modules don't have a file path context
+                            match self.load_module(&inner_path, None) {
+                                Ok(val) => {
+                                    vm = Vm::resume_with_result(continuation, val);
+                                },
+                                Err(e) => {
+                                    vm = Vm::resume_with_error(continuation, e.to_string());
+                                }
+                            }
+                        } else {
+                            match self.tools.call(&tool_name, arg) {
+                                Ok(val) => {
+                                    vm = Vm::resume_with_result(continuation, val);
+                                },
+                                Err(e) => {
+                                    vm = Vm::resume_with_error(continuation, e);
+                                }
+                            }
+                        }
+                    }
+                    VmResult::Yielded => unreachable!("VM should handle yields internally"),
+                }
+            }
+        }
+
         // Resolve path relative to current file if provided
         let mut resolved_path = if let Some(base) = current_file {
             let parent = base.parent().unwrap_or(std::path::Path::new("."));
