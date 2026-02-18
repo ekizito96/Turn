@@ -1,9 +1,13 @@
 //! Bytecode instruction definitions for the Turn VM.
 
 use serde::{Deserialize, Serialize};
+use crate::ast::Type;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instr {
+    // Type checking
+    CheckType(Type),
+
     // Stack ops
     PushNum(f64),
     PushStr(String),
@@ -12,7 +16,9 @@ pub enum Instr {
     PushNull,
     MakeList(usize),
     MakeMap(usize),
-
+    MakeStruct(String, usize),
+    MakeVec(usize),
+    
     // Variables
     Load(String),
     Store(String),
@@ -25,7 +31,8 @@ pub enum Instr {
     And,
     Or,
     Not,
-
+    Similarity, // ~>
+    
     // Control
     Pop, // discard top of stack
 
@@ -38,6 +45,12 @@ pub enum Instr {
     Index,
     MakeTurn(u32),
 
+    // Concurrency
+    Spawn,
+    Send,
+    Receive,
+    Confidence, // NEW
+    
     // Control flow
     Jump(u32),
     JumpIfFalse(u32),

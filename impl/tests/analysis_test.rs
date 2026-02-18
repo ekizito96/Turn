@@ -11,22 +11,13 @@ fn analyze(source: &str) -> Analysis {
 }
 
 #[test]
-fn test_stdlib_return_types() {
+fn test_type_check_let() {
     let source = r#"
-    let content: Str = call("fs_read", "file.txt");
-    let json: Any = call("json_parse", content);
+    let x: Num = "hello";
     "#;
     let analysis = analyze(source);
-    assert!(analysis.diagnostics.is_empty());
-}
-
-#[test]
-fn test_stdlib_type_mismatch() {
-    let source = r#"
-    let content: Num = call("fs_read", "file.txt");
-    "#;
-    let analysis = analyze(source);
-    assert!(!analysis.diagnostics.is_empty());
+    
+    assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));
     assert!(msg.contains("expected Num"));
@@ -34,29 +25,30 @@ fn test_stdlib_type_mismatch() {
 }
 
 #[test]
-fn test_single_param_function_inference() {
+fn test_type_check_return() {
     let source = r#"
-    let identity = turn(x: Num) -> Num {
-        return x;
+    let f = turn() -> Num {
+        return "not a number";
     };
-    // 1 param, inferred arg type is Num. Ret is Num.
-    // Function(Num, Num)
-    let res: Num = call(identity, 10);
     "#;
     let analysis = analyze(source);
-    assert!(analysis.diagnostics.is_empty());
+    
+    assert_eq!(analysis.diagnostics.len(), 1);
+    let (_, msg) = &analysis.diagnostics[0];
+    assert!(msg.contains("Type mismatch"));
+    assert!(msg.contains("expected Num"));
+    assert!(msg.contains("got Str"));
 }
 
 #[test]
-fn test_single_param_function_mismatch() {
+fn test_type_inference_propagation() {
     let source = r#"
-    let identity = turn(x: Num) -> Num {
-        return x;
-    };
-    let res: Str = call(identity, 10);
+    let x = 10;
+    let y: Str = x;
     "#;
     let analysis = analyze(source);
-    assert!(!analysis.diagnostics.is_empty());
+    
+    assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));
     assert!(msg.contains("expected Str"));

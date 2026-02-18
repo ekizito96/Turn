@@ -133,6 +133,7 @@ impl<S: Store> Runner<S> {
                         }
                     }
                 }
+                VmResult::Yielded => unreachable!("VM should handle yields internally"),
             }
         }
     }
@@ -207,6 +208,7 @@ impl<S: Store> Runner<S> {
                         }
                     }
                 }
+                VmResult::Yielded => unreachable!("VM should handle yields internally"),
             }
         }
     }

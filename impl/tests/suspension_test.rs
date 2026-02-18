@@ -1,4 +1,4 @@
-use turn::{compiler, lexer, parser, tools, Value, Vm, VmResult};
+use turn::{compiler, lexer, parser, Value, Vm, VmResult};
 
 #[test]
 fn test_manual_suspension_resume_cycle() {
@@ -15,10 +15,7 @@ fn test_manual_suspension_resume_cycle() {
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
 
-    // 2. Setup Tools
-    let tools = tools::ToolRegistry::new(); // empty registry is fine as we handle call manually
-
-    // 3. Start VM
+    // 2. Start VM
     let mut vm = Vm::new(&code);
 
     // 4. Run -> Suspend

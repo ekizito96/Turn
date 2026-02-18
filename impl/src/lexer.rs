@@ -6,8 +6,13 @@ use std::str::Chars;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Keywords
+    Spawn,
+    Send,
+    Receive,
+    Vec,
     Turn,
     Let,
+    Confidence, // NEW
     Use,
     Context,
     Try,
@@ -17,7 +22,10 @@ pub enum Token {
     Remember,
     Recall,
     Call,
+    Impl,
+    Type, // 'type' keyword for aliases
     Return,
+    Struct,
     If,
     Else,
     While,
@@ -35,15 +43,20 @@ pub enum Token {
     TypeMap,
     TypeAny,
     TypeVoid,
+    TypePid,
+    TypeVec,
 
     // Operators
     Plus,
     Minus,
     Star,
     Slash,
+    Similarity, // ~>
     Eq, // = (assignment)
     EqEq,
     Ne,
+    Less,
+    Greater,
     Arrow, // ->
 
     // Literals
@@ -82,8 +95,13 @@ pub struct Span {
 }
 
 const KEYWORDS: &[(&str, Token)] = &[
+    ("spawn", Token::Spawn),
+    ("send", Token::Send),
+    ("receive", Token::Receive),
+    ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
+    ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
     ("try", Token::Try),
     ("catch", Token::Catch),
@@ -94,6 +112,9 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("recall", Token::Recall),
     ("call", Token::Call),
     ("return", Token::Return),
+    ("struct", Token::Struct),
+    ("impl", Token::Impl),
+    ("type", Token::Type),
     ("if", Token::If),
     ("else", Token::Else),
     ("while", Token::While),
@@ -109,6 +130,8 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("Map", Token::TypeMap),
     ("Any", Token::TypeAny),
     ("Void", Token::TypeVoid),
+    ("Pid", Token::TypePid),
+    ("Vec", Token::TypeVec),
 ];
 
 pub struct Lexer<'a> {
@@ -239,6 +262,15 @@ impl<'a> Lexer<'a> {
 
         let token = match self.peek() {
             None => Token::Eof,
+            Some('~') => {
+                self.next();
+                if self.peek() == Some('>') {
+                    self.next();
+                    Token::Similarity
+                } else {
+                    return Err(LexError::UnexpectedChar('~', start));
+                }
+            }
             Some('/') => {
                 self.next();
                 match self.peek() {
@@ -338,6 +370,14 @@ impl<'a> Lexer<'a> {
             Some('.') => {
                 self.next();
                 Token::Dot
+            }
+            Some('<') => {
+                self.next();
+                Token::Less
+            }
+            Some('>') => {
+                self.next();
+                Token::Greater
             }
             Some(c) => return Err(LexError::UnexpectedChar(c, start)),
         };

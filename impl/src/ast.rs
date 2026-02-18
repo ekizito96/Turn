@@ -1,17 +1,22 @@
 //! AST node definitions per spec/02-grammar.md and spec/01-minimal-core.md.
 
+use indexmap::IndexMap;
 use crate::lexer::Span;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Type {
     Num,
     Str,
     Bool,
-    List,
-    Map,
+    List(Box<Type>),
+    Map(Box<Type>),
+    Function(Box<Type>, Box<Type>), // Arg -> Ret
+    Struct(String, IndexMap<String, Type>), // Name, Fields
     Any,
     Void,
-    // We can add generics later: List(Box<Type>)
+    Pid,
+    Vec,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +48,21 @@ pub enum Stmt {
     CallStmt {
         tool: Expr,
         arg: Expr,
+        span: Span,
+    },
+    ImplDef {
+        type_name: String,
+        methods: Vec<Stmt>, // Stmt::Let (functions)
+        span: Span,
+    },
+    TypeAlias {
+        name: String,
+        ty: Type,
+        span: Span,
+    },
+    StructDef {
+        name: String,
+        fields: IndexMap<String, Type>,
         span: Span,
     },
     Return {
@@ -86,9 +106,25 @@ pub struct Block {
 pub enum Expr {
     Literal { value: Literal, span: Span },
     Id { name: String, span: Span },
+    MethodCall {
+        target: Box<Expr>,
+        name: String,
+        arg: Box<Expr>,
+        span: Span,
+    },
     Recall { key: Box<Expr>, span: Span },
     Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
     Use { module: Box<Expr>, span: Span },
+    Spawn { expr: Box<Expr>, span: Span },
+    Send { pid: Box<Expr>, msg: Box<Expr>, span: Span },
+    Receive { span: Span },
+    Vec { items: Vec<Expr>, span: Span },
+    Confidence { expr: Box<Expr>, span: Span },
+    StructInit {
+        name: String,
+        fields: IndexMap<String, Expr>,
+        span: Span,
+    },
     Index { target: Box<Expr>, index: Box<Expr>, span: Span },
     Turn {
         params: Vec<(String, Span, Option<Type>)>,
@@ -123,9 +159,15 @@ pub enum Expr {
         match self {
             Expr::Literal { span, .. } => *span,
             Expr::Id { span, .. } => *span,
+            Expr::MethodCall { span, .. } => *span,
             Expr::Recall { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
+            Expr::Spawn { span, .. } => *span,
+            Expr::Send { span, .. } => *span,
+            Expr::Receive { span } => *span,
+            Expr::Vec { span, .. } => *span,
+            Expr::Confidence { span, .. } => *span,
             Expr::Index { span, .. } => *span,
             Expr::Turn { span, .. } => *span,
             Expr::List { span, .. } => *span,
@@ -133,6 +175,7 @@ pub enum Expr {
             Expr::Binary { span, .. } => *span,
             Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
+            Expr::StructInit { span, .. } => *span,
         }
     }
 }
@@ -149,6 +192,7 @@ pub enum BinOp {
     Add,
     Eq,
     Ne,
+    Similarity,
     And,
     Or,
 }

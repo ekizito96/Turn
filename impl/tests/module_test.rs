@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 
 // In-memory store
 #[derive(Clone)]
@@ -78,7 +77,6 @@ fn test_module_import() {
 fn test_recursive_import() {
     let temp_dir = tempfile::tempdir().unwrap();
     let util_path = temp_dir.path().join("util.tn");
-    let main_path = temp_dir.path().join("main.tn");
     
     // util.tn
     fs::write(&util_path, r#"return "util";"#).unwrap();
