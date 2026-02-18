@@ -231,6 +231,7 @@ impl Analysis {
             Expr::Send { .. } => Some(Type::Bool),
             Expr::Receive { .. } => Some(Type::Any),
             Expr::Confidence { .. } => Some(Type::Num),
+            Expr::Infer { target_ty, .. } => Some(target_ty.clone()),
             Expr::Vec { items, .. } => {
                 // Infer type as Vec.
                 // Assuming Vec<Num>.
@@ -577,6 +578,9 @@ impl Analysis {
             Expr::Receive { .. } => {}
             Expr::Confidence { expr, .. } => {
                 self.visit_expr(expr);
+            }
+            Expr::Infer { body, .. } => {
+                self.visit_block(body);
             }
             Expr::Id { name, span } => {
                 self.record_usage(name, *span);

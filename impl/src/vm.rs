@@ -274,6 +274,26 @@ impl Vm {
                         _ => process.stack.push(Value::Num(1.0)), // Certainty
                     }
                 }
+                Instr::Infer(ty) => {
+                    let prompt_val = process.stack.pop().unwrap_or(Value::Null);
+                    let ty_str = format!("{:?}", ty);
+                    
+                    let mut map = IndexMap::new();
+                    map.insert("prompt".to_string(), prompt_val);
+                    map.insert("schema".to_string(), Value::Str(ty_str));
+                    
+                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    let state = VmState {
+                        frames: process.frames.clone(),
+                        stack: process.stack.clone(),
+                        runtime: process.runtime.clone(),
+                    };
+                    return VmResult::Suspended {
+                        tool_name: "llm_infer".to_string(),
+                        arg: Value::Map(map),
+                        continuation: state,
+                    };
+                }
                 Instr::PushNull => process.stack.push(Value::Null),
                 Instr::PushTrue => process.stack.push(Value::Bool(true)),
                 Instr::PushFalse => process.stack.push(Value::Bool(false)),

@@ -50,6 +50,7 @@ pub enum Instr {
     Send,
     Receive,
     Confidence, // NEW
+    Infer(Type), // NEW
     
     // Control flow
     Jump(u32),

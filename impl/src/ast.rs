@@ -132,6 +132,11 @@ pub enum Expr {
         body: Block,
         span: Span,
     },
+    Infer {
+        target_ty: Type,
+        body: Block,
+        span: Span,
+    },
     List {
         items: Vec<Expr>,
         span: Span,
@@ -170,6 +175,7 @@ pub enum Expr {
             Expr::Confidence { span, .. } => *span,
             Expr::Index { span, .. } => *span,
             Expr::Turn { span, .. } => *span,
+            Expr::Infer { span, .. } => *span,
             Expr::List { span, .. } => *span,
             Expr::Map { span, .. } => *span,
             Expr::Binary { span, .. } => *span,
