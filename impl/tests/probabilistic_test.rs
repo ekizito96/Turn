@@ -5,7 +5,7 @@ use turn::parser::Parser;
 use turn::lexer::Lexer;
 
 fn run_code_with_env(source: &str, env_setup: impl FnOnce(&mut Vm)) -> Value {
-    let mut lexer = Lexer::new(source);
+    let lexer = Lexer::new(source);
     let tokens = lexer.tokenize().expect("Lexer failed");
     let mut parser = Parser::new(tokens);
     let program = parser.parse().expect("Parser failed");
@@ -30,7 +30,9 @@ fn test_confidence_keyword() {
     "#;
     
     let res = run_code_with_env(source, |vm| {
-        vm.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+        if let Some(p) = vm.scheduler.front_mut() {
+            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+        }
     });
     
     if let Value::Num(n) = res {
@@ -60,8 +62,10 @@ fn test_uncertainty_propagation_add() {
     "#;
     
     let res = run_code_with_env(source, |vm| {
-        vm.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
-        vm.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Num(5.0)), 0.5));
+        if let Some(p) = vm.scheduler.front_mut() {
+            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+            p.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Num(5.0)), 0.5));
+        }
     });
     
     // 0.8 * 0.5 = 0.4
@@ -80,7 +84,9 @@ fn test_uncertainty_propagation_add_mixed() {
     "#;
     
     let res = run_code_with_env(source, |vm| {
-        vm.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+        if let Some(p) = vm.scheduler.front_mut() {
+            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+        }
     });
     
     // 0.8 * 1.0 = 0.8
@@ -100,13 +106,15 @@ fn test_uncertainty_nested_logic() {
     // Probability: 0.9 * 0.5 = 0.45
     
     let source = r#"
-    let res = x && y;
+    let res = x and y;
     return confidence res;
     "#;
     
     let res = run_code_with_env(source, |vm| {
-        vm.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Bool(true)), 0.9));
-        vm.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Bool(false)), 0.5));
+        if let Some(p) = vm.scheduler.front_mut() {
+            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Bool(true)), 0.9));
+            p.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Bool(false)), 0.5));
+        }
     });
     
     if let Value::Num(n) = res {
