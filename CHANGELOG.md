@@ -1,41 +1,21 @@
 # Changelog
 
-All notable changes to Turn will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.2.0] - 2026-02-18
 
 ### Added
+- **Native Intelligence**: `infer <Type> { ... }` keyword for direct LLM calls from language syntax.
+- **Probabilistic Logic**: `confidence` operator, `Uncertain` value type, and probabilistic propagation for `+`, `*`, `and`, `or`, `!`.
+- **Concurrency**: Actor model primitives `spawn`, `send`, `receive`, `PID` type.
+- **Vector Embeddings**: First-class `vec[...]` literals and `~>` cosine similarity operator.
+- **Language Server**: Initial LSP implementation (`turn lsp`).
+- **Package Manager**: `turn add <pkg>` command.
+- **Runtime**: `llm_infer` mock provider for testing agentic logic.
 
-- CI workflow (GitHub Actions): format check, clippy, tests, build on ubuntu/macos/windows
-- CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
-- GitHub issue templates (bug report, feature request)
-- Cargo.toml metadata for crates.io (license, repository, keywords)
-- `--version` flag to CLI
-- Error messages with file:line:col for lex and parse errors
-- `offset_to_line_col()` helper
-- `examples/` directory (hello, recall, conditionals)
-- Release workflow: build binaries on tag push (v*)
-- `rust-toolchain.toml` for consistent toolchain
+### Changed
+- **Type System**: Enhanced with Generics (`List<T>`, `Map<T>`) and Runtime Type Checking.
+- **Performance**: Optimized VM instruction dispatch and memory model.
 
-## [0.1.0] - 2026-02-17
-
-### Added
-
-- Rust bytecode VM implementation
-- Lexer, parser, AST, compiler, VM, runtime
-- Multi-turn support with nested turns
-- True suspension/resume on tool calls (VM pauses, serializable state)
-- `turn run <file>` CLI
-- `run_with_tools()` for custom tool registries
-- Tests: hello_turn, example_agent, suspension
-- Documentation: DOCUMENTATION_INDEX.md, PROJECT_SUMMARY.md
-- Empirical analysis: research/07-empirical-analysis.md
-
-### Spec (locked for v1)
-
-- Design mandate, minimal core, grammar, runtime model
-- Type-friendly design, implementation strategy
-- Reference programs: hello_turn, example_agent
+## [0.1.0] - Initial Release
+- Basic VM, Lexer, Parser.
+- Functions, Structs, primitive types.
+- HTTP and File I/O tools.
