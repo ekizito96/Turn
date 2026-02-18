@@ -263,6 +263,32 @@ impl ToolRegistry {
                 }
             }) as ToolHandler,
         );
+
+        // llm_infer: Handled by `infer` keyword
+        // Returns Value::Uncertain based on schema
+        tools.insert(
+            "llm_infer".to_string(),
+            Box::new(|arg| {
+                 if let Value::Map(m) = arg {
+                     let schema = m.get("schema").unwrap_or(&Value::Null);
+                     // Simple Mock Logic
+                     match schema {
+                         Value::Str(s) if s.contains("Num") => {
+                             Ok(Value::Uncertain(Box::new(Value::Num(42.0)), 0.85))
+                         }
+                         Value::Str(s) if s.contains("Bool") => {
+                             Ok(Value::Uncertain(Box::new(Value::Bool(true)), 0.9))
+                         }
+                         Value::Str(s) if s.contains("Str") => {
+                             Ok(Value::Uncertain(Box::new(Value::Str("Mock Response".to_string())), 0.7))
+                         }
+                         _ => Ok(Value::Uncertain(Box::new(Value::Null), 0.5)),
+                     }
+                 } else {
+                     Err("Invalid args for llm_infer".to_string())
+                 }
+            }) as ToolHandler
+        );
         
         Self { tools }
     }
