@@ -195,9 +195,15 @@ pub enum UnOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Mul,
+    Div,
     Add,
+    Sub,
     Eq,
     Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
     Similarity,
     And,
     Or,

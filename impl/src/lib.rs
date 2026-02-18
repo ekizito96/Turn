@@ -12,6 +12,7 @@ pub mod tools;
 pub mod value;
 pub mod vm;
 pub mod lsp;
+pub mod std_lib;
 
 pub use analysis::*;
 pub use ast::*;

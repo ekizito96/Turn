@@ -25,9 +25,15 @@ pub enum Instr {
 
     // Binary ops
     Add,
+    Sub,
     Mul,
+    Div,
     Eq,
     Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
     And,
     Or,
     Not,
@@ -41,9 +47,10 @@ pub enum Instr {
     Remember,
     Recall,
     CallTool,
+    CallMethod(String), // NEW
     LoadModule,
     Index,
-    MakeTurn(u32),
+    MakeTurn(u32, Vec<String>),
 
     // Concurrency
     Spawn,

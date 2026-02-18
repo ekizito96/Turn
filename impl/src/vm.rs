@@ -325,10 +325,20 @@ impl Vm {
                     let a = process.stack.pop().unwrap_or(Value::Null);
                     process.stack.push(add_values(&a, &b));
                 }
+                Instr::Sub => {
+                    let b = process.stack.pop().unwrap_or(Value::Null);
+                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    process.stack.push(sub_values(&a, &b));
+                }
                 Instr::Mul => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
                     process.stack.push(mul_values(&a, &b));
+                }
+                Instr::Div => {
+                    let b = process.stack.pop().unwrap_or(Value::Null);
+                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    process.stack.push(div_values(&a, &b));
                 }
                 Instr::Eq => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
@@ -339,6 +349,26 @@ impl Vm {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
                     process.stack.push(ne_values(&a, &b));
+                }
+                Instr::Lt => {
+                    let b = process.stack.pop().unwrap_or(Value::Null);
+                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    process.stack.push(lt_values(&a, &b));
+                }
+                Instr::Gt => {
+                    let b = process.stack.pop().unwrap_or(Value::Null);
+                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    process.stack.push(gt_values(&a, &b));
+                }
+                Instr::Le => {
+                    let b = process.stack.pop().unwrap_or(Value::Null);
+                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    process.stack.push(le_values(&a, &b));
+                }
+                Instr::Ge => {
+                    let b = process.stack.pop().unwrap_or(Value::Null);
+                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    process.stack.push(ge_values(&a, &b));
                 }
                 Instr::Not => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
@@ -406,6 +436,110 @@ impl Vm {
                         }
                     }
                 }
+                Instr::CallMethod(name) => {
+                    let arg = process.stack.pop().unwrap_or(Value::Null);
+                    let target = process.stack.pop().unwrap_or(Value::Null);
+                    
+                    let (tool_val, final_arg) = if let Some(func) = match &target {
+                        Value::Map(m) | Value::Struct(_, m) => m.get(&name).cloned(),
+                        _ => None
+                    } {
+                        (func, arg)
+                    } else if let Some(func) = process.runtime.get_env(&name) {
+                        let final_arg = if arg.is_falsy() { target } else { arg };
+                        (func, final_arg)
+                    } else {
+                        (Value::Null, Value::Null)
+                    };
+
+                    match tool_val {
+                        Value::Str(name) => {
+                            process.frames[frame_idx].env = process.runtime.env.clone();
+                            let state = VmState {
+                                frames: process.frames.clone(),
+                                stack: process.stack.clone(),
+                                runtime: process.runtime.clone(),
+                            };
+                            return VmResult::Suspended {
+                                tool_name: name,
+                                arg: final_arg,
+                                continuation: state,
+                            };
+                        }
+                        Value::Closure { code, ip, env, params } => {
+                            let mut new_env = env.clone();
+                            let mut mem_inserts = Vec::new();
+
+                            if params.len() == 1 {
+                                let name = &params[0];
+                                match final_arg {
+                                    Value::Map(m) => {
+                                        if m.contains_key(name) {
+                                            for (k, v) in m {
+                                                mem_inserts.push((k.clone(), v.clone()));
+                                                new_env.insert(k, v);
+                                            }
+                                        } else {
+                                            let wrapped = Value::Map(m);
+                                            mem_inserts.push((name.clone(), wrapped.clone()));
+                                            new_env.insert(name.clone(), wrapped);
+                                        }
+                                    }
+                                    Value::Struct(struct_name, m) => {
+                                        if m.contains_key(name) {
+                                            for (k, v) in m {
+                                                mem_inserts.push((k.clone(), v.clone()));
+                                                new_env.insert(k, v);
+                                            }
+                                        } else {
+                                            let wrapped = Value::Struct(struct_name, m);
+                                            mem_inserts.push((name.clone(), wrapped.clone()));
+                                            new_env.insert(name.clone(), wrapped);
+                                        }
+                                    }
+                                    other => {
+                                        mem_inserts.push((name.clone(), other.clone()));
+                                        new_env.insert(name.clone(), other);
+                                    }
+                                }
+                            } else if let Value::Map(m) = final_arg {
+                                for (k, v) in m {
+                                    mem_inserts.push((k.clone(), v.clone()));
+                                    new_env.insert(k, v);
+                                }
+                            } else if let Value::Struct(_, m) = final_arg.clone() {
+                                for (k, v) in m {
+                                    mem_inserts.push((k.clone(), v.clone()));
+                                    new_env.insert(k, v);
+                                }
+                            } else if let Value::List(items) = final_arg {
+                                for (i, item) in items.into_iter().enumerate() {
+                                    if i < params.len() {
+                                        mem_inserts.push((params[i].clone(), item.clone()));
+                                        new_env.insert(params[i].clone(), item);
+                                    }
+                                }
+                            } else if !final_arg.is_falsy() {
+                                mem_inserts.push(("arg".to_string(), final_arg.clone()));
+                                new_env.insert("arg".to_string(), final_arg);
+                            }
+                            
+                            process.frames[frame_idx].env = process.runtime.env.clone();
+                            process.runtime.env = new_env;
+                            for (k, v) in mem_inserts {
+                                process.runtime.memory.insert(k, v);
+                            }
+                            
+                            process.frames.push(Frame {
+                                code,
+                                ip,
+                                env: process.runtime.env.clone(),
+                                handlers: Vec::new(),
+                            });
+                        }
+                        _ => process.stack.push(Value::Null),
+                    }
+                }
                 Instr::CallTool => {
                     let arg = process.stack.pop().unwrap_or(Value::Null);
                     let tool_val = process.stack.pop().unwrap_or(Value::Null);
@@ -424,11 +558,43 @@ impl Vm {
                                 continuation: state,
                             };
                         }
-                        Value::Closure { code, ip, env } => {
+                        Value::Closure { code, ip, env, params } => {
                             let mut new_env = env.clone();
                             let mut mem_inserts = Vec::new();
-                            
-                            if let Value::Map(m) = arg {
+
+                            if params.len() == 1 {
+                                let name = &params[0];
+                                match arg {
+                                    Value::Map(m) => {
+                                        if m.contains_key(name) {
+                                            for (k, v) in m {
+                                                mem_inserts.push((k.clone(), v.clone()));
+                                                new_env.insert(k, v);
+                                            }
+                                        } else {
+                                            let wrapped = Value::Map(m);
+                                            mem_inserts.push((name.clone(), wrapped.clone()));
+                                            new_env.insert(name.clone(), wrapped);
+                                        }
+                                    }
+                                    Value::Struct(struct_name, m) => {
+                                        if m.contains_key(name) {
+                                            for (k, v) in m {
+                                                mem_inserts.push((k.clone(), v.clone()));
+                                                new_env.insert(k, v);
+                                            }
+                                        } else {
+                                            let wrapped = Value::Struct(struct_name, m);
+                                            mem_inserts.push((name.clone(), wrapped.clone()));
+                                            new_env.insert(name.clone(), wrapped);
+                                        }
+                                    }
+                                    other => {
+                                        mem_inserts.push((name.clone(), other.clone()));
+                                        new_env.insert(name.clone(), other);
+                                    }
+                                }
+                            } else if let Value::Map(m) = arg {
                                 for (k, v) in m {
                                     mem_inserts.push((k.clone(), v.clone()));
                                     new_env.insert(k, v);
@@ -437,6 +603,13 @@ impl Vm {
                                 for (k, v) in m {
                                     mem_inserts.push((k.clone(), v.clone()));
                                     new_env.insert(k, v);
+                                }
+                            } else if let Value::List(items) = arg {
+                                for (i, item) in items.into_iter().enumerate() {
+                                    if i < params.len() {
+                                        mem_inserts.push((params[i].clone(), item.clone()));
+                                        new_env.insert(params[i].clone(), item);
+                                    }
                                 }
                             } else if !arg.is_falsy() {
                                 mem_inserts.push(("arg".to_string(), arg.clone()));
@@ -533,10 +706,10 @@ impl Vm {
                     };
                     process.stack.push(res);
                 }
-                Instr::MakeTurn(offset) => {
+                Instr::MakeTurn(offset, params) => {
                     let code = process.frames[frame_idx].code.clone();
                     let env = process.runtime.env.clone();
-                    process.stack.push(Value::Closure { code, ip: offset as usize, env });
+                    process.stack.push(Value::Closure { code, ip: offset as usize, env, params });
                 }
                 Instr::LoadModule => {
                     let p_val = process.stack.pop().unwrap_or(Value::Null);
@@ -838,5 +1011,86 @@ fn or_values(a: &Value, b: &Value) -> Value {
             Value::Uncertain(Box::new(res), *p)
         },
         _ => Value::Bool(a.is_truthy() || b.is_truthy()),
+    }
+}
+
+fn sub_values(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Uncertain(v1, p1), Value::Uncertain(v2, p2)) => {
+            let res = sub_values(v1, v2);
+            if let Value::Uncertain(inner, p3) = res { Value::Uncertain(inner, p1 * p2 * p3) } else { Value::Uncertain(Box::new(res), p1 * p2) }
+        },
+        (Value::Uncertain(v, p), other) => {
+            let res = sub_values(v, other);
+            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
+        },
+        (other, Value::Uncertain(v, p)) => {
+            let res = sub_values(other, v);
+            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
+        },
+        (Value::Num(x), Value::Num(y)) => Value::Num(x - y),
+        (Value::Vec(v1), Value::Vec(v2)) => {
+            if v1.len() != v2.len() { return Value::Null; }
+            let diff: Vec<f64> = v1.iter().zip(v2.iter()).map(|(x, y)| x - y).collect();
+            Value::Vec(diff)
+        },
+        _ => Value::Null,
+    }
+}
+
+fn div_values(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Uncertain(v1, p1), Value::Uncertain(v2, p2)) => {
+            let res = div_values(v1, v2);
+            if let Value::Uncertain(inner, p3) = res { Value::Uncertain(inner, p1 * p2 * p3) } else { Value::Uncertain(Box::new(res), p1 * p2) }
+        },
+        (Value::Uncertain(v, p), other) => {
+            let res = div_values(v, other);
+            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
+        },
+        (other, Value::Uncertain(v, p)) => {
+            let res = div_values(other, v);
+            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
+        },
+        (Value::Num(x), Value::Num(y)) => {
+            if *y == 0.0 { Value::Null } else { Value::Num(x / y) }
+        },
+        _ => Value::Null,
+    }
+}
+
+fn lt_values(a: &Value, b: &Value) -> Value {
+    compare_values(a, b, |x, y| x < y)
+}
+
+fn gt_values(a: &Value, b: &Value) -> Value {
+    compare_values(a, b, |x, y| x > y)
+}
+
+fn le_values(a: &Value, b: &Value) -> Value {
+    compare_values(a, b, |x, y| x <= y)
+}
+
+fn ge_values(a: &Value, b: &Value) -> Value {
+    compare_values(a, b, |x, y| x >= y)
+}
+
+fn compare_values<F>(a: &Value, b: &Value, op: F) -> Value 
+where F: Fn(f64, f64) -> bool + Copy {
+    match (a, b) {
+        (Value::Uncertain(v1, p1), Value::Uncertain(v2, p2)) => {
+            let res = compare_values(v1, v2, op);
+            if let Value::Uncertain(inner, p3) = res { Value::Uncertain(inner, p1 * p2 * p3) } else { Value::Uncertain(Box::new(res), p1 * p2) }
+        },
+        (Value::Uncertain(v, p), other) => {
+            let res = compare_values(v, other, op);
+            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
+        },
+        (other, Value::Uncertain(v, p)) => {
+            let res = compare_values(other, v, op);
+            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
+        },
+        (Value::Num(x), Value::Num(y)) => Value::Bool(op(*x, *y)),
+        _ => Value::Bool(false), // Only numbers comparable for now
     }
 }
