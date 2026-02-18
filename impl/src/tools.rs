@@ -7,6 +7,42 @@ use std::thread;
 use std::env;
 use std::fs;
 
+// Helper function for OpenAI calls
+fn call_openai_chat(
+    api_key: &str,
+    model: &str,
+    messages: &serde_json::Value
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::new();
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages
+    });
+
+    match client.post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&payload)
+        .send() {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                            Ok(content.to_string())
+                        } else {
+                            Err("Invalid response format from OpenAI".to_string())
+                        }
+                    },
+                    Err(e) => Err(format!("Failed to parse OpenAI response: {}", e)),
+                }
+            } else {
+                Err(format!("OpenAI API error: {}", resp.status()))
+            }
+        },
+        Err(e) => Err(format!("OpenAI request failed: {}", e)),
+    }
+}
+
 // Update ToolHandler to return Result<Value, String>
 pub type ToolHandler = Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>;
 
@@ -205,35 +241,11 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a map {messages, model?}".to_string()),
                 };
 
-                let client = reqwest::blocking::Client::new();
                 let json_msgs = serde_json::to_value(&messages).unwrap_or(serde_json::Value::Array(vec![]));
                 
-                let payload = serde_json::json!({
-                    "model": model,
-                    "messages": json_msgs
-                });
-
-                match client.post("https://api.openai.com/v1/chat/completions")
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .json(&payload)
-                    .send() {
-                    Ok(resp) => {
-                        if resp.status().is_success() {
-                            match resp.json::<serde_json::Value>() {
-                                Ok(json) => {
-                                    if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
-                                        Ok(Value::Str(content.to_string()))
-                                    } else {
-                                        Err("Invalid response format from OpenAI".to_string())
-                                    }
-                                },
-                                Err(e) => Err(format!("Failed to parse OpenAI response: {}", e)),
-                            }
-                        } else {
-                            Err(format!("OpenAI API error: {}", resp.status()))
-                        }
-                    },
-                    Err(e) => Err(format!("OpenAI request failed: {}", e)),
+                match call_openai_chat(&api_key, &model, &json_msgs) {
+                    Ok(content) => Ok(Value::Str(content)),
+                    Err(e) => Err(e),
                 }
             }) as ToolHandler,
         );
@@ -271,18 +283,55 @@ impl ToolRegistry {
             Box::new(|arg| {
                  if let Value::Map(m) = arg {
                      let schema = m.get("schema").unwrap_or(&Value::Null);
-                     // Simple Mock Logic
-                     match schema {
-                         Value::Str(s) if s.contains("Num") => {
-                             Ok(Value::Uncertain(Box::new(Value::Num(42.0)), 0.85))
+                     let prompt = m.get("prompt").unwrap_or(&Value::Null);
+                     
+                     // Check for API Key
+                     let api_key = env::var("OPENAI_API_KEY").ok();
+                     
+                     if let Some(key) = api_key {
+                         // Real Implementation
+                         let system_msg = serde_json::json!({
+                             "role": "system",
+                             "content": "You are a Turn Language Runtime. The user wants a value matching the provided schema. Output ONLY JSON object: { \"value\": <value>, \"confidence\": <0.0-1.0> }."
+                         });
+                         let user_content = format!("Schema Type: {}\nPrompt: {}", schema, prompt);
+                         let user_msg = serde_json::json!({
+                             "role": "user",
+                             "content": user_content
+                         });
+                         
+                         let messages = serde_json::Value::Array(vec![system_msg, user_msg]);
+                         
+                         match call_openai_chat(&key, "gpt-4o-mini", &messages) {
+                             Ok(content) => {
+                                 // Clean potential markdown
+                                 let clean = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+                                 match serde_json::from_str::<serde_json::Value>(clean) {
+                                     Ok(json) => {
+                                         let val_json = json.get("value").unwrap_or(&serde_json::Value::Null);
+                                         let conf = json.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.9);
+                                         let turn_val: Value = serde_json::from_value(val_json.clone()).unwrap_or(Value::Null);
+                                         Ok(Value::Uncertain(Box::new(turn_val), conf))
+                                     },
+                                     Err(e) => Err(format!("Failed to parse LLM JSON: {} in '{}'", e, clean)),
+                                 }
+                             },
+                             Err(e) => Err(format!("LLM Infer failed: {}", e)),
                          }
-                         Value::Str(s) if s.contains("Bool") => {
-                             Ok(Value::Uncertain(Box::new(Value::Bool(true)), 0.9))
+                     } else {
+                         // Mock Implementation
+                         match schema {
+                             Value::Str(s) if s.contains("Num") => {
+                                 Ok(Value::Uncertain(Box::new(Value::Num(42.0)), 0.85))
+                             }
+                             Value::Str(s) if s.contains("Bool") => {
+                                 Ok(Value::Uncertain(Box::new(Value::Bool(true)), 0.9))
+                             }
+                             Value::Str(s) if s.contains("Str") => {
+                                 Ok(Value::Uncertain(Box::new(Value::Str("Mock Response".to_string())), 0.7))
+                             }
+                             _ => Ok(Value::Uncertain(Box::new(Value::Null), 0.5)),
                          }
-                         Value::Str(s) if s.contains("Str") => {
-                             Ok(Value::Uncertain(Box::new(Value::Str("Mock Response".to_string())), 0.7))
-                         }
-                         _ => Ok(Value::Uncertain(Box::new(Value::Null), 0.5)),
                      }
                  } else {
                      Err("Invalid args for llm_infer".to_string())
