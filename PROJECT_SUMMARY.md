@@ -54,28 +54,33 @@ Turn is built on deep science:
 
 ---
 
-## Language Features (v1)
+## Language Features (v0.2.0)
 
 ### Primitives
 
 ```turn
 turn {
-  let name = "Turn";
-  remember("user", name);           // Memory: persistent key-value
-  context.append("Hello, " + name); // Context: bounded buffer
-  let result = call("echo", "Hello"); // Tool call: suspend/resume
+  let name = infer Str { "What is your name?" }; // Native Intelligence
+  spawn {                                        // Concurrency
+      print("Thinking...");
+  };
+  context.append("Hello, " + name);              // Context: bounded buffer
+  let result = call("echo", "Hello");            // Tool call: suspend/resume
   return result;
 }
 ```
 
 ### Key Capabilities
 
-1. **Turn**: Unit of execution and checkpointing
-2. **Context**: Bounded buffer (runtime-enforced max size)
-3. **Memory**: Persistent store (`remember`, `recall`)
-4. **Tool Call**: Suspension boundary for external effects
-5. **Control Flow**: `if`, `while`, `return`
-6. **Operators**: `+` (concat/add), `==`, `!=`, `and`, `or`
+1. **Native Intelligence**: `infer` keyword for direct LLM calls.
+2. **Probabilistic Logic**: `confidence` operator and uncertainty propagation.
+3. **Concurrency**: Actor model (`spawn`, `send`, `receive`).
+4. **Vector Embeddings**: `vec[...]` literals and `~>` similarity.
+5. **Turn**: Unit of execution and checkpointing.
+6. **Context**: Bounded buffer (runtime-enforced max size).
+7. **Memory**: Persistent store (`remember`, `recall`).
+8. **Tool Call**: Suspension boundary for external effects.
+9. **Control Flow**: `if`, `while`, `return`, `try/catch`.
 
 ### What Makes It Different
 
@@ -313,6 +318,6 @@ Both layers are necessary. Solving semantic problems on a slow runtime contradic
 
 ---
 
-**Last Updated**: 2026-02-17  
-**Version**: 1.0.0-alpha  
-**Status**: Specification locked, implementation in progress
+**Last Updated**: 2026-02-18  
+**Version**: 0.2.0  
+**Status**: Core Implementation Complete (Phases 1-4)
