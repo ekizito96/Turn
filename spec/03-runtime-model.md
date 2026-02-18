@@ -1,29 +1,30 @@
-# Turn runtime model (v1)
+# Turn runtime model (v0.4 Alpha)
 
-**Status:** Locked for v1. Turn is object-oriented: execution is the **agent** running. The **configuration** is the full state of that agent at any point—its environment, its context object, its memory object, its tool registry, turn state, and remaining program. This document defines that state, one transition rule for executing one turn, and lifetimes. Implementations and tools must conform.
+**Status:** Public alpha spec. Turn execution is a **process** running. The **configuration** is the full state of that process at any point—its environment, managed context, managed memory, mailbox, tool registry, turn/control-cycle state, and remaining program. This document defines that state, transition rules for executing within a turn/control cycle, and lifetimes. Implementations and tools must conform.
 
 ---
 
-## 1. Configuration (agent state)
+## 1. Configuration (process state)
 
-The **configuration** is the full state of the **agent** at any point. It is a single value (e.g. a record or struct) with the following components. Conceptually: the agent has these objects and this execution state.
+The **configuration** is the full state of the **process** at any point. It is a single value (e.g. a record or struct) with the following components.
 
 | Component      | Type / meaning | Lifetime |
 |----------------|----------------|----------|
 | **env**        | Map from identifier to value. Current lexical bindings (variables, let-bound names). | Updated on `let`; pushed/popped on block entry/exit. |
-| **context**    | The agent's **context object**: bounded buffer of values (messages or state entries). Max size N (fixed for v1). | Per agent (per run). Updated by `context.append`. When at max, append either fails or evicts (see error model). |
-| **memory**     | The agent's **memory object**: key-value store. Keys and values are values (e.g. strings). | Per agent; may be persisted across runs (implementation-defined). Updated by `remember`; read by `recall`. |
-| **tool_registry** | The agent's **tool registry**: map from tool name (string) to handler. | Set at startup. Used when evaluating `call(name, arg)`. |
-| **turn_state** | Current turn id (optional); pending suspension (if any). | Updated when entering a turn and when suspending/resuming on `call`. |
+| **context**    | Managed context buffer. Bounded by a runtime invariant (by entries, bytes, or tokens). | Per process. Updated by `context.append`. On overflow, runtime follows the error/policy model. |
+| **memory**     | Managed memory store. Key-value map plus optional semantic addressing metadata. | Per process; may be persisted across runs (implementation-defined). Updated by `remember`; read by `recall`. |
+| **mailbox**    | Queue of messages for actor-style concurrency (`send`/`receive`). | Per process. Updated by `send`; consumed by `receive`. |
+| **tool_registry** | Tool registry: map from tool name (string) to handler. | Set at startup. Used when evaluating `call(name, arg)` and `infer` (via an inference effect). |
+| **turn_state** | Current turn id (optional); pending suspension (if any). | Updated when entering a turn and when suspending/resuming on effects (`call`, `infer`, `suspend`). |
 | **program**    | Remaining program to execute (or current turn body). | For interpreter: pointer into AST or current statement. |
 
 **Notation:** We write a configuration as a tuple or record, e.g.:
 
 ```
-Config = (env, context, memory, tool_registry, turn_state, program)
+Config = (env, context, memory, mailbox, tool_registry, turn_state, program)
 ```
 
-For **serialization** (checkpoint, replay, debug): we serialize `env`, `context`, `memory`, and `turn_state`. We do **not** serialize `tool_registry` (it is runtime setup) or the full `program` (we can store program source or AST separately). So the "serializable state" is `(env, context, memory, turn_state)`.
+For **serialization** (checkpoint, replay, debug): we serialize `env`, `context`, `memory`, `mailbox`, and `turn_state`. We do **not** serialize `tool_registry` (it is runtime setup) or the full `program` (we can store program source or AST separately). So the "serializable state" is `(env, context, memory, mailbox, turn_state)`.
 
 ### Invariants (preserved by every transition)
 
@@ -31,13 +32,13 @@ The following must hold at **every** step (and the runtime must enforce them so 
 
 1. **Context bound:** |context| ≤ N (or total context size ≤ M, if the runtime measures in tokens or bytes). On `context.append(expr)` when at the bound, the runtime either evicts (e.g. drop oldest) or fails (see error model); it does **not** allow context to grow beyond N.
 2. **Configuration well-formedness:** `env` is a finite map; `context` is a sequence of values; `memory` is a key-value map; `tool_registry` is a map from tool names to handlers; `program` is a valid remaining program (or the empty program). No component is undefined or malformed.
-3. **Serializable state:** The tuple `(env, context, memory, turn_state)` is sufficient to restore execution (with program and tool_registry provided separately). So checkpointing does not lose information needed to resume.
+3. **Serializable state:** The tuple `(env, context, memory, mailbox, turn_state)` is sufficient to restore execution (with program and tool_registry provided separately). So checkpointing does not lose information needed to resume.
 
 Implementations must maintain these invariants. The transition relation is defined so that every step preserves them (context bound by eviction or fail on append; well-formedness by construction; serializable state unchanged by step).
 
 ---
 
-## 2. Values (v1)
+## 2. Values (alpha)
 
 - **Literal values:** numbers, strings, booleans (`true`, `false`), `null`.
 - **Operators:** `+` (concatenation/addition), `==`, `!=` (equality), `and`, `or` (logical, short-circuit). See [02-grammar.md](02-grammar.md) §7 for semantics.
@@ -53,9 +54,9 @@ We leave "what is a value" minimal: numbers, strings, and possibly a dedicated "
 We define a **small-step** transition: one step takes the configuration to a new configuration or to a **suspension**.
 
 **Step relation:**  
-`Config → Config'`  or  `Config → Suspension(tool_name, arg, continuation)`
+`Config → Config'`  or  `Config → Suspension(effect_name, arg, continuation)`
 
-**Suspension** means: the program has evaluated to a `call(tool_name, arg)` and we need to run the tool. The **continuation** is the rest of the program (and env, etc.) that will run when we resume with the tool result.
+**Suspension** means: the program has evaluated to an **effect boundary** (`call`, `infer`, or `suspend`) and the runtime must perform an external action or durable commit. The **continuation** is the rest of the program (and env, etc.) that will run when we resume with the effect result (or a null result for `suspend`).
 
 **Rules (informal):**
 
@@ -63,7 +64,9 @@ We define a **small-step** transition: one step takes the configuration to a new
    - If `stmt` is `let id = expr`: evaluate `expr` in env; extend env with `id → value`; continue with `rest`.
    - If `stmt` is `context.append(expr)`: evaluate `expr`; append to context (if under bound); continue with `rest`. If context is full, follow error model (e.g. fail or evict).
    - If `stmt` is `remember(k, v)`: evaluate `k` and `v`; update memory with `k → v`; continue with `rest`.
-   - If `stmt` is `call(tool_name, arg)`: evaluate `tool_name` and `arg`; produce **Suspension(tool_name, arg, continuation)**. The continuation holds the rest of the program and current env/context/memory/turn_state.
+   - If `stmt` is `call(tool_name, arg)`: evaluate `tool_name` and `arg`; produce **Suspension(tool_name, arg, continuation)**.
+   - If `stmt` is `infer Type { prompt; }`: evaluate `Type` and `prompt`; produce **Suspension("llm_infer", {schema, prompt, context}, continuation)** (effect name is implementation-defined; semantics are suspension + typed result).
+   - If `stmt` is `suspend;`: produce **Suspension("sys_suspend", null, continuation)** to force a durable checkpoint boundary.
    - If `stmt` is `return expr`: evaluate `expr`; the turn completes with that value. (No more steps for this turn.)
    - If `stmt` is `if expr block1 else block2`: evaluate `expr`; if truthy (non-falsy), next program is `block1`; else `block2`. Then continue.
    - If `stmt` is `while expr block`: evaluate `expr`; if truthy, next program is `block` followed by the same `while` (loop); else continue with `rest`.
@@ -74,7 +77,7 @@ We define a **small-step** transition: one step takes the configuration to a new
 
 3. **Expression evaluation:** Expressions (in let, append, remember, call, return, if condition) are evaluated in the current env to a value. No side effects during expression evaluation except that we might eventually hit a `call` in a nested statement.
 
-**One turn:** A **turn** is the execution of a `turn { body }` from start until (a) the body runs to completion (e.g. `return` or end of block), or (b) the body suspends on `call(...)`. So "one turn" is the maximal sequence of steps that starts with entering a turn and ends with either turn completion or suspension.
+**One turn:** A **turn** is the execution of a `turn { body }` from start until (a) the body runs to completion (e.g. `return` or end of block), or (b) the body suspends on an effect boundary (`call`, `infer`, `suspend`). So "one turn" is the maximal sequence of steps that starts with entering a turn and ends with either turn completion or suspension.
 
 **Big-step (optional):** We can also define a **big-step** relation for a whole turn: `(config, turn_body) ⇓ (config', result)` or `(config, turn_body) ⇓ Suspension(...)`. The small-step relation defines the same behavior; big-step is a convenient abstraction for "run this turn to completion or suspension."
 
@@ -84,7 +87,7 @@ Turn's core language is **deterministic**: given a configuration and a sequence 
 
 **Non-determinism is quarantined at effect boundaries:**
 - **Tool calls:** `call(tool_name, arg)` suspends; the tool handler may be non-deterministic (network timing, stochastic APIs). When we resume with a result, that result becomes part of the **input sequence** for reproducibility.
-- **LLM calls:** (Future) LLM calls are also effects; their outputs are non-deterministic but become inputs for replay.
+- **LLM calls:** `infer` is an effect; outputs are non-deterministic but become inputs for replay.
 
 **Why this matters:**
 - **Debugging:** Replay the same input sequence → reproduce the bug.
@@ -110,19 +113,19 @@ Turn's core language is **deterministic**: given a configuration and a sequence 
 
 ## 5. Default runtime (batteries included)
 
-For v1 we specify a **default runtime** so that a Turn program can run without external setup:
+For the alpha we specify a **default runtime** so that a Turn program can run without external setup:
 
 - **Context:** In-memory buffer; max size N (e.g. 100 entries or 10_000 tokens—implementation chooses). When full, append either returns an error or evicts oldest (see [05-types-and-errors.md](05-types-and-errors.md)).
-- **Memory:** In-memory key-value map. No persistence by default.
+- **Memory:** In-memory key-value map. Persistence is implementation-defined.
 - **Tool registry:** At least one built-in tool, e.g. `echo`, so that `call("echo", "hello")` works. Handler: return the argument as the result (or print and return ok).
 
-So "run this Turn program" means: create one **agent** with env (empty), context object (empty, max N), memory object (empty), tool registry (echo + any user-provided tools), turn_state (no turn); then run the program (the agent's behavior) from the first statement.
+So "run this Turn program" means: create one **process** with env (empty), context (empty, bounded), memory (empty), mailbox (empty), tool registry (echo + any user-provided tools), turn_state (no turn); then run the program from the first statement.
 
 ---
 
 ## 6. Summary
 
-- **Configuration** = agent state = (env, context, memory, tool_registry, turn_state, program).
+- **Configuration** = process state = (env, context, memory, mailbox, tool_registry, turn_state, program).
 - **One step** = small-step transition or suspension. **One turn** = run a turn body to completion or suspension.
 - **Serializable state** = (env, context, memory, turn_state) for checkpoint/replay of the agent.
 - **Default runtime** = one agent with in-memory context object (bounded), in-memory memory object, at least `echo` tool.
@@ -137,7 +140,7 @@ To achieve the "Universal Agent" capability (durable, pausable, resumable), impl
 2.  **Run:** Execute until `Complete` or `Suspended`.
 3.  **Handle Suspension:**
     *   If `Suspended(tool, arg, continuation)`:
-    *   **Persist:** Save `continuation` to durable storage (DB/Disk).
+    *   **Persist:** Save `continuation` to durable storage (mechanism implementation-defined).
     *   **Execute:** Run the tool (async, human-in-the-loop, etc.).
     *   **Resume:** Load `continuation`, inject `result`, and goto Step 2.
 4.  **Complete:** Return final value.

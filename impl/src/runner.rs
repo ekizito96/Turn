@@ -236,6 +236,12 @@ impl<S: Store> Runner<S> {
                     return Ok(v);
                 }
                 VmResult::Suspended { tool_name, arg, continuation } => {
+                    // Handle Suspend
+                    if tool_name == "sys_suspend" {
+                        self.store.save(id, &continuation)?;
+                        return Ok(Value::Null);
+                    }
+
                     // Handle Import
                     if tool_name == "sys_import" {
                         // 3a. Save state (checkpoint)

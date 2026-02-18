@@ -1,4 +1,4 @@
-# Types and errors (v1)
+# Types and errors (v0.4 Alpha)
 
 **Status:** Locked for v1. Documents type-friendly design (for a future typed surface) and the error model. v1 has **no type syntax**; this spec ensures we don't paint ourselves into a corner.
 
@@ -8,13 +8,13 @@
 
 We design the **runtime and primitives** so that a later type system can assign sensible types without breaking changes.
 
-Turn is object-oriented; the type system should reflect that. In v1 we have one agent with untyped context and memory; future types assign sensible types to these objects and to the agent.
+Turn is process-centric; the type system should reflect that. In the minimal core we have one process with runtime-managed context and memory. The goal is to keep operational semantics stable while strengthening static guarantees.
 
 | Concept | v1 (untyped) | Future typing |
 |--------|---------------|----------------|
-| **Agent** | One instance; state = (env, context, memory, turn_state, program). | `Agent` type with attributes: `context: Context<T>`, `memory: Memory<K,V>`, and methods (turn, call). User-defined agent classes in later versions. |
-| **Context** | The agent's bounded buffer. | `Context<T>` or `context: Buffer<Message>`. Append takes `T`; index/iteration (if added) yield `T`. |
-| **Memory** | The agent's key-value store. | `Memory<K, V>` or `memory: Map<K, V>`. `remember(k, v)` requires `k: K`, `v: V`; `recall(k)` returns `V` or `Option<V>`. |
+| **Process** | One instance; state = (env, context, memory, turn_state, program). | `Process` type with managed resources (context, memory) and effect capabilities (call, infer). |
+| **Context** | A bounded buffer managed by the runtime. | `Context<T>` with policies for retention/promotion; append takes `T`. |
+| **Memory** | A key-value store managed by the runtime. | `Memory<K, V>`; `remember(k, v)` requires `k: K`, `v: V`; `recall(k)` returns `V` or `Option<V>`. |
 | **Tool call** | `call(name, arg)` → result value. | `call(name, arg): R` where the registry maps `name` to a type like `(A) => R`. |
 | **Turn** | `turn { body }` produces a value or suspension. | `turn { body }: T` where body's return type is `T`; suspension is an effect. |
 | **Values** | Numbers, strings, booleans (`true`, `false`), `null`. | Primitives and product/sum types if we add them. |
@@ -32,7 +32,7 @@ We classify errors and define **recoverable** vs **fatal** and what the implemen
 ### 2.1 Context full
 
 - **When:** `context.append(expr)` and the context buffer is already at max size N.
-- **Behavior (v1):** **Fatal** (abort this turn or program) **or** implementation-defined eviction (e.g. drop oldest entry then append). Spec allows either; implementation must document which.
+- **Behavior (alpha):** **Fatal** (abort this turn or program) **or** implementation-defined eviction (e.g. drop oldest entry then append). Spec allows either; implementation must document which.
 - **Message (example):** `"context full (max N); append failed"` or `"context full; evicted oldest entry"`.
 
 ### 2.2 Tool not found

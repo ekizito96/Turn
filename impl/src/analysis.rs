@@ -561,6 +561,7 @@ impl Analysis {
                 self.visit_expr(arg);
             }
             Stmt::Throw { expr, .. } => self.visit_expr(expr),
+            Stmt::Suspend { .. } => {},
         }
     }
 

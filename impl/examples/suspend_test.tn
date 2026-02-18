@@ -1,0 +1,4 @@
+call("echo", "Phase 1: Start");
+suspend;
+call("echo", "Phase 2: Resumed");
+return "Done";

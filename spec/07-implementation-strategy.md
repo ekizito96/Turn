@@ -25,8 +25,6 @@ If we build on TypeScript/Node:
 
 ## The Real Problems We're Solving
 
-From [00-problems-we-solve.md](../research/00-problems-we-solve.md):
-
 1. **Cost:** $500+/day at 1K users. Token accumulation (2.1K → 47K tokens). **Every CPU cycle and memory byte matters.**
 2. **Performance:** Agent loops need to be fast. Checkpointing, context append, memory read should be **minimal overhead**.
 3. **Token efficiency:** Bounded context, minimal runtime overhead so more budget goes to **actual agent work**, not interpreter overhead.
@@ -121,7 +119,7 @@ From [00-problems-we-solve.md](../research/00-problems-we-solve.md):
 - **Lexer/Parser:** Rust (or generate from grammar)
 - **Compiler:** Turn → bytecode (Rust)
 - **VM:** Execute bytecode (Rust)
-- **Runtime:** Agent state, suspension, tool registry (Rust)
+- **Runtime:** Process state, suspension, tool registry (Rust)
 
 **Why Rust:**
 - **Fast:** Native speed, zero-cost abstractions
@@ -177,7 +175,7 @@ impl/
 ├── compiler.rs       # AST → bytecode
 ├── bytecode.rs       # Instruction definitions
 ├── vm.rs             # Execute bytecode
-├── runtime.rs        # Agent state, transition rules
+├── runtime.rs        # Process state, transition rules
 └── tools.rs          # Tool registry, handlers
 ```
 
@@ -199,7 +197,7 @@ impl/
 
 ### Turn's Runtime Model Is Independent
 
-- **Agent state** (context, memory, turn_state) is defined in spec/03-runtime-model.md. Python/TS are just storage (dicts, objects). Turn's **semantics** (bounded context, checkpointing, suspension) are ours.
+- **Process state** (env, context, memory, mailbox, turn_state) is defined in spec/03-runtime-model.md. Python/TS are just storage (dicts, objects). Turn's **semantics** (bounded context, checkpointing, suspension) are ours.
 - **Cost model** (one config, one transition) is Turn's. Python overhead is **additive**, not **multiplicative**—we can measure and optimize it separately.
 
 ### Turn's Syntax Is Ours
@@ -224,7 +222,7 @@ impl/
 │   ├── compiler.rs  # AST → bytecode
 │   ├── bytecode.rs  # Instruction definitions, serialization
 │   ├── vm.rs        # Execute bytecode
-│   ├── runtime.rs   # Agent state, transition rules (spec/03-runtime-model.md)
+│   ├── runtime.rs   # Process state, transition rules (spec/03-runtime-model.md)
 │   └── tools.rs     # Tool registry, handlers
 └── tests/
     └── hello_turn.turn  # Test with spec/04-hello-turn.md
@@ -282,14 +280,14 @@ impl/
 
 ---
 
-## Recommendation: Rust Bytecode VM (v1)
+## Recommendation: Rust Bytecode VM
 
 **Build Turn's runtime in Rust from the start.**
 
 - **Lexer/Parser:** Rust (or generate from grammar with `lalrpop`/`pest`)
 - **Compiler:** Turn → bytecode (Rust)
 - **VM:** Execute bytecode (Rust)
-- **Runtime:** Agent state, suspension, tool registry (Rust)
+- **Runtime:** Process state, suspension, tool registry (Rust)
 
 **Performance target:** Native speed. Profile from day one.
 

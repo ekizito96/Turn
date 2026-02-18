@@ -4,6 +4,9 @@ use crate::value::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
+use crate::ast::Type;
+use indexmap::IndexMap;
+
 const MAX_CONTEXT_SIZE: usize = 100;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11,6 +14,7 @@ pub struct Runtime {
     pub env: HashMap<String, Value>,
     pub context: Vec<Value>,
     pub memory: HashMap<String, Value>,
+    pub structs: HashMap<String, IndexMap<String, Type>>,
 }
 
 impl Runtime {
@@ -19,7 +23,12 @@ impl Runtime {
             env: HashMap::new(),
             context: Vec::new(),
             memory: HashMap::new(),
+            structs: HashMap::new(),
         }
+    }
+
+    pub fn register_struct(&mut self, name: String, fields: IndexMap<String, Type>) {
+        self.structs.insert(name, fields);
     }
 
     pub fn append_context(&mut self, value: Value) -> Result<(), RuntimeError> {

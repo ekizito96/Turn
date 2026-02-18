@@ -226,6 +226,99 @@ fn call_ollama_chat(
     }
 }
 
+fn call_azure_chat(
+    api_key: &str,
+    endpoint: &str,
+    deployment: &str,
+    api_version: &str,
+    messages: &serde_json::Value
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::new();
+    // Azure URL: {endpoint}/openai/deployments/{deployment}/chat/completions?api-version=...
+    // Note: endpoint usually includes https://
+    let base = endpoint.trim_end_matches('/');
+    let url = format!(
+        "{}/openai/deployments/{}/chat/completions?api-version={}",
+        base, deployment, api_version
+    );
+
+    let payload = serde_json::json!({
+        "messages": messages
+    });
+
+    match client.post(&url)
+        .header("api-key", api_key)
+        .json(&payload)
+        .send() {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                            Ok(content.to_string())
+                        } else {
+                            Err("Invalid response format from Azure OpenAI".to_string())
+                        }
+                    },
+                    Err(e) => Err(format!("Failed to parse response: {}", e)),
+                }
+            } else {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                Err(format!("Azure API error {}: {}", status, text))
+            }
+        },
+        Err(e) => Err(format!("Request failed: {}", e)),
+    }
+}
+
+fn call_azure_responses(
+    api_key: &str,
+    responses_url: &str,
+    model: &str,
+    messages: &serde_json::Value,
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::new();
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "max_completion_tokens": 16384
+    });
+
+    match client
+        .post(responses_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(text) = json.get("output_text").and_then(|v| v.as_str()) {
+                            return Ok(text.to_string());
+                        }
+                        if let Some(text) = json["output"][0]["content"][0]["text"].as_str() {
+                            return Ok(text.to_string());
+                        }
+                        if let Some(text) = json["choices"][0]["message"]["content"].as_str() {
+                            return Ok(text.to_string());
+                        }
+                        Err("Invalid response format from Azure Responses API".to_string())
+                    }
+                    Err(e) => Err(format!("Failed to parse response: {}", e)),
+                }
+            } else {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                Err(format!("Azure Responses API error {}: {}", status, text))
+            }
+        }
+        Err(e) => Err(format!("Request failed: {}", e)),
+    }
+}
+
 fn call_llm_dispatch(
     model_hint: Option<&str>,
     messages: &serde_json::Value
@@ -235,6 +328,32 @@ fn call_llm_dispatch(
     let model = model_hint.or(env_model.as_deref());
 
     match provider.as_str() {
+        "azure" => {
+            let api_key = env::var("AZURE_OPENAI_KEY")
+                .or_else(|_| env::var("AZURE_API_KEY"))
+                .map_err(|_| "AZURE_OPENAI_KEY or AZURE_API_KEY not set".to_string())?;
+
+            // If full Responses API URL is provided, use it directly.
+            if let Ok(responses_url) = env::var("AZURE_OPENAI_RESPONSES_URL") {
+                let final_model = model.unwrap_or("gpt-5.2-codex");
+                return call_azure_responses(&api_key, &responses_url, final_model, messages);
+            }
+
+            let endpoint = env::var("AZURE_OPENAI_ENDPOINT")
+                .map_err(|_| "AZURE_OPENAI_ENDPOINT not set".to_string())?;
+            let api_version = env::var("AZURE_OPENAI_API_VERSION")
+                .unwrap_or_else(|_| "2024-12-01-preview".to_string());
+
+            // Allow passing a full responses URL in AZURE_OPENAI_ENDPOINT too.
+            if endpoint.contains("/openai/responses") {
+                let final_model = model.unwrap_or("gpt-5.2-codex");
+                return call_azure_responses(&api_key, &endpoint, final_model, messages);
+            }
+
+            // For deployment path mode, model maps to deployment name.
+            let deployment = model.unwrap_or("gpt-5.2-chat");
+            call_azure_chat(&api_key, &endpoint, deployment, &api_version, messages)
+        },
         "anthropic" => {
             let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
             let final_model = model.unwrap_or("claude-3-opus-20240229");
@@ -293,7 +412,10 @@ impl ToolRegistry {
         // echo
         tools.insert(
             "echo".to_string(),
-            Box::new(|arg| Ok(arg)) as ToolHandler,
+            Box::new(|arg| {
+                println!("{}", arg);
+                Ok(arg)
+            }) as ToolHandler,
         );
 
         // sleep
@@ -571,18 +693,69 @@ impl ToolRegistry {
                  if let Value::Map(m) = arg {
                      let schema = m.get("schema").unwrap_or(&Value::Null);
                      let prompt = m.get("prompt").unwrap_or(&Value::Null);
+                     let context = m.get("context").unwrap_or(&Value::Null);
                      
-                     let system_msg = serde_json::json!({
+                     let mut msgs = Vec::new();
+                     
+                     // Helper to extract struct info from Debug string
+                     // Struct("Name", {"field": Type, ...})
+                     let mut json_hint = String::new();
+                     if let Value::Str(s) = schema {
+                         if s.contains("Struct") {
+                             if let Some(start) = s.find('{') {
+                                 if let Some(end) = s.rfind('}') {
+                                     let fields_str = &s[start+1..end];
+                                     // "score": Num, "reasoning": Str
+                                     let mut field_hints = Vec::new();
+                                     for part in fields_str.split(',') {
+                                         let part = part.trim();
+                                         if let Some(idx) = part.find(':') {
+                                             let key = part[..idx].trim().trim_matches('"');
+                                             let ty_raw = part[idx+1..].trim();
+                                             let example_val = if ty_raw.contains("Num") { "0.8" }
+                                                             else if ty_raw.contains("Str") { "\"example\"" }
+                                                             else if ty_raw.contains("Bool") { "true" }
+                                                             else { "null" };
+                                             field_hints.push(format!("\"{}\": {}", key, example_val));
+                                         }
+                                     }
+                                     if !field_hints.is_empty() {
+                                         json_hint = format!("{{ {} }}", field_hints.join(", "));
+                                     }
+                                 }
+                             }
+                         }
+                     }
+
+                     let sys_msg = if !json_hint.is_empty() {
+                         format!("You are a Turn Language Runtime. The user wants a value matching the provided schema.\n\nREQUIRED OUTPUT FORMAT:\n{{ \"value\": {}, \"confidence\": <0.0-1.0> }}\n\nEnsure 'value' is a VALID JSON object matching the example structure EXACTLY, filling fields based on the Prompt.", json_hint)
+                     } else {
+                         "You are a Turn Language Runtime. The user wants a value matching the provided schema. \n\nIMPORTANT: If the schema describes a Struct (e.g. Struct(\"Name\", { fields... })), you MUST return a JSON object for the 'value' field that strictly matches those fields.\n\nOutput ONLY JSON object: { \"value\": <value>, \"confidence\": <0.0-1.0> }.".to_string()
+                     };
+
+                     msgs.push(serde_json::json!({
                          "role": "system",
-                         "content": "You are a Turn Language Runtime. The user wants a value matching the provided schema. Output ONLY JSON object: { \"value\": <value>, \"confidence\": <0.0-1.0> }."
-                     });
+                         "content": sys_msg
+                     }));
+
+                     if let Value::List(items) = context {
+                         for item in items {
+                             if let Value::Str(s) = item {
+                                 msgs.push(serde_json::json!({
+                                     "role": "system",
+                                     "content": format!("Context: {}", s)
+                                 }));
+                             }
+                         }
+                     }
+
                      let user_content = format!("Schema Type: {}\nPrompt: {}", schema, prompt);
-                     let user_msg = serde_json::json!({
+                     msgs.push(serde_json::json!({
                          "role": "user",
                          "content": user_content
-                     });
+                     }));
                      
-                     let messages = serde_json::Value::Array(vec![system_msg, user_msg]);
+                     let messages = serde_json::Value::Array(msgs);
                      
                      match call_llm_dispatch(None, &messages) {
                          Ok(content) => {
@@ -591,7 +764,31 @@ impl ToolRegistry {
                                  Ok(json) => {
                                      let val_json = json.get("value").unwrap_or(&serde_json::Value::Null);
                                      let conf = json.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.9);
-                                     let turn_val: Value = serde_json::from_value(val_json.clone()).unwrap_or(Value::Null);
+                                     
+                                     // If schema is Struct, try to parse val_json as Struct
+                                     let turn_val = if let Value::Str(s) = schema {
+                                         if s.contains("Struct") {
+                                             // Best-effort struct parsing from JSON object
+                                             match val_json {
+                                                 serde_json::Value::Object(map) => {
+                                                     let mut fields = indexmap::IndexMap::new();
+                                                     for (k, v) in map {
+                                                         let tv: Value = serde_json::from_value(v.clone()).unwrap_or(Value::Null);
+                                                         fields.insert(k.clone(), tv);
+                                                     }
+                                                     // Extract struct name from schema string "Struct(\"Name\", ...)"
+                                                     let name = s.split('"').nth(1).unwrap_or("Anon").to_string();
+                                                     Value::Struct(name, fields)
+                                                 },
+                                                 _ => serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
+                                             }
+                                         } else {
+                                             serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
+                                         }
+                                     } else {
+                                         serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
+                                     };
+
                                      Ok(Value::Uncertain(Box::new(turn_val), conf))
                                  },
                                  Err(e) => Err(format!("Failed to parse LLM JSON: {} in '{}'", e, clean)),

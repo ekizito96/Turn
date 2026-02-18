@@ -1,15 +1,16 @@
 # Turn design mandate
 
 **Status:** Locked. This is the mission and design constraints for Turn. All spec and implementation decisions must align with it.
-Empirical validation from production agent systems (integration agents, research agents) confirms these mandates (see [research/07-empirical-analysis.md](../research/07-empirical-analysis.md)).
 
 ---
 
 ## 1. What Turn is
 
-**Turn is a new, object-oriented programming language for agentic software.**
+**Turn is a systems language for agentic computation.**
 
-We are not retrofitting an existing language. Turn’s execution model is **object-oriented**: the primary abstraction is the **agent**—an object with identity, state, and behavior. An agent has **context** (a bounded buffer object), **memory** (a persistent key-value object), and the ability to run **turns** (units of execution) and to **call tools** (suspend, invoke, resume). Traditional languages were built for a different model; retrofitting them for agentic software causes real pains. Turn exists to remove those pains by making the agent and its objects native.
+We are not retrofitting an existing language. Turn’s execution model is built around long-lived processes that operate under finite context capacity, stochastic inference, explicit effects (tool calls), and durable state. Turn exists to remove the common failure modes of agentic systems by making these constraints language-native and mechanically enforceable.
+
+**Object model stance:** Turn is object-oriented by **capability and encapsulation**. Value objects (`struct` + methods) and process objects (PID + mailbox + durable state) are the primary organizing units. Turn prefers composition and behavioral contracts (interfaces/traits) over inheritance-heavy hierarchies.
 
 ---
 
@@ -24,7 +25,7 @@ When you build agentic software in current languages, you encode agentic behavio
 - **Wrong mental model** → you think in turns and context; you code in loops and lists
 - **Observability, cost, governance** → all bolted on; no first-class trace or policy
 
-Turn makes the **agent** and its **context**, **memory**, **turn**, and **tool** primitives **primitive and explicit**—language-native objects with a fixed API and runtime-enforced invariants. In v1 the program is the behavior of **one agent instance**; that agent has one context object and one memory object (runtime-managed; not first-class values you can pass or store in v1). We reserve "first-class" for values that can be stored, passed, and returned. Full problem space and science: [research/00-problems-we-solve.md](../research/00-problems-we-solve.md).
+Turn makes the **process** and its **context**, **memory**, **turn/control-cycle boundaries**, and **effects** primitives explicit, with runtime-enforced invariants. In v1 the program is the behavior of a single process instance with runtime-managed context and memory objects. We reserve "first-class" for values that can be stored, passed, and returned.
 
 **Why this minimal set:** Each primitive earns its place. *Turn* = unit of execution and checkpointing; without it we cannot define "one step" or persist state. *Context* = bounded buffer the language can enforce (unbounded lists in other langs cannot). *Memory* = persistent store across turns; distinct from context ("send now" vs "keep"). *Tool call* = single suspension boundary for external effects. We cannot derive one from the others without losing expressiveness or invariants. So the minimal core is justified, not arbitrary.
 
@@ -58,4 +59,4 @@ We add more as we grow (e.g. multi-agent, richer types), but **minimal tokens, p
 
 **Implementation:** Turn is built in **Rust from day one** (bytecode VM). Not Python/TypeScript—those languages' overhead contradicts our goals (fast, cost-efficient). Rust gives us native speed, minimal memory, single binary, true concurrency. See [07-implementation-strategy.md](07-implementation-strategy.md).
 
-Future work (agent as value, multi-agent, user-defined agent classes, modules, types) stays within this mandate: **object-oriented language for agentic software, solve retrofit pains, minimize tokens and compute, performance, security, boilerplate.**
+Future work (multi-agent semantics, richer types, stronger policies) stays within this mandate: **physics-first semantics, determinism at boundaries, durable state, bounded context, and measurable cost control.**
