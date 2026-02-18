@@ -64,7 +64,7 @@ fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         Value::Num(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Err(RuntimeError::InvalidMemoryKey),
-        Value::List(_) | Value::Map(_) | Value::Closure { .. } => Err(RuntimeError::InvalidMemoryKey),
+        Value::List(_) | Value::Map(_) | Value::Struct(_, _) | Value::Closure { .. } | Value::Pid(_) | Value::Vec(_) => Err(RuntimeError::InvalidMemoryKey),
     }
 }
 

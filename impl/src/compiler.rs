@@ -60,8 +60,11 @@ impl Compiler {
                 let after_turn = self.code.len() as u32;
                 self.patch_jump(enter_turn_addr, after_turn);
             }
-            Stmt::Let { name, init, .. } => {
+            Stmt::Let { name, ty, init, .. } => {
                 self.compile_expr(init);
+                if let Some(t) = ty {
+                    self.emit(Instr::CheckType(t.clone()));
+                }
                 self.emit(Instr::Store(name.clone()));
             }
             Stmt::ContextAppend { expr, .. } => {
@@ -145,6 +148,20 @@ impl Compiler {
                 self.compile_expr(expr);
                 self.emit(Instr::Pop);
             }
+            Stmt::StructDef { .. } => {
+                // Struct definition is purely static info for now. No runtime effect.
+                // Or we could register it in runtime if we want runtime type tags.
+                // For now, no-op in bytecode.
+            }
+            Stmt::ImplDef { methods, .. } => {
+                // Compile methods so they exist as functions in the scope
+                for method in methods {
+                    self.compile_stmt(method);
+                }
+            }
+            Stmt::TypeAlias { .. } => {
+                // Type aliases are static-only.
+            }
         }
     }
 
@@ -189,9 +206,20 @@ impl Compiler {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
             }
-            Expr::Turn { body, .. } => {
+            Expr::Turn { params, ret_ty: _, body, .. } => {
                 let jump_over = self.emit(Instr::Jump(0));
                 let start_addr = self.code.len() as u32;
+
+                // Parameter type checks
+                // Assumes arguments are already in env (via CallTool)
+                for (name, _, ty) in params {
+                    if let Some(t) = ty {
+                        self.emit(Instr::Load(name.clone()));
+                        self.emit(Instr::CheckType(t.clone()));
+                        self.emit(Instr::Pop); // Discard value, just check
+                    }
+                }
+
                 self.compile_block(body);
                 // Implicit return
                 let has_return = body.stmts.last().map_or(false, |s| matches!(s, Stmt::Return { .. }));
@@ -214,6 +242,13 @@ impl Compiler {
                     self.compile_expr(item);
                 }
                 self.emit(Instr::MakeList(len));
+            }
+            Expr::Vec { items, .. } => {
+                let len = items.len();
+                for item in items {
+                    self.compile_expr(item);
+                }
+                self.emit(Instr::MakeVec(len));
             }
             Expr::Map { entries, .. } => {
                 let len = entries.len();
@@ -245,6 +280,9 @@ impl Compiler {
                     BinOp::Or => {
                         self.emit(Instr::Or);
                     }
+                    BinOp::Similarity => {
+                        self.emit(Instr::Similarity);
+                    }
                 }
             }
             Expr::Unary { op, expr, .. } => {
@@ -261,7 +299,50 @@ impl Compiler {
                     }
                 }
             }
+            Expr::Spawn { expr, .. } => {
+                self.compile_expr(expr);
+                self.emit(Instr::Spawn);
+            }
+            Expr::Send { pid, msg, .. } => {
+                self.compile_expr(pid);
+                self.compile_expr(msg);
+                self.emit(Instr::Send);
+            }
+            Expr::Receive { .. } => {
+                self.emit(Instr::Receive);
+            }
+            Expr::Confidence { expr, .. } => {
+                self.compile_expr(expr);
+                self.emit(Instr::Confidence);
+            }
             Expr::Paren(inner) => self.compile_expr(inner),
+            Expr::StructInit { name, fields, .. } => {
+                // Compile as Struct creation
+                let len = fields.len();
+                for (key, val) in fields {
+                    self.emit(Instr::PushStr(key.clone()));
+                    self.compile_expr(val);
+                }
+                self.emit(Instr::MakeStruct(name.clone(), len));
+            }
+            Expr::MethodCall { target, name, arg, .. } => {
+                // Lower `obj.method(arg)` to `call(method, arg)` logic.
+                // If `arg` is Null (no args), pass `target` as the argument.
+                // If `arg` is present, pass `arg` (and `target` is effectively ignored by current runtime, 
+                // unless we implement multi-arg calling convention or `self`).
+                self.emit(Instr::Load(name.clone()));
+                
+                // Check if arg is literal Null (from parser empty parens)
+                let is_null_arg = matches!(**arg, Expr::Literal { value: Literal::Null, .. });
+                
+                if is_null_arg {
+                    self.compile_expr(target);
+                } else {
+                    self.compile_expr(arg);
+                }
+                
+                self.emit(Instr::CallTool);
+            }
         }
     }
 }

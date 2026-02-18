@@ -1,8 +1,6 @@
 use turn::server;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn test_server_run() {

@@ -16,11 +16,15 @@ pub enum Value {
     Str(String),
     List(Vec<Value>),
     Map(IndexMap<String, Value>),
+    Struct(String, IndexMap<String, Value>),
     Closure {
         code: Arc<Vec<Instr>>,
         ip: usize,
         env: HashMap<String, Value>,
     },
+    Pid(u64), // Process ID
+    Vec(Vec<f64>),
+    Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
 }
 
 impl Value {
@@ -32,6 +36,10 @@ impl Value {
             Value::Num(n) => *n == 0.0 || *n == -0.0,
             Value::List(l) => l.is_empty(),
             Value::Map(m) => m.is_empty(),
+            Value::Struct(_, m) => m.is_empty(),
+            Value::Pid(_) => false,
+            Value::Vec(v) => v.is_empty(),
+            Value::Uncertain(v, _) => v.is_falsy(),
             Value::Closure { .. } => false,
         }
     }
@@ -65,6 +73,24 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::Struct(name, m) => {
+                write!(f, "{} {{", name)?;
+                for (i, (k, v)) in m.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
+            Value::Pid(id) => write!(f, "<pid {}>", id),
+            Value::Vec(v) => {
+                write!(f, "vec[")?;
+                for (i, val) in v.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", val)?;
+                }
+                write!(f, "]")
+            }
+            Value::Uncertain(v, p) => write!(f, "{} ({}%)", v, p * 100.0),
         }
     }
 }

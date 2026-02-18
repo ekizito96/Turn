@@ -1,4 +1,4 @@
-use turn::{Vm, VmResult, compiler, parser, lexer, tools, Value};
+use turn::{Vm, VmResult, compiler, parser, lexer, Value};
 
 #[test]
 fn test_list_creation() {
@@ -13,7 +13,6 @@ fn test_list_creation() {
     let program = parser::Parser::new(tokens).parse().unwrap();
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
-    let tools = tools::ToolRegistry::new();
     let mut vm = Vm::new(&code);
     
     match vm.run() {
@@ -44,7 +43,6 @@ fn test_map_creation() {
     let program = parser::Parser::new(tokens).parse().unwrap();
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
-    let tools = tools::ToolRegistry::new();
     let mut vm = Vm::new(&code);
     
     match vm.run() {
@@ -74,7 +72,6 @@ fn test_nested_structures() {
     let program = parser::Parser::new(tokens).parse().unwrap();
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
-    let tools = tools::ToolRegistry::new();
     let mut vm = Vm::new(&code);
     
     match vm.run() {

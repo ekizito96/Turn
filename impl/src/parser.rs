@@ -1,6 +1,7 @@
 //! Parser for Turn. Precedence-climbing for expressions per spec/02-grammar.md.
 //! Precedence (highest to lowest): + > == != > and > or
 
+use indexmap::IndexMap;
 use crate::ast::*;
 use crate::lexer::{Span, SpannedToken, Token};
 use std::iter::Peekable;
@@ -70,13 +71,41 @@ impl Parser {
     fn parse_type(&mut self) -> Result<Type, ParseError> {
         let t = self.next().ok_or(ParseError::UnexpectedEof)?;
         match t.token {
+            Token::LParen => {
+                let arg_type = self.parse_type()?;
+                self.expect(Token::RParen)?;
+                self.expect(Token::Arrow)?;
+                let ret_type = self.parse_type()?;
+                Ok(Type::Function(Box::new(arg_type), Box::new(ret_type)))
+            }
             Token::TypeNum => Ok(Type::Num),
             Token::TypeStr => Ok(Type::Str),
             Token::TypeBool => Ok(Type::Bool),
-            Token::TypeList => Ok(Type::List),
-            Token::TypeMap => Ok(Type::Map),
+            Token::TypeList => {
+                if matches!(self.peek(), Some(Token::Less)) {
+                    self.next(); // consume <
+                    let inner = self.parse_type()?;
+                    self.expect(Token::Greater)?;
+                    Ok(Type::List(Box::new(inner)))
+                } else {
+                    Ok(Type::List(Box::new(Type::Any)))
+                }
+            }
+            Token::TypeMap => {
+                if matches!(self.peek(), Some(Token::Less)) {
+                    self.next(); // consume <
+                    let inner = self.parse_type()?;
+                    self.expect(Token::Greater)?;
+                    Ok(Type::Map(Box::new(inner)))
+                } else {
+                    Ok(Type::Map(Box::new(Type::Any)))
+                }
+            }
             Token::TypeAny => Ok(Type::Any),
             Token::TypeVoid => Ok(Type::Void),
+            Token::TypePid => Ok(Type::Pid),
+            Token::TypeVec => Ok(Type::Vec),
+            Token::Id(name) => Ok(Type::Struct(name, IndexMap::new())), // Placeholder until resolution
             _ => Err(ParseError::UnexpectedToken(t.span)),
         }
     }
@@ -88,6 +117,71 @@ impl Parser {
                 self.next();
                 let body = self.parse_block()?;
                 Ok(Stmt::Turn { body, span })
+            }
+            Some(Token::Type) => {
+                self.next();
+                let Token::Id(name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
+                    return Err(ParseError::UnexpectedToken(self.span()));
+                };
+                self.expect(Token::Eq)?;
+                let ty = self.parse_type()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::TypeAlias { name, ty, span })
+            }
+            Some(Token::Impl) => {
+                self.next();
+                let Token::Id(type_name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
+                    return Err(ParseError::UnexpectedToken(self.span()));
+                };
+                self.expect(Token::LBrace)?;
+                let mut methods = Vec::new();
+                while !matches!(self.peek(), Some(Token::RBrace) | Some(Token::Eof)) {
+                    // Only Let statements (functions) allowed in impl block for now
+                    if matches!(self.peek(), Some(Token::Let)) {
+                        methods.push(self.parse_stmt()?);
+                    } else {
+                        // Or allow arbitrary logic? No, definitions only.
+                        // For simplicity, reuse parse_stmt, but validation logic belongs in analysis.
+                        methods.push(self.parse_stmt()?);
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                if matches!(self.peek(), Some(Token::Semicolon)) {
+                    self.next();
+                }
+                Ok(Stmt::ImplDef { type_name, methods, span })
+            }
+            Some(Token::Struct) => {
+                // parse struct definition: struct Foo { x: Num, y: Str };
+                self.next();
+                let name_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                let name = match name_token.token {
+                    Token::Id(s) => s,
+                    _ => return Err(ParseError::UnexpectedToken(name_token.span)),
+                };
+                
+                self.expect(Token::LBrace)?;
+                let mut fields = IndexMap::new();
+                while !matches!(self.peek(), Some(Token::RBrace) | Some(Token::Eof)) {
+                     let field_name_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                     let field_name = match field_name_token.token {
+                         Token::Id(s) => s,
+                         _ => return Err(ParseError::UnexpectedToken(field_name_token.span)),
+                     };
+                     
+                     self.expect(Token::Colon)?;
+                     let ty = self.parse_type()?;
+                     fields.insert(field_name, ty);
+                     
+                     if matches!(self.peek(), Some(Token::Comma)) {
+                         self.next();
+                     } else {
+                         break;
+                     }
+                }
+                self.expect(Token::RBrace)?;
+                self.expect(Token::Semicolon)?; // struct Foo { ... };
+                Ok(Stmt::StructDef { name, fields, span })
             }
             Some(Token::Let) => {
                 self.next();
@@ -266,6 +360,7 @@ impl Parser {
             let op = match self.peek() {
                 Some(Token::EqEq) => BinOp::Eq,
                 Some(Token::Ne) => BinOp::Ne,
+                Some(Token::Similarity) => BinOp::Similarity,
                 _ => break,
             };
             self.next();
@@ -297,11 +392,11 @@ impl Parser {
     }
 
     fn parse_mul(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_postfix()?;
+        let mut left = self.parse_unary()?;
         let span = self.span();
         while matches!(self.peek(), Some(Token::Star)) {
             self.next();
-            let right = self.parse_postfix()?;
+            let right = self.parse_unary()?;
             left = Expr::Binary {
                 op: BinOp::Mul,
                 left: Box::new(left),
@@ -310,6 +405,53 @@ impl Parser {
             };
         }
         Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        let span = self.span();
+        match self.peek() {
+            Some(Token::Minus) => {
+                self.next();
+                let expr = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnOp::Neg,
+                    expr: Box::new(expr),
+                    span,
+                })
+            }
+            Some(Token::Spawn) => {
+                self.next();
+                let expr = self.parse_unary()?; // High precedence prefix
+                Ok(Expr::Spawn {
+                    expr: Box::new(expr),
+                    span,
+                })
+            }
+            Some(Token::Send) => {
+                self.next();
+                // send <pid>, <msg>
+                // Treat send as high precedence prefix?
+                // parse_unary(pid) -> expect(Comma) -> parse_expr(msg)?
+                // If msg contains binary ops, parse_expr handles it.
+                let pid = self.parse_unary()?; 
+                self.expect(Token::Comma)?;
+                let msg = self.parse_expr()?;
+                Ok(Expr::Send {
+                    pid: Box::new(pid),
+                    msg: Box::new(msg),
+                    span,
+                })
+            }
+            Some(Token::Confidence) => {
+                self.next();
+                let expr = self.parse_unary()?;
+                Ok(Expr::Confidence {
+                    expr: Box::new(expr),
+                    span,
+                })
+            }
+            _ => self.parse_postfix(),
+        }
     }
 
     fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
@@ -327,6 +469,43 @@ impl Parser {
                         span,
                     };
                 }
+                Some(Token::Dot) => {
+                    self.next();
+                    let Token::Id(name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
+                        return Err(ParseError::UnexpectedToken(self.span()));
+                    };
+                    
+                    if matches!(self.peek(), Some(Token::LParen)) {
+                        self.next(); // consume (
+                        let arg = if matches!(self.peek(), Some(Token::RParen)) {
+                            Expr::Literal {
+                                value: Literal::Null,
+                                span: self.last_span,
+                            }
+                        } else {
+                            self.parse_expr()?
+                        };
+                        self.expect(Token::RParen)?;
+                        let span = Span { start: expr.span().start, end: self.last_span.end };
+                        expr = Expr::MethodCall {
+                            target: Box::new(expr),
+                            name,
+                            arg: Box::new(arg),
+                            span,
+                        };
+                    } else {
+                        // Property access sugar: obj.prop -> obj["prop"]
+                        let span = Span { start: expr.span().start, end: self.last_span.end };
+                        expr = Expr::Index {
+                            target: Box::new(expr),
+                            index: Box::new(Expr::Literal { 
+                                value: Literal::Str(name),
+                                span: self.last_span 
+                            }),
+                            span,
+                        };
+                    }
+                }
                 _ => break,
             }
         }
@@ -342,7 +521,38 @@ impl Parser {
             Token::True => Ok(Expr::Literal { value: Literal::True, span }),
             Token::False => Ok(Expr::Literal { value: Literal::False, span }),
             Token::Null => Ok(Expr::Literal { value: Literal::Null, span }),
-            Token::Id(name) => Ok(Expr::Id { name, span }),
+            Token::Id(name) => {
+                 // Check if it's a struct instantiation: Foo { x: 1 }
+                 if matches!(self.peek(), Some(Token::LBrace)) {
+                     // Check if it's a known struct name? Or just parse as struct init speculatively?
+                     // If it's Foo { ... }, it's struct init.
+                     // But wait, what if `Foo` is a variable holding a Map, and `{...}` is a block?
+                     // Expressions can't be followed by blocks like that except for `turn` or control flow.
+                     // So `Foo { ... }` is unique enough.
+                     
+                     self.next(); // consume LBrace
+                     let mut fields = IndexMap::new();
+                     while !matches!(self.peek(), Some(Token::RBrace) | Some(Token::Eof)) {
+                         let field_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                         let field_name = match field_token.token {
+                             Token::Id(s) => s,
+                             _ => return Err(ParseError::UnexpectedToken(field_token.span)),
+                         };
+                         self.expect(Token::Colon)?;
+                         let val = self.parse_expr()?;
+                         fields.insert(field_name, val);
+                         if matches!(self.peek(), Some(Token::Comma)) {
+                             self.next();
+                         } else {
+                             break;
+                         }
+                     }
+                     self.expect(Token::RBrace)?;
+                     Ok(Expr::StructInit { name, fields, span })
+                 } else {
+                     Ok(Expr::Id { name, span })
+                 }
+            },
             Token::Recall => {
                 self.expect(Token::LParen)?;
                 let key = self.parse_expr()?;
@@ -370,6 +580,23 @@ impl Parser {
                     module: Box::new(module),
                     span,
                 })
+            }
+            Token::Receive => {
+                Ok(Expr::Receive { span })
+            }
+            Token::Vec => {
+                self.expect(Token::LBracket)?;
+                let mut items = Vec::new();
+                while !matches!(self.peek(), Some(Token::RBracket) | Some(Token::Eof)) {
+                    items.push(self.parse_expr()?);
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RBracket)?;
+                Ok(Expr::Vec { items, span })
             }
             Token::Turn => {
                 let mut params = Vec::new();

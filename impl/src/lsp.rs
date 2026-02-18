@@ -289,6 +289,28 @@ impl Backend {
         let mut analysis = Analysis::new();
         analysis.analyze(&program);
         
+        // Process analysis diagnostics
+        for (span, msg) in &analysis.diagnostics {
+            let (start_line, start_col) = offset_to_line_col(text, span.start);
+            let (end_line, end_col) = offset_to_line_col(text, span.end);
+            
+            let diagnostic = Diagnostic {
+                range: Range {
+                    start: Position { line: (start_line - 1) as u32, character: (start_col - 1) as u32 },
+                    end: Position { line: (end_line - 1) as u32, character: (end_col - 1) as u32 },
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("turn-analysis".to_string()),
+                message: msg.clone(),
+                related_information: None,
+                tags: None,
+                data: None,
+            };
+            diagnostics.push(diagnostic);
+        }
+        
         // Store analysis result
         if let Ok(mut guard) = self.analysis.write() {
             *guard = analysis;
