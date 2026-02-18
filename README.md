@@ -56,7 +56,7 @@ cd impl
 
 Or directly:
 ```bash
-cd impl && cargo run -- run ../examples/hello_turn.turn
+cd impl && cargo run -- run ../examples/hello_turn.tn
 ```
 
 ## Deployment (Server Mode)
