@@ -450,6 +450,15 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::Bang) => {
+                self.next();
+                let expr = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnOp::Not,
+                    expr: Box::new(expr),
+                    span,
+                })
+            }
             _ => self.parse_postfix(),
         }
     }

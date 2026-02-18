@@ -58,6 +58,7 @@ pub enum Token {
     Less,
     Greater,
     Arrow, // ->
+    Bang, // !
 
     // Literals
     Num(f64),
@@ -328,7 +329,7 @@ impl<'a> Lexer<'a> {
                     self.next();
                     Token::Ne
                 } else {
-                    return Err(LexError::UnexpectedChar('!', start));
+                    Token::Bang
                 }
             }
             Some('{') => {
