@@ -1,0 +1,58 @@
+// ============================================================================
+// Turn v0.5.0-alpha Example: Object-Capability (OCap) Security Model
+// 
+// Use Case: Demonstrates how Turn prevents LLM hallucination and guest-code
+// leakage from exposing sensitive API keys to the network or logs.
+// ============================================================================
+
+use "std/print";
+
+// 1. Defining a Secure Tool
+// The `secret` parameter modifier is a Turn VM primitive. When `llm_tools.rs`
+// converts this signature into an OpenAI JSON Schema, it completely strips 
+// the `api_key` field. The LLM has zero knowledge this parameter exists.
+let stripe_charge = tool turn(
+    customer_name: Str, 
+    amount: Num, 
+    secret api_key: Cap
+) -> Bool {
+    println("[Stripe Tool] Attempting to charge $" + amount + " to " + customer_name);
+    
+    // The `api_key` here is an Opaque unforgeable handle (e.g. `Cap(42)`).
+    // The actual string ("sk_live_123...") lives in the trusted Rust backend Registry.
+    // If the turn script attempts to `print(api_key)` or serialize it, the VM will
+    // immediately throw a `PrivilegeViolationTrap`. 
+    
+    // In actual implementation: HTTP Post to stripe using the Cap handle to resolve the header.
+    println("[Stripe Tool] CHARGE SUCCESSFUL for " + customer_name);
+
+    return true;
+};
+
+// 2. Fetching the Capability
+// In reality, this capability would be injected by the Rust Host Runtime 
+// (e.g., from ENV variables before the VM starts) directly into the global scope. 
+// For this example script we mock its creation:
+let my_app_secret_api_key = Cap; // Dummy syntax representing an injected opaque value
+
+// 3. Execution
+println("Booting Secure E-Commerce Agent...");
+
+let response = infer Bool with [stripe_charge] {
+    "You are a billing agent. The customer 'Alice' just bought a $150 widget. " +
+    "Please issue the charge now and return true if successful."
+};
+
+println("Final LLM Billing State: " + response);
+
+// ----------------------------------------------------------------------------
+// Why is this revolutionary for Agents?
+// 
+// Typical AI frameworks force you to pass `"sk_live_123..."` directly to the tool
+// wrapper or inject it into a context object. If the agent generates a snippet like:
+//      `print("Here is my reasoning: " + context.api_key)` 
+// Your production secret is instantly burned to your terminal logs or UI output.
+// 
+// Turn's VM strictly types capabilities. They cannot be logged. They cannot be
+// leaked to the LLM. They exist mechanically purely to authenticate boundary effects.
+// ----------------------------------------------------------------------------

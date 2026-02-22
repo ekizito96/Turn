@@ -1,0 +1,49 @@
+// ============================================================================
+// Turn v0.5.0-alpha Example: Distributed Swarm Supervisor
+// 
+// Use Case: Demonstrates deploying an agent to a distinct physical node 
+// using `spawn_remote` and monitoring its lifecycle for fault-tolerance.
+// ============================================================================
+
+use "std/print";
+use "std/time";
+
+println("Initializing Distributed Agent Orchestrator...");
+
+// 1. Define the distributed payload. 
+// This closure will be serialized over the TCP Switchboard and booted on Node B.
+let pdf_extractor_agent = fn(document_id: Str) {
+    println("[Worker Node] Booting extractor for Doc: " + document_id);
+    
+    // Simulate heavy token workload
+    let result = infer Str {
+        "Please extract all entities from document " + document_id
+    };
+    
+    // In a real distributed swarm, this would be routed back to the supervisor
+    // over the TCP socket, but for the example we just pretend.
+    println("[Worker Node] Extraction complete.");
+};
+
+// 2. Spawn the process on a remote machine
+// Under the hood, the VM parses this IP, opens a gRPC/TCP tunnel, serializes
+// the closure environment natively via Serde, and triggers VM execution remotely.
+let worker_ip = "10.0.0.5";
+println("Deploying Extractor to Node: " + worker_ip);
+
+// (In a dev environment without the switchboard active, this defaults to local execution)
+let remote_pid = spawn_remote(worker_ip, fn() {
+    // Start extraction
+    pdf_extractor_agent("SEC_FILING_10K_2025");
+});
+
+// 3. Supervisor Link
+// We link the local process to the remote PID. If Node B crashes or loses 
+// network connectivity, the local Supervisor VM instances catches a ProcessExit trap.
+println("Linking local supervisor to remote PID: " + remote_pid);
+link(remote_pid);
+
+// Allow the remote payload time to execute
+time.sleep(2);
+
+println("Swarm execution complete. Shutting down.");
