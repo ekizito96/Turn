@@ -123,8 +123,8 @@ fn test_monitor_unidirectional_signal() {
     let val = run(source);
     
     if let Value::Map(m) = val {
-        assert_eq!(m.get("type"), Some(&Value::Str("DOWN".to_string())));
-        assert_eq!(m.get("reason"), Some(&Value::Str("I panicked".to_string())));
+        assert_eq!(m.get("type"), Some(&Value::Str(std::sync::Arc::new("DOWN".to_string()))));
+        assert_eq!(m.get("reason"), Some(&Value::Str(std::sync::Arc::new("I panicked".to_string()))));
     } else {
         panic!("Expected DOWN message Map, got {:?}", val);
     }
@@ -150,8 +150,8 @@ fn test_link_bidirectional_exit_signal() {
     let val = run(source);
     
     if let Value::Map(m) = val {
-        assert_eq!(m.get("type"), Some(&Value::Str("EXIT".to_string())));
-        assert_eq!(m.get("reason"), Some(&Value::Str("clean exit".to_string())));
+        assert_eq!(m.get("type"), Some(&Value::Str(std::sync::Arc::new("EXIT".to_string()))));
+        assert_eq!(m.get("reason"), Some(&Value::Str(std::sync::Arc::new("clean exit".to_string()))));
     } else {
         panic!("Expected EXIT message Map, got {:?}", val);
     }

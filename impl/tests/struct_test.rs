@@ -34,7 +34,7 @@ fn test_struct_runtime_creation() {
     "#;
     let val = run(source);
     if let Value::Struct(name, fields) = val {
-        assert_eq!(name, "Point");
+        assert_eq!(name.as_str(), "Point");
         assert_eq!(fields.get("x"), Some(&Value::Num(10.0)));
         assert_eq!(fields.get("y"), Some(&Value::Num(20.0)));
     } else {

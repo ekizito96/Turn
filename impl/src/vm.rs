@@ -170,7 +170,7 @@ impl Vm {
             next_pid: state.next_pid,
         };
 
-        let err = Value::Str(error_msg);
+        let err = Value::Str(std::sync::Arc::new(error_msg));
         
         // Unwind stack looking for catch
         if let Some(p) = vm.scheduler.front_mut() {
@@ -217,17 +217,17 @@ impl Vm {
                     } else if v != Value::Null {
                         v.clone()
                     } else {
-                        Value::Str("normal".to_string())
+                        Value::Str(std::sync::Arc::new("normal".to_string()))
                     };
 
                     // Broadcast to links (bidirectional expectation, so a link crash usually crashes the parent unless trapped, but Turn handles this as a standard mailbox priority message for now)
                     for linked_pid in &process.links {
                         if let Some(target) = self.scheduler.iter_mut().find(|p| p.pid == *linked_pid) {
                             let mut map = indexmap::IndexMap::new();
-                            map.insert("type".to_string(), Value::Str("EXIT".to_string()));
+                            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("EXIT".to_string())));
                             map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: process.pid });
                             map.insert("reason".to_string(), reason.clone());
-                            target.mailbox.push_back(Value::Map(map));
+                            target.mailbox.push_back(Value::Map(std::sync::Arc::new(map)));
                         }
                     }
 
@@ -235,10 +235,10 @@ impl Vm {
                     for monitor_pid in &process.monitors {
                         if let Some(target) = self.scheduler.iter_mut().find(|p| p.pid == *monitor_pid) {
                             let mut map = indexmap::IndexMap::new();
-                            map.insert("type".to_string(), Value::Str("DOWN".to_string()));
+                            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("DOWN".to_string())));
                             map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: process.pid });
                             map.insert("reason".to_string(), reason.clone());
-                            target.mailbox.push_back(Value::Map(map));
+                            target.mailbox.push_back(Value::Map(std::sync::Arc::new(map)));
                         }
                     }
 
@@ -274,7 +274,7 @@ impl Vm {
         
         loop {
             if process.token_budget == 0 {
-                return VmResult::Complete(Value::Str("Runtime Error: TokenExhaustionError - Process ran out of gas".to_string()));
+                return VmResult::Complete(Value::Str(std::sync::Arc::new("Runtime Error: TokenExhaustionError - Process ran out of gas".to_string())));
             }
         
             if steps_left == 0 {
@@ -522,10 +522,10 @@ impl Vm {
                     
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
-                    map.insert("schema".to_string(), Value::Str(ty_str));
-                    map.insert("context".to_string(), Value::List(combined_context));
+                    map.insert("schema".to_string(), Value::Str(std::sync::Arc::new(ty_str)));
+                    map.insert("context".to_string(), Value::List(std::sync::Arc::new(combined_context)));
                     if tool_count > 0 {
-                        map.insert("tools".to_string(), Value::List(tools));
+                        map.insert("tools".to_string(), Value::List(std::sync::Arc::new(tools)));
                     }
                     
                     process.frames[frame_idx].env = process.runtime.env.clone();
@@ -541,7 +541,7 @@ impl Vm {
                     };
                     return VmResult::Suspended {
                         tool_name: "llm_infer".to_string(),
-                        arg: Value::Map(map),
+                        arg: Value::Map(std::sync::Arc::new(map)),
                         continuation: state,
                     };
                 }
@@ -552,7 +552,7 @@ impl Vm {
                 Instr::PushTrue => process.stack.push(Value::Bool(true)),
                 Instr::PushFalse => process.stack.push(Value::Bool(false)),
                 Instr::PushNum(n) => process.stack.push(Value::Num(n)),
-                Instr::PushStr(s) => process.stack.push(Value::Str(s)),
+                Instr::PushStr(s) => process.stack.push(Value::Str(std::sync::Arc::new(s))),
                 Instr::Pop => { process.stack.pop(); },
                 Instr::Load(name) => {
                     match process.runtime.get_env(&name) {
@@ -576,7 +576,7 @@ impl Vm {
                     // Auto-Embedding Logic for Semantic RAM
                     // If the user did not provide an explicit embedding inside a Struct/Map,
                     // the Virtual Machine generates one implicitly via Azure OpenAI
-                    let (mut id, mut emb) = match &key {
+                    let (id, mut emb) = match &key {
                         Value::Map(m) | Value::Struct(_, m) => {
                             let k_id = m.get("id").and_then(|v| crate::runtime::value_to_key(v).ok()).unwrap_or_else(|| "unnamed".to_string());
                             let k_emb = match m.get("embedding") {
@@ -590,90 +590,90 @@ impl Vm {
                     
                     if emb.is_none() && !id.is_empty() {
                          // Generate implicit vector coordinates representing the semantic memory
-                         emb = crate::llm_tools::get_embedding(&id);
+                         emb = crate::llm_tools::get_embedding(&id).map(|e| std::sync::Arc::new(e));
                          // Bill the process for the background LLM operation
                          if process.token_budget >= 50 {
                              process.token_budget -= 50;
                          }
                     }
                     
-                    process.runtime.memory.insert(id, emb, val);
+                    process.runtime.memory.insert(id, emb.map(|e| (*e).clone()), val);
                 }
                 Instr::Add => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(add_values(&a, &b));
                 }
                 Instr::Sub => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(sub_values(&a, &b));
                 }
                 Instr::Mul => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(mul_values(&a, &b));
                 }
                 Instr::Div => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(div_values(&a, &b));
                 }
                 Instr::Eq => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(eq_values(&a, &b));
                 }
                 Instr::Ne => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(ne_values(&a, &b));
                 }
                 Instr::Lt => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(lt_values(&a, &b));
                 }
                 Instr::Gt => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(gt_values(&a, &b));
                 }
                 Instr::Le => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(le_values(&a, &b));
                 }
                 Instr::Ge => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(ge_values(&a, &b));
                 }
                 Instr::Not => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(not_value(&v));
                 }
                 Instr::And => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(and_values(&a, &b));
                 }
                 Instr::Or => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
                     process.stack.push(or_values(&a, &b));
                 }
                 Instr::Jump(target) => {
@@ -681,17 +681,17 @@ impl Vm {
                 }
                 Instr::JumpIfFalse(target) => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string())); }
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string()))); }
                     if v.is_falsy() { process.frames[frame_idx].ip = target as usize; }
                 }
                 Instr::JumpIfTrue(target) => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string())); }
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string()))); }
                     if v.is_truthy() { process.frames[frame_idx].ip = target as usize; }
                 }
                 Instr::ContextAppend => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be appended to Agent context".to_string())); }
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be appended to Agent context".to_string()))); }
                     let _ = process.runtime.append_context(v);
                 }
                 Instr::EnterTurn(after_addr) => {
@@ -761,7 +761,7 @@ impl Vm {
                                 token_budget: process.token_budget,
                             };
                             return VmResult::Suspended {
-                                tool_name: name,
+                                tool_name: name.to_string(),
                                 arg: final_arg,
                                 continuation: state,
                             };
@@ -775,9 +775,9 @@ impl Vm {
                                 match final_arg {
                                     Value::Map(m) => {
                                         if m.contains_key(name) {
-                                            for (k, v) in m {
+                                            for (k, v) in m.iter() {
                                                 mem_inserts.push((k.clone(), v.clone()));
-                                                new_env.insert(k, v);
+                                                new_env.insert(k.clone(), v.clone());
                                             }
                                         } else {
                                             let wrapped = Value::Map(m);
@@ -787,9 +787,9 @@ impl Vm {
                                     }
                                     Value::Struct(struct_name, m) => {
                                         if m.contains_key(name) {
-                                            for (k, v) in m {
+                                            for (k, v) in m.iter() {
                                                 mem_inserts.push((k.clone(), v.clone()));
-                                                new_env.insert(k, v);
+                                                new_env.insert(k.clone(), v.clone());
                                             }
                                         } else {
                                             let wrapped = Value::Struct(struct_name, m);
@@ -803,20 +803,20 @@ impl Vm {
                                     }
                                 }
                             } else if let Value::Map(m) = final_arg {
-                                for (k, v) in m {
+                                for (k, v) in m.iter() {
                                     mem_inserts.push((k.clone(), v.clone()));
-                                    new_env.insert(k, v);
+                                    new_env.insert(k.clone(), v.clone());
                                 }
                             } else if let Value::Struct(_, m) = final_arg.clone() {
-                                for (k, v) in m {
+                                for (k, v) in m.iter() {
                                     mem_inserts.push((k.clone(), v.clone()));
-                                    new_env.insert(k, v);
+                                    new_env.insert(k.clone(), v.clone());
                                 }
                             } else if let Value::List(items) = final_arg {
-                                for (i, item) in items.into_iter().enumerate() {
+                                for (i, item) in items.iter().enumerate() {
                                     if i < params.len() {
                                         mem_inserts.push((params[i].0.clone(), item.clone()));
-                                        new_env.insert(params[i].0.clone(), item);
+                                        new_env.insert(params[i].0.clone(), item.clone());
                                     }
                                 }
                             } else if !final_arg.is_falsy() {
@@ -858,7 +858,7 @@ impl Vm {
                                 token_budget: process.token_budget,
                             };
                             return VmResult::Suspended {
-                                tool_name: name,
+                                tool_name: name.to_string(),
                                 arg,
                                 continuation: state,
                             };
@@ -872,9 +872,9 @@ impl Vm {
                                 match arg {
                                     Value::Map(m) => {
                                         if m.contains_key(name) {
-                                            for (k, v) in m {
+                                            for (k, v) in m.iter() {
                                                 mem_inserts.push((k.clone(), v.clone()));
-                                                new_env.insert(k, v);
+                                                new_env.insert(k.clone(), v.clone());
                                             }
                                         } else {
                                             let wrapped = Value::Map(m);
@@ -884,9 +884,9 @@ impl Vm {
                                     }
                                     Value::Struct(struct_name, m) => {
                                         if m.contains_key(name) {
-                                            for (k, v) in m {
+                                            for (k, v) in m.iter() {
                                                 mem_inserts.push((k.clone(), v.clone()));
-                                                new_env.insert(k, v);
+                                                new_env.insert(k.clone(), v.clone());
                                             }
                                         } else {
                                             let wrapped = Value::Struct(struct_name, m);
@@ -900,20 +900,20 @@ impl Vm {
                                     }
                                 }
                             } else if let Value::Map(m) = arg {
-                                for (k, v) in m {
+                                for (k, v) in m.iter() {
                                     mem_inserts.push((k.clone(), v.clone()));
-                                    new_env.insert(k, v);
+                                    new_env.insert(k.clone(), v.clone());
                                 }
                             } else if let Value::Struct(_, m) = arg.clone() {
-                                for (k, v) in m {
+                                for (k, v) in m.iter() {
                                     mem_inserts.push((k.clone(), v.clone()));
-                                    new_env.insert(k, v);
+                                    new_env.insert(k.clone(), v.clone());
                                 }
                             } else if let Value::List(items) = arg {
-                                for (i, item) in items.into_iter().enumerate() {
+                                for (i, item) in items.iter().enumerate() {
                                     if i < params.len() {
                                         mem_inserts.push((params[i].0.clone(), item.clone()));
-                                        new_env.insert(params[i].0.clone(), item);
+                                        new_env.insert(params[i].0.clone(), item.clone());
                                     }
                                 }
                             } else if !arg.is_falsy() {
@@ -953,27 +953,27 @@ impl Vm {
                     let mut items = Vec::new();
                     for _ in 0..count { items.push(process.stack.pop().unwrap_or(Value::Null)); }
                     items.reverse();
-                    process.stack.push(Value::List(items));
+                    process.stack.push(Value::List(std::sync::Arc::new(items)));
                 }
                 Instr::MakeMap(count) => {
                     let mut map = IndexMap::new();
                     for _ in 0..count {
                         let val = process.stack.pop().unwrap_or(Value::Null);
                         let k_val = process.stack.pop().unwrap_or(Value::Null);
-                        let k = match k_val { Value::Str(s) => s, _ => k_val.to_string() };
+                        let k = match k_val { Value::Str(s) => s.to_string(), _ => k_val.to_string() };
                         map.insert(k, val);
                     }
-                    process.stack.push(Value::Map(map));
+                    process.stack.push(Value::Map(std::sync::Arc::new(map)));
                 }
                 Instr::MakeStruct(name, count) => {
                     let mut map = IndexMap::new();
                     for _ in 0..count {
                         let val = process.stack.pop().unwrap_or(Value::Null);
                         let k_val = process.stack.pop().unwrap_or(Value::Null);
-                        let k = match k_val { Value::Str(s) => s, _ => k_val.to_string() };
+                        let k = match k_val { Value::Str(s) => s.to_string(), _ => k_val.to_string() };
                         map.insert(k, val);
                     }
-                    process.stack.push(Value::Struct(name, map));
+                    process.stack.push(Value::Struct(std::sync::Arc::new(name), std::sync::Arc::new(map)));
                 }
                 Instr::MakeVec(count) => {
                     let mut items = Vec::new();
@@ -987,7 +987,7 @@ impl Vm {
                         }
                     }
                     items.reverse();
-                    process.stack.push(Value::Vec(items));
+                    process.stack.push(Value::Vec(std::sync::Arc::new(items)));
                 }
                 Instr::Similarity => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
@@ -1004,14 +1004,14 @@ impl Vm {
                     let res = match tgt {
                         Value::List(l) => if let Value::Num(n) = idx { l.get(n as usize).cloned().unwrap_or(Value::Null) } else { Value::Null },
                         Value::Map(m) | Value::Struct(_, m) => {
-                            let k = match idx { Value::Str(s) => s, Value::Num(n) => n.to_string(), _ => "".to_string() };
+                            let k = match idx { Value::Str(s) => s.to_string(), Value::Num(n) => n.to_string(), _ => "".to_string() };
                             m.get(&k).cloned().unwrap_or(Value::Null)
                         },
                         Value::Uncertain(inner, _) => {
                              // Auto-unwrap uncertain for property access
                              match inner.as_ref() {
                                  Value::Map(m) | Value::Struct(_, m) => {
-                                     let k = match idx { Value::Str(s) => s, Value::Num(n) => n.to_string(), _ => "".to_string() };
+                                     let k = match idx { Value::Str(s) => s.to_string(), Value::Num(n) => n.to_string(), _ => "".to_string() };
                                      m.get(&k).cloned().unwrap_or(Value::Null)
                                  },
                                  _ => Value::Null
@@ -1028,7 +1028,7 @@ impl Vm {
                 }
                 Instr::LoadModule => {
                     let p_val = process.stack.pop().unwrap_or(Value::Null);
-                    let path = match p_val { Value::Str(s) => s, _ => "".to_string() };
+                    let path = match p_val { Value::Str(s) => s.clone(), _ => std::sync::Arc::new("".to_string()) };
                     process.frames[frame_idx].env = process.runtime.env.clone();
                     let state = VmState {
                         pid: process.pid,
@@ -1045,7 +1045,7 @@ impl Vm {
                 Instr::CheckType(ref ty) => {
                     let val = process.stack.last().unwrap_or(&Value::Null);
                     if !self.check_value_type(ty, val) {
-                        let err = Value::Str(format!("Runtime Type Error: Expected {:?}, got {:?}", ty, val));
+                        let err = Value::Str(std::sync::Arc::new(format!("Runtime Type Error: Expected {:?}, got {:?}", ty, val)));
                          // Unwind
                          loop {
                              if process.frames.is_empty() { return VmResult::Complete(err); }
@@ -1077,20 +1077,20 @@ impl Vm {
             (Type::Bool, Value::Null) => false,
             (Type::List(inner), Value::List(items)) => {
                 if **inner == Type::Any { return true; }
-                for item in items {
+                for item in items.iter() {
                     if !self.check_value_type(inner, item) { return false; }
                 }
                 true
             },
             (Type::Map(inner), Value::Map(map)) => {
                 if **inner == Type::Any { return true; }
-                for (_, val) in map {
+                for (_, val) in map.iter() {
                     if !self.check_value_type(inner, val) { return false; }
                 }
                 true
             },
             (Type::Struct(name, fields), Value::Struct(val_name, val_fields)) => {
-                if name != val_name { return false; }
+                if name.as_str() != val_name.as_str() { return false; }
                 for (field_name, field_ty) in fields {
                     if let Some(val) = val_fields.get(field_name) {
                         if !self.check_value_type(field_ty, val) { return false; }
@@ -1160,28 +1160,28 @@ fn add_values(a: &Value, b: &Value) -> Value {
         (Value::Vec(v1), Value::Vec(v2)) => {
             if v1.len() != v2.len() { return Value::Null; }
             let sum: Vec<f64> = v1.iter().zip(v2.iter()).map(|(x, y)| x + y).collect();
-            Value::Vec(sum)
+            Value::Vec(std::sync::Arc::new(sum))
         },
         (Value::List(l1), Value::List(l2)) => {
-            let mut new_list = l1.clone();
-            new_list.extend(l2.clone());
-            Value::List(new_list)
+            let mut new_list = (**l1).clone();
+            new_list.extend(l2.iter().cloned());
+            Value::List(std::sync::Arc::new(new_list))
         },
         (Value::Map(m1), Value::Map(m2)) => {
-            let mut new_map = m1.clone();
-            for (k, v) in m2 {
+            let mut new_map = (**m1).clone();
+            for (k, v) in m2.iter() {
                 new_map.insert(k.clone(), v.clone());
             }
-            Value::Map(new_map)
+            Value::Map(std::sync::Arc::new(new_map))
         },
         (Value::Struct(name1, m1), Value::Struct(name2, m2)) if name1 == name2 => {
-             let mut new_map = m1.clone();
-             for (k, v) in m2 {
+             let mut new_map = (**m1).clone();
+             for (k, v) in m2.iter() {
                  new_map.insert(k.clone(), v.clone());
              }
-             Value::Struct(name1.clone(), new_map)
+             Value::Struct(name1.clone(), std::sync::Arc::new(new_map))
         },
-        _ => Value::Str(format!("{}{}", a, b)),
+        _ => Value::Str(std::sync::Arc::new(format!("{}{}", a, b))),
     }
 }
 
@@ -1214,7 +1214,7 @@ fn mul_values(a: &Value, b: &Value) -> Value {
         (Value::Num(x), Value::Num(y)) => Value::Num(x * y),
         (Value::Vec(v), Value::Num(x)) | (Value::Num(x), Value::Vec(v)) => {
             let res: Vec<f64> = v.iter().map(|n| n * x).collect();
-            Value::Vec(res)
+            Value::Vec(std::sync::Arc::new(res))
         },
         (Value::Vec(v1), Value::Vec(v2)) => {
             if v1.len() != v2.len() { return Value::Null; }
@@ -1356,7 +1356,7 @@ fn sub_values(a: &Value, b: &Value) -> Value {
         (Value::Vec(v1), Value::Vec(v2)) => {
             if v1.len() != v2.len() { return Value::Null; }
             let diff: Vec<f64> = v1.iter().zip(v2.iter()).map(|(x, y)| x - y).collect();
-            Value::Vec(diff)
+            Value::Vec(std::sync::Arc::new(diff))
         },
         _ => Value::Null,
     }

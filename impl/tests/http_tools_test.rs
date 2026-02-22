@@ -23,7 +23,7 @@ fn test_http_get() {
     let result = run_with_tools(&source, &tools).unwrap();
     
     match result {
-        Value::Str(s) => assert_eq!(s, "world"),
+        Value::Str(s) => assert_eq!(s.as_str(), "world"),
         _ => panic!("Expected string 'world', got {:?}", result),
     }
 }
@@ -51,7 +51,7 @@ fn test_http_post() {
     let result = run_with_tools(&source, &tools).unwrap();
     
     match result {
-        Value::Str(s) => assert_eq!(s, "ok"),
+        Value::Str(s) => assert_eq!(s.as_str(), "ok"),
         _ => panic!("Expected string 'ok', got {:?}", result),
     }
 }

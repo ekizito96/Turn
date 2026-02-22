@@ -100,5 +100,5 @@ fn test_recursive_import() {
     let mut runner = Runner::new(store, tools);
     
     let result = runner.run("test_agent", &source, None).unwrap();
-    assert_eq!(result, Value::Str("util".to_string()));
+    assert_eq!(result, Value::Str(std::sync::Arc::new("util".to_string())));
 }

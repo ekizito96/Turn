@@ -26,7 +26,7 @@ fn test_manual_suspension_resume_cycle() {
             continuation,
         } => {
             assert_eq!(tool_name, "my_tool");
-            assert_eq!(arg, Value::Str("ping".to_string()));
+            assert_eq!(arg, Value::Str(std::sync::Arc::new("ping".to_string())));
             println!("Suspended on tool call. Saving state...");
             continuation
         }
@@ -39,12 +39,12 @@ fn test_manual_suspension_resume_cycle() {
     // 6. Resume with Result "pong"
     println!("Resuming with result 'pong'...");
     let mut resumed_vm =
-        Vm::resume_with_result(continuation, Value::Str("pong".to_string()));
+        Vm::resume_with_result(continuation, Value::Str(std::sync::Arc::new("pong".to_string())));
 
     // 7. Run -> Complete
     match resumed_vm.run() {
         VmResult::Complete(val) => {
-            assert_eq!(val, Value::Str("pong".to_string()));
+            assert_eq!(val, Value::Str(std::sync::Arc::new("pong".to_string())));
             println!("Completed successfully.");
         }
         _ => panic!("Expected completion, got suspension"),

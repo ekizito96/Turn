@@ -13,10 +13,10 @@ pub enum Value {
     Null,
     Bool(bool),
     Num(f64),
-    Str(String),
-    List(Vec<Value>),
-    Map(IndexMap<String, Value>),
-    Struct(String, IndexMap<String, Value>),
+    Str(Arc<String>),
+    List(Arc<Vec<Value>>),
+    Map(Arc<IndexMap<String, Value>>),
+    Struct(Arc<String>, Arc<IndexMap<String, Value>>),
     Closure {
         is_tool: bool,
         code: Arc<Vec<Instr>>,
@@ -25,7 +25,7 @@ pub enum Value {
         params: Vec<(String, Option<crate::ast::Type>, bool)>,
     },
     Pid { node_id: String, local_pid: u64 }, // Globally Addressable Process ID
-    Vec(Vec<f64>),
+    Vec(Arc<Vec<f64>>),
     Cap(usize), // Local OCap Handle
     CapProxy { origin_node: String, id: usize }, // Remote OCap
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)

@@ -325,7 +325,7 @@ impl Runtime {
         let mut actual_value = value.clone();
         
         if let Value::Struct(ref name, ref m) = value {
-            if name == "ContextItem" || m.contains_key("priority") {
+            if name.as_str() == "ContextItem" || m.contains_key("priority") {
                 if let Some(Value::Num(p)) = m.get("priority") {
                     priority = *p as u8;
                 }
@@ -361,7 +361,7 @@ impl Runtime {
             Value::Map(ref m) | Value::Struct(_, ref m) => {
                 let id = m.get("id").and_then(|v| value_to_key(v).ok()).unwrap_or_else(|| "unnamed".to_string());
                 let emb = match m.get("embedding") {
-                    Some(Value::Vec(v)) => Some(v.clone()),
+                    Some(Value::Vec(v)) => Some((**v).clone()),
                     _ => None,
                 };
                 (id, emb)
@@ -404,7 +404,7 @@ impl Runtime {
 
 pub fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
     match v {
-        Value::Str(s) => Ok(s.clone()),
+        Value::Str(s) => Ok(s.to_string()),
         Value::Num(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Err(RuntimeError::InvalidMemoryKey),

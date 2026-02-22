@@ -84,7 +84,7 @@ fn test_persistence_crash_recovery() {
     // Then we proceed to Tool 2. 'b' becomes "step2".
     // Result is Null + "step2" = "nullstep2".
     match result {
-        Value::Str(s) => assert_eq!(s, "nullstep2"),
+        Value::Str(s) => assert_eq!(s.as_str(), "nullstep2"),
         _ => panic!("Expected string, got {:?}", result),
     }
 }

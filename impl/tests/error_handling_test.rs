@@ -47,7 +47,7 @@ fn test_try_catch_basic() {
     let mut runner = Runner::new(store, tools);
     
     let result = runner.run("test_error", source, None).unwrap();
-    assert_eq!(result, Value::Str("caught: oops".to_string()));
+    assert_eq!(result, Value::Str(std::sync::Arc::new("caught: oops".to_string())));
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn test_try_catch_no_error() {
     let mut runner = Runner::new(store, tools);
     
     let result = runner.run("test_error", source, None).unwrap();
-    assert_eq!(result, Value::Str("success".to_string()));
+    assert_eq!(result, Value::Str(std::sync::Arc::new("success".to_string())));
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_nested_try_catch() {
     let mut runner = Runner::new(store, tools);
     
     let result = runner.run("test_error", source, None).unwrap();
-    assert_eq!(result, Value::Str("caught: outer: inner".to_string()));
+    assert_eq!(result, Value::Str(std::sync::Arc::new("caught: outer: inner".to_string())));
 }
 
 #[test]
@@ -116,5 +116,5 @@ fn test_cross_function_throw() {
     let mut runner = Runner::new(store, tools);
     
     let result = runner.run("test_error", source, None).unwrap();
-    assert_eq!(result, Value::Str("caught: fail".to_string()));
+    assert_eq!(result, Value::Str(std::sync::Arc::new("caught: fail".to_string())));
 }

@@ -69,7 +69,7 @@ impl<S: Store> Runner<S> {
                     VmResult::Suspended { tool_name, arg, continuation } => {
                         if tool_name == "sys_import" {
                             let inner_path = match arg {
-                                Value::Str(s) => s.clone(),
+                                Value::Str(s) => s.to_string(),
                                 _ => "".to_string(),
                             };
                             // Std lib modules don't have a file path context
@@ -182,7 +182,7 @@ impl<S: Store> Runner<S> {
                     // Recurse for imports inside modules!
                     if tool_name == "sys_import" {
                         let inner_path = match arg {
-                            Value::Str(s) => s.clone(),
+                            Value::Str(s) => s.to_string(),
                             _ => "".to_string(),
                         };
                         match self.load_module(&inner_path, Some(&abs_path)) {
@@ -265,7 +265,7 @@ impl<S: Store> Runner<S> {
                         
                         // 3b. Load Module
                         let import_path = match arg {
-                            Value::Str(s) => s.clone(),
+                            Value::Str(s) => s.to_string(),
                             _ => "".to_string(),
                         };
                         

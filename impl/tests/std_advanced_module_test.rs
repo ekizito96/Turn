@@ -24,7 +24,7 @@ fn test_std_json_module_parse_and_stringify() {
 
     let result = runner.run("test_agent", source, None).expect("Run failed");
     if let Value::List(items) = result {
-        assert_eq!(items[0], Value::Str("turn".to_string()));
+        assert_eq!(items[0], Value::Str(std::sync::Arc::new("turn".to_string())));
         match &items[1] {
             Value::Str(s) => {
                 let parsed: serde_json::Value =
@@ -66,7 +66,7 @@ fn test_std_regex_module() {
     let result = runner.run("test_agent", source, None).expect("Run failed");
     if let Value::List(items) = result {
         assert_eq!(items[0], Value::Bool(true));
-        assert_eq!(items[1], Value::Str("hello TURN world".to_string()));
+        assert_eq!(items[1], Value::Str(std::sync::Arc::new("hello TURN world".to_string())));
     } else {
         panic!("Expected list, got {:?}", result);
     }

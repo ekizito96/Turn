@@ -21,7 +21,7 @@ fn test_vector_creation() {
     let source = "let v = vec[1, 2, 3]; return v;";
     let val = run(source);
     if let Value::Vec(v) = val {
-        assert_eq!(v, vec![1.0, 2.0, 3.0]);
+        assert_eq!(*v, vec![1.0, 2.0, 3.0]);
     } else {
         panic!("Expected Vec, got {:?}", val);
     }
@@ -32,7 +32,7 @@ fn test_vector_addition() {
     let source = "let v1 = vec[1, 2]; let v2 = vec[3, 4]; return v1 + v2;";
     let val = run(source);
     if let Value::Vec(v) = val {
-        assert_eq!(v, vec![4.0, 6.0]);
+        assert_eq!(*v, vec![4.0, 6.0]);
     } else {
         panic!("Expected Vec, got {:?}", val);
     }
@@ -43,7 +43,7 @@ fn test_vector_scalar_mul() {
     let source = "let v = vec[1, 2]; return v * 2;";
     let val = run(source);
     if let Value::Vec(v) = val {
-        assert_eq!(v, vec![2.0, 4.0]);
+        assert_eq!(*v, vec![2.0, 4.0]);
     } else {
         panic!("Expected Vec, got {:?}", val);
     }

@@ -441,8 +441,8 @@ impl ToolRegistry {
                     Value::Str(s) => s,
                     _ => return Err("Argument must be a string path".to_string()),
                 };
-                match fs::read_to_string(&path) {
-                    Ok(content) => Ok(Value::Str(content)),
+                match fs::read_to_string(path.as_ref()) {
+                    Ok(content) => Ok(Value::Str(std::sync::Arc::new(content))),
                     Err(e) => Err(format!("Failed to read file {}: {}", path, e)),
                 }
             }) as ToolHandler,
@@ -467,7 +467,7 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a map {path, content}".to_string()),
                 };
                 
-                match fs::write(&path, &content) {
+                match fs::write(path.as_ref(), content.as_ref()) {
                     Ok(_) => Ok(Value::Null),
                     Err(e) => Err(format!("Failed to write file {}: {}", path, e)),
                 }
@@ -482,8 +482,8 @@ impl ToolRegistry {
                     Value::Str(s) => s,
                     _ => return Err("Argument must be a string key".to_string()),
                 };
-                match env::var(&key) {
-                    Ok(val) => Ok(Value::Str(val)),
+                match env::var(key.as_ref()) {
+                    Ok(val) => Ok(Value::Str(std::sync::Arc::new(val))),
                     Err(_) => Ok(Value::Null),
                 }
             }) as ToolHandler,
@@ -507,7 +507,7 @@ impl ToolRegistry {
                     },
                     _ => return Err("Argument must be a map {key, value}".to_string()),
                 };
-                env::set_var(key, val);
+                env::set_var(key.as_ref(), val.as_ref());
                 Ok(Value::Null)
             }) as ToolHandler,
         );
@@ -521,11 +521,11 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a string URL".to_string()),
                 };
                 
-                match reqwest::blocking::get(&url) {
+                match reqwest::blocking::get(url.as_ref()) {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {
-                                Ok(text) => Ok(Value::Str(text)),
+                                Ok(text) => Ok(Value::Str(std::sync::Arc::new(text))),
                                 Err(e) => Err(format!("Failed to read response text: {}", e)),
                             }
                         } else {
@@ -556,11 +556,11 @@ impl ToolRegistry {
                 let client = reqwest::blocking::Client::new();
                 let json_body = serde_json::to_value(&body_val).unwrap_or(serde_json::Value::Null);
 
-                match client.post(&url).json(&json_body).send() {
+                match client.post(url.as_ref()).json(&json_body).send() {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {
-                                Ok(text) => Ok(Value::Str(text)),
+                                Ok(text) => Ok(Value::Str(std::sync::Arc::new(text))),
                                 Err(e) => Err(format!("Failed to read response text: {}", e)),
                             }
                         } else {
@@ -578,9 +578,9 @@ impl ToolRegistry {
             Box::new(|arg| {
                 let (messages, model_opt) = match arg {
                     Value::Map(m) => {
-                        let msgs = m.get("messages").cloned().unwrap_or(Value::List(vec![]));
+                        let msgs = m.get("messages").cloned().unwrap_or(Value::List(std::sync::Arc::new(vec![])));
                         let model = match m.get("model") {
-                            Some(Value::Str(s)) => Some(s.clone()),
+                            Some(Value::Str(s)) => Some(s.to_string()),
                             _ => None,
                         };
                         (msgs, model)
@@ -591,7 +591,7 @@ impl ToolRegistry {
                 let json_msgs = serde_json::to_value(&messages).unwrap_or(serde_json::Value::Array(vec![]));
                 
                 match call_llm_dispatch(model_opt.as_deref(), &json_msgs) {
-                    Ok(content) => Ok(Value::Str(content)),
+                    Ok(content) => Ok(Value::Str(std::sync::Arc::new(content))),
                     Err(e) => Err(e),
                 }
             }) as ToolHandler,
@@ -617,7 +617,7 @@ impl ToolRegistry {
             "json_stringify".to_string(),
             Box::new(|arg| {
                 match serde_json::to_string(&arg) {
-                    Ok(s) => Ok(Value::Str(s)),
+                    Ok(s) => Ok(Value::Str(std::sync::Arc::new(s))),
                     Err(e) => Err(format!("JSON stringify error: {}", e)),
                 }
             }) as ToolHandler,
@@ -682,7 +682,7 @@ impl ToolRegistry {
                 };
 
                 let re = Regex::new(&pattern).map_err(|e| format!("Invalid regex pattern: {}", e))?;
-                Ok(Value::Str(re.replace_all(&text, replacement.as_str()).to_string()))
+                Ok(Value::Str(std::sync::Arc::new(re.replace_all(&text, replacement.as_str()).to_string())))
             }) as ToolHandler,
         );
 
@@ -739,7 +739,7 @@ impl ToolRegistry {
                      }));
 
                      if let Value::List(items) = context {
-                         for item in items {
+                         for item in items.iter() {
                              if let Value::Str(s) = item {
                                  msgs.push(serde_json::json!({
                                      "role": "system",
@@ -778,7 +778,7 @@ impl ToolRegistry {
                                                      }
                                                      // Extract struct name from schema string "Struct(\"Name\", ...)"
                                                      let name = s.split('"').nth(1).unwrap_or("Anon").to_string();
-                                                     Value::Struct(name, fields)
+                                                     Value::Struct(std::sync::Arc::new(name), std::sync::Arc::new(fields))
                                                  },
                                                  _ => serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
                                              }
@@ -804,7 +804,7 @@ impl ToolRegistry {
                                      Ok(Value::Uncertain(Box::new(Value::Bool(true)), 0.9))
                                  }
                                  Value::Str(s) if s.contains("Str") => {
-                                     Ok(Value::Uncertain(Box::new(Value::Str("Mock Response".to_string())), 0.7))
+                                     Ok(Value::Uncertain(Box::new(Value::Str(std::sync::Arc::new("Mock Response".to_string()))), 0.7))
                                  }
                                  _ => Ok(Value::Uncertain(Box::new(Value::Null), 0.5)),
                              }

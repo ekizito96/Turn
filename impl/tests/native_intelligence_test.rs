@@ -29,9 +29,9 @@ fn test_infer_suspension_flow() {
             assert_eq!(tool_name, "llm_infer");
             
             if let Value::Map(m) = arg {
-                assert_eq!(m.get("prompt").unwrap(), &Value::Str("Calculate 2+2".to_string()));
+                assert_eq!(m.get("prompt").unwrap(), &Value::Str(std::sync::Arc::new("Calculate 2+2".to_string())));
                 // Type stringified by Serde is "\"Num\""
-                assert_eq!(m.get("schema").unwrap(), &Value::Str("\"Num\"".to_string()));
+                assert_eq!(m.get("schema").unwrap(), &Value::Str(std::sync::Arc::new("\"Num\"".to_string())));
             } else {
                 panic!("Expected Map arg, got {:?}", arg);
             }
@@ -75,7 +75,7 @@ fn test_infer_with_dynamic_prompt() {
         VmResult::Suspended { tool_name, arg, .. } => {
             assert_eq!(tool_name, "llm_infer");
             if let Value::Map(m) = arg {
-                assert_eq!(m.get("prompt").unwrap(), &Value::Str("What is the capital of France".to_string()));
+                assert_eq!(m.get("prompt").unwrap(), &Value::Str(std::sync::Arc::new("What is the capital of France".to_string())));
             }
         }
         _ => panic!("Expected suspension, got {:?}", result),

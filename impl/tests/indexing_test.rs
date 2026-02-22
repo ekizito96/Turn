@@ -52,7 +52,7 @@ fn test_nested_indexing() {
     let result = run_with_tools(source, &tools).unwrap();
     
     match result {
-        Value::Str(s) => assert_eq!(s, "Bob"),
+        Value::Str(s) => assert_eq!(s.as_str(), "Bob"),
         _ => panic!("Expected string 'Bob', got {:?}", result),
     }
 }

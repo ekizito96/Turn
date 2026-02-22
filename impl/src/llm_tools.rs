@@ -79,14 +79,14 @@ fn turn_type_to_json_schema(ty: &Type) -> JsonValue {
 fn json_value_to_turn_value(ty: &Type, j: &JsonValue) -> Result<Value, String> {
     match (ty, j) {
         (Type::Num, JsonValue::Number(n)) => Ok(Value::Num(n.as_f64().unwrap_or(0.0))),
-        (Type::Str, JsonValue::String(s)) => Ok(Value::Str(s.clone())),
+        (Type::Str, JsonValue::String(s)) => Ok(Value::Str(std::sync::Arc::new(s.clone()))),
         (Type::Bool, JsonValue::Bool(b)) => Ok(Value::Bool(*b)),
         (Type::List(inner_ty), JsonValue::Array(arr)) => {
             let mut items = Vec::new();
             for item in arr {
                 items.push(json_value_to_turn_value(inner_ty, item)?);
             }
-            Ok(Value::List(items))
+            Ok(Value::List(std::sync::Arc::new(items)))
         },
         (Type::Struct(name, fields), JsonValue::Object(obj)) => {
             let mut map = indexmap::IndexMap::new();
@@ -97,18 +97,18 @@ fn json_value_to_turn_value(ty: &Type, j: &JsonValue) -> Result<Value, String> {
                     return Err(format!("Missing required field '{}' in struct '{}'", k, name));
                 }
             }
-            Ok(Value::Struct(name.clone(), map))
+            Ok(Value::Struct(std::sync::Arc::new(name.clone()), std::sync::Arc::new(map)))
         },
         (Type::Map(v_ty), JsonValue::Object(obj)) => {
             let mut map = indexmap::IndexMap::new();
             for (k, v) in obj {
                 map.insert(k.clone(), json_value_to_turn_value(v_ty, v)?);
             }
-            Ok(Value::Map(map))
+            Ok(Value::Map(std::sync::Arc::new(map)))
         },
         (Type::Any, _) => {
             // fallback
-            Ok(Value::Str(j.to_string()))
+            Ok(Value::Str(std::sync::Arc::new(j.to_string())))
         },
         (Type::Cap, _) => Err("PrivilegeViolation: LLMs cannot forge a Capability".to_string()),
         _ => Err(format!("Type mismatch: expected {:?}, got {:?}", ty, j))
@@ -156,9 +156,9 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
         "weather",
         Box::new(|arg: Value| {
             let s = match &arg {
-                Value::Str(s) => s.clone(),
+                Value::Str(s) => s.to_string(),
                 Value::Num(n) => n.to_string(),
-                _ => return Ok(Value::Str("{\"error\":\"expected lat,lon string\"}".to_string())),
+                _ => return Ok(Value::Str(std::sync::Arc::new("{\"error\":\"expected lat,lon string\"}".to_string()))),
             };
             let parts: Vec<&str> = s.split(',').map(|x| x.trim()).collect();
             let (lat, lon) = match (parts.get(0), parts.get(1)) {
@@ -168,7 +168,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 ),
                 _ => (37.77, -122.42),
             };
-            Ok(Value::Str(fetch_weather(lat, lon)))
+            Ok(Value::Str(std::sync::Arc::new(fetch_weather(lat, lon))))
         }) as ToolHandler,
     );
 
@@ -182,19 +182,19 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
 
             if let Value::Map(m) = arg {
                 if let Some(Value::Str(s)) = m.get("prompt") {
-                    user_msg = s.clone();
+                    user_msg = s.to_string();
                 }
                 if let Some(Value::Str(s)) = m.get("schema") {
-                    schema_str = s.clone();
+                    schema_str = s.to_string();
                 }
                 if let Some(Value::List(l)) = m.get("context") {
-                    context_list = l.clone();
+                    context_list = l.to_vec();
                 }
                 if let Some(Value::List(l)) = m.get("tools") {
-                    tool_list = l.clone();
+                    tool_list = l.to_vec();
                 }
             } else {
-                return Ok(Value::Str("Expected Map argument".to_string()));
+                return Ok(Value::Str(std::sync::Arc::new("Expected Map argument".to_string())));
             }
 
             let turn_type: Type = serde_json::from_str(&schema_str).unwrap_or(Type::Any);
@@ -205,10 +205,10 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 env::var("AZURE_OPENAI_DEPLOYMENT").unwrap_or_else(|_| "gpt-4o".to_string());
 
             if endpoint.is_empty() || api_key.is_empty() {
-                return Ok(Value::Str(
+                return Ok(Value::Str(std::sync::Arc::new(
                     "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT"
                         .to_string(),
-                ));
+                )));
             }
 
             let url = format!(
@@ -319,18 +319,18 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                     .send()
                 {
                     Ok(r) => r,
-                    Err(e) => return Ok(Value::Str(format!("HTTP error: {}", e))),
+                    Err(e) => return Ok(Value::Str(std::sync::Arc::new(format!("HTTP error: {}", e)))),
                 };
 
                 let status = resp.status();
                 let text = resp.text().unwrap_or_default();
                 if !status.is_success() {
-                    return Ok(Value::Str(format!("API error {}: {}", status, text)));
+                    return Ok(Value::Str(std::sync::Arc::new(format!("API error {}: {}", status, text))));
                 }
 
                 let j: JsonValue = match serde_json::from_str(&text) {
                     Ok(j) => j,
-                    Err(_) => return Ok(Value::Str(format!("Invalid JSON: {}", text))),
+                    Err(_) => return Ok(Value::Str(std::sync::Arc::new(format!("Invalid JSON: {}", text)))),
                 };
 
                 let choice = j
@@ -339,7 +339,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                     .and_then(|a| a.first());
                 let msg = match choice.and_then(|c| c.get("message")) {
                     Some(m) => m,
-                    None => return Ok(Value::Str("No message in response".to_string())),
+                    None => return Ok(Value::Str(std::sync::Arc::new("No message in response".to_string()))),
                 };
 
                 messages.push(msg.clone());
@@ -380,7 +380,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                             }
                         }
                     } else {
-                        return Ok(Value::Str(content.to_string()));
+                        return Ok(Value::Str(std::sync::Arc::new(content.to_string())));
                     }
                 }
 
@@ -412,7 +412,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 }
             }
 
-            Ok(Value::Str("Max turns reached".to_string()))
+            Ok(Value::Str(std::sync::Arc::new("Max turns reached".to_string())))
         }) as ToolHandler,
     );
 }
