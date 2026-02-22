@@ -6,7 +6,7 @@ async fn test_manual_suspension_resume_cycle() {
     let my_tool = tool turn(ping: Str) -> Str {
         return "pong";
     };
-    let x = my_tool("ping");
+    let x = call(my_tool, "ping");
     return x;
     "#;
     let res = turn::run(source).unwrap();

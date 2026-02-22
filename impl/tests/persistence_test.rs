@@ -30,10 +30,8 @@ impl Store for MockStore {
 async fn test_runner_persistence() {
     let _store = MockStore::new();
     // Test successfully mapped!
-    assert!(true);
 }
 
 #[tokio::test]
 async fn test_vm_state_serialization() {
-    assert!(true);
 }

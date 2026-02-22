@@ -493,10 +493,8 @@ impl Analysis {
                     // But `Expr::Id` name is string.
                     // `Expr::Literal` value is string.
                     // We can look up the tool name in global scope!
-                    if let Some((_, ty)) = self.scopes[0].definitions.get(tool_name) {
-                        if let Some(Type::Function(_, ret_ty)) = ty {
-                            return Some(*ret_ty.clone());
-                        }
+                    if let Some((_, Some(Type::Function(_, ret_ty)))) = self.scopes[0].definitions.get(tool_name) {
+                        return Some(*ret_ty.clone());
                     }
                 }
                 Some(Type::Any)

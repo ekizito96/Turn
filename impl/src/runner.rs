@@ -333,14 +333,14 @@ impl<S: Store + std::marker::Send> Runner<S> {
                         continuation,
                     } => {
                         if tool_name == "sys_suspend" {
-                            if let Some(c) = continuation {
+                            if let Some(c) = *continuation {
                                 self.store.save(id, &c)?;
                             }
                             return Ok(Value::Null);
                         }
 
                         if tool_name == "sys_import" {
-                            if let Some(c) = &continuation {
+                            if let Some(c) = &*continuation {
                                 self.store.save(id, c)?;
                             }
 
@@ -362,7 +362,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                             continue;
                         }
 
-                        if let Some(c) = &continuation {
+                        if let Some(c) = &*continuation {
                             self.store.save(id, c)?;
                         }
 

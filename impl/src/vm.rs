@@ -30,7 +30,7 @@ pub enum VmEvent {
         tool_name: String,
         arg: Value,
         resume_tx: tokio::sync::oneshot::Sender<Value>,
-        continuation: Option<VmState>,
+        continuation: Box<Option<VmState>>,
     },
 }
 
@@ -474,7 +474,7 @@ impl Process {
                         tool_name: "sys_suspend".to_string(),
                         arg: Value::Null,
                         resume_tx: tx,
-                        continuation: Some(state),
+                        continuation: Box::new(Some(state)),
                     });
                     if let Ok(res) = rx.await {
                         self.stack.push(res);
@@ -557,7 +557,7 @@ impl Process {
                         tool_name: "llm_infer".to_string(),
                         arg: Value::Map(std::sync::Arc::new(map)),
                         resume_tx: tx,
-                        continuation: Some(state),
+                        continuation: Box::new(Some(state)),
                     });
 
                     if let Ok(res) = rx.await {
@@ -1282,7 +1282,7 @@ impl Process {
                                 tool_name: name.to_string(),
                                 arg: final_arg,
                                 resume_tx: tx,
-                                continuation: Some(state),
+                                continuation: Box::new(Some(state)),
                             });
                             if let Ok(res) = rx.await {
                                 self.stack.push(res);
@@ -1393,7 +1393,7 @@ impl Process {
                                 tool_name: name.to_string(),
                                 arg,
                                 resume_tx: tx,
-                                continuation: Some(state),
+                                continuation: Box::new(Some(state)),
                             });
                             if let Ok(res) = rx.await {
                                 self.stack.push(res);
@@ -1625,7 +1625,7 @@ impl Process {
                         tool_name: "sys_import".to_string(),
                         arg: Value::Str(path),
                         resume_tx: tx,
-                        continuation: Some(state),
+                        continuation: Box::new(Some(state)),
                     });
                     if let Ok(res) = rx.await {
                         self.stack.push(res);

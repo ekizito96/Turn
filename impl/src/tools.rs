@@ -397,7 +397,7 @@ fn call_llm_dispatch(
             let final_model = model.unwrap_or("llama3");
             call_ollama_chat(final_model, messages)
         }
-        "openai" | _ => {
+        _ => {
             let api_key =
                 env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
             let final_model = model.unwrap_or("gpt-4o-mini");

@@ -18,19 +18,14 @@ pub struct Backend {
 impl Backend {
     fn find_identifier(&self, source: &str, offset: usize) -> Option<(String, Span)> {
         let mut lexer = Lexer::new(source);
-        loop {
-            match lexer.next_token() {
-                Ok(t) => {
-                    if let Token::Eof = t.token {
-                        break;
-                    }
-                    if let Token::Id(name) = t.token {
-                        if t.span.start <= offset && offset <= t.span.end {
-                            return Some((name, t.span));
-                        }
-                    }
+        while let Ok(t) = lexer.next_token() {
+            if let Token::Eof = t.token {
+                break;
+            }
+            if let Token::Id(name) = t.token {
+                if t.span.start <= offset && offset <= t.span.end {
+                    return Some((name, t.span));
                 }
-                Err(_) => break,
             }
         }
         None
