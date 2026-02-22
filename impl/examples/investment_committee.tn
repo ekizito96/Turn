@@ -1,0 +1,170 @@
+// ============================================================================
+// Turn v0.5.0-alpha Example: Investment Committee (Multi-Agent Swarm)
+// 
+// Use Case: A committee of specialist agents (Market, Fundamental, Risk, Chair)
+// collaborates to evaluate public-equity investment opportunities for a $10M 
+// portfolio under strict constraints.
+// ============================================================================
+
+use "std/print";
+
+// ============================================================================
+// 1. Data Structures & Types
+// ============================================================================
+
+struct MarketData {
+    price: Num,
+    volatility: Num,
+    pe_ratio: Num,
+    market_cap: Num
+}
+
+struct RiskAnalysis {
+    var_95: Num,
+    max_position_breach: Bool,
+    sector_cap_breach: Bool,
+    recommended_size: Num
+}
+
+struct CommitteeMemo {
+    ticker: Str,
+    fundamental_thesis: Str,
+    risk_assessment: RiskAnalysis,
+    final_decision: Str, // "APPROVE" or "REJECT"
+    allocation: Num
+}
+
+// ============================================================================
+// 2. Shared Tools (Capabilities)
+// ============================================================================
+
+// Mock Tool: Market Data API
+let fetch_market_data = tool turn(ticker: Str) -> MarketData {
+    println("[System] Fetching live market data for " + ticker + "...");
+    // In reality, this would use `std/http` to call Polygon or yfinance.
+    if ticker == "NVDA" {
+        return MarketData { price: 850.50, volatility: 0.45, pe_ratio: 75.2, market_cap: 2100000000000.0 };
+    } else if ticker == "AAPL" {
+        return MarketData { price: 175.20, volatility: 0.22, pe_ratio: 28.5, market_cap: 2800000000000.0 };
+    } else {
+        return MarketData { price: 100.0, volatility: 0.3, pe_ratio: 15.0, market_cap: 10000000000.0 };
+    }
+};
+
+// Mock Tool: Portfolio & Mandate Engine
+let check_mandate = tool turn(ticker: Str, requested_allocation: Num) -> RiskAnalysis {
+    println("[System] Running mandate compliance check for $" + requested_allocation + " into " + ticker);
+    let total_portfolio = 10000000.0; // $10M
+    let max_position_size = total_portfolio * 0.15; // 15% max ($1.5M)
+
+    let capped_size = requested_allocation;
+    let breach = false;
+
+    if requested_allocation > max_position_size {
+        capped_size = max_position_size;
+        breach = true;
+    }
+
+    return RiskAnalysis {
+        var_95: capped_size * 0.08, // 8% VaR
+        max_position_breach: breach,
+        sector_cap_breach: false,
+        recommended_size: capped_size
+    };
+};
+
+// ============================================================================
+// 3. Specialist Agents (Actors)
+// ============================================================================
+
+// 3.1 Fundamental Analyst
+let fundamental_analyst = fn(ticker: Str) -> Str {
+    println("\n--- [Fundamental Analyst] Initializing ---");
+    // The analyst uses the market data tool to formulate a thesis
+    let analysis = infer Str with [fetch_market_data] {
+        "You are the Fundamental Analyst. Fetch the market data for " + ticker + ". " +
+        "Write a 2-sentence thesis on its valuation multiples and growth quality."
+    };
+    println("[Fundamental Analyst] Thesis generated.");
+    return analysis;
+};
+
+// 3.2 Risk Officer
+let risk_officer = fn(ticker: Str, requested_size: Num) -> RiskAnalysis {
+    println("\n--- [Risk Officer] Initializing ---");
+    // Ensure the model returns a strictly typed result using the Tool
+    let analysis = infer RiskAnalysis with [check_mandate] {
+        "You are the Risk Officer. Check the mandate for allocating $" + requested_size + 
+        " to " + ticker + ". Return the strict RiskAnalysis struct."
+    };
+    println("[Risk Officer] Risk constraints checked.");
+    return analysis;
+};
+
+// 3.3 Knowledge Base / RAG Agent (Demonstrating Semantic Memory)
+let knowledge_agent = fn(ticker: Str) -> Str {
+    println("\n--- [Knowledge Library] Searching Past Memos ---");
+    // Implicit recall uses the HNSW index to find similar past notes
+    recall("Past memos regarding " + ticker + " sector performance");
+    let context = infer Str {
+        "Based on our semantic memory of past memos, summarize our institutional stance on " + ticker
+    };
+    return context;
+};
+
+// 3.4 Committee Chair (Orchestrator)
+let committee_chair = fn(ticker: Str, requested_size: Num) -> CommitteeMemo {
+    println("\n===============================================");
+    println(" [Committee Chair] Opening review for " + ticker);
+    println("===============================================");
+
+    // 1. Dispatch Analysts concurrently (spawn)
+    let fundamental_pid = spawn(fn() { send supervisor_pid, fundamental_analyst(ticker); });
+    let risk_pid = spawn(fn() { send supervisor_pid, risk_officer(ticker, requested_size); });
+    let knowledge_pid = spawn(fn() { send supervisor_pid, knowledge_agent(ticker); });
+
+    // Wait for all three subordinates to reply
+    let fund_thesis = receive;
+    let risk_report = receive;
+    let past_context = receive;
+
+    println("\n--- [Committee Chair] Reviewing Subordinate Intelligence ---");
+    println("Using probabilistic logic (confidence traps) to evaluate risk data.");
+
+    // The Chair makes the final decision
+    let final_decision = infer CommitteeMemo {
+        "You are the Committee Chair. Read the following packets:" +
+        "\n1. Thesis: " + fund_thesis +
+        "\n2. Risk Data: Max Breach=" + risk_report.max_position_breach + ", Rec Size=" + risk_report.recommended_size +
+        "\n3. Past Memos: " + past_context +
+        "\n\nIf Max Breach is true, you MUST restrict allocation to the Rec Size or REJECT." +
+        "\nReturn the final CommitteeMemo struct."
+    };
+
+    return final_decision;
+};
+
+// ============================================================================
+// 4. Main Execution
+// ============================================================================
+
+println("Welcome to the Turn Investment Committee.");
+println("Mandate: Core Equity, $10M AUM, Max Position 15% ($1.5M)");
+
+// Pre-load some institutional memory into the HNSW index
+remember("NVDA was highly volatile in Q1, we suffered a 10% drawdown. Proceed with extreme caution on sizing.", "NVDA Q1 Memo");
+remember("AAPL is a steady cash generator, approved for max sizing last year.", "AAPL Review");
+
+// Request: Evaluate NVDA for a $2.0M position (Note: this violates the 15% / $1.5M max rule)
+let target = "NVDA";
+let requested_allocation = 2000000.0;
+
+let final_memo = committee_chair(target, requested_allocation);
+
+println("\n===============================================");
+println(" FINAL COMMITTEE MEMO: " + final_memo.ticker);
+println("===============================================");
+println("Decision:   " + final_memo.final_decision);
+println("Allocation: $" + final_memo.allocation);
+println("Thesis:     " + final_memo.fundamental_thesis);
+println("Risk Breach:" + final_memo.risk_assessment.max_position_breach);
