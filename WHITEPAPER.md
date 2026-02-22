@@ -139,7 +139,19 @@ The reference implementation compiles Turn source to bytecode and executes it on
 
 Lexer → Parser → AST → Compiler → Bytecode → VM
 
-### 5.2 Durable Heap
+### 5.2 The Provider-Agnostic Boundary (Solving Vendor Lock-In)
+
+A critical architectural anti-pattern in agentic engineering is binding the application lifecycle to a specific foundation model provider (e.g., OpenAI, Anthropic). If a provider changes their API endpoint, deprecates a model, or alters their JSON Schema specification, traditional agent architectures break completely.
+
+Turn explicitly prevents this by formalizing a **Language vs. Provider Boundary**:
+- **The Turn AST** has zero knowledge of "OpenAI", "Tokens", or "REST endpoints". The language only understands the `infer` keyword, cognitive types (`Struct`, `List`), and `confidence`.
+- **The Execution Layer (VM)** evaluates `infer` by emitting a generic `VmEvent::Suspend` Host Trap. It requests a capability fulfillment from the physical Host running the VM.
+- **The Host Runtime** (e.g., `runner.rs` in Rust) intercepts the trap, maps Turn's canonical AST Type into the provider's specific proprietary format (e.g., OpenAI's structured outputs or Anthropic's tool use XML), executes the physical HTTP/gRPC request, and casts the payload back into a generic Turn `Value::Struct`.
+
+This guarantees **Absolute Provider Agnosticism**. 
+If a new LLM provider emerges tomorrow, or an old one introduces breaking API changes, **not a single line of Turn script needs to be rewritten**. Only the Rust Host executing the VM needs its HTTP adapter updated, keeping the ecosystem completely decoupled from vendor volatility.
+
+### 5.3 Durable Heap
 
 The runtime uses a durable state store for continuations and long-lived state. This enables:
 
