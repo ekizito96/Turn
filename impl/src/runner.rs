@@ -4,10 +4,9 @@ use crate::parser::Parser;
 use crate::store::Store;
 use crate::tools::ToolRegistry;
 use crate::value::Value;
-use crate::vm::{Vm, VmResult};
-use anyhow::Result;
-use std::collections::HashMap;
+use crate::vm::{VmEvent, Vm};
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 pub struct Runner<S: Store> {
     store: S,
@@ -16,7 +15,7 @@ pub struct Runner<S: Store> {
     injected_caps: HashMap<String, String>,
 }
 
-impl<S: Store> Runner<S> {
+impl<S: Store + std::marker::Send> Runner<S> {
     pub fn new(store: S, tools: ToolRegistry) -> Self {
         Self { 
             store, 
@@ -30,7 +29,9 @@ impl<S: Store> Runner<S> {
         self.injected_caps.insert(name.to_string(), secret.to_string());
     }
 
-    fn load_module(&mut self, path: &str, current_file: Option<&PathBuf>) -> Result<Value> {
+    #[allow(clippy::needless_lifetimes)]
+    fn load_module<'a>(&'a mut self, path: &'a str, current_file: Option<&'a PathBuf>) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<crate::value::Value>> + Send + 'a>> {
+        Box::pin(async move {
         // 1. Check embedded Standard Library
         if let Some(source) = crate::std_lib::get_module_source(path) {
             let key = format!("std::{}", path);
@@ -58,41 +59,44 @@ impl<S: Store> Runner<S> {
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
             
-            // Run in fresh VM
-            let mut vm = Vm::new(&code);
+            let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
+            let vm = Vm::new(&code, host_tx);
+            vm.start().await;
+            
             loop {
-                match vm.run() {
-                    VmResult::Complete(v) => {
-                        self.module_cache.insert(key, v.clone());
-                        return Ok(v);
-                    }
-                    VmResult::Suspended { tool_name, arg, continuation } => {
-                        if tool_name == "sys_import" {
-                            let inner_path = match arg {
-                                Value::Str(s) => s.to_string(),
-                                _ => "".to_string(),
-                            };
-                            // Std lib modules don't have a file path context
-                            match self.load_module(&inner_path, None) {
-                                Ok(val) => {
-                                    vm = Vm::resume_with_result(continuation, val);
-                                },
-                                Err(e) => {
-                                    vm = Vm::resume_with_error(continuation, e.to_string());
-                                }
+                if let Some(event) = host_rx.recv().await {
+                    match event {
+                        VmEvent::Complete { pid, result } => {
+                            if pid == 1 {
+                                self.module_cache.insert(key, result.clone());
+                                return Ok(result);
                             }
-                        } else {
-                            match self.tools.call(&tool_name, arg) {
-                                Ok(val) => {
-                                    vm = Vm::resume_with_result(continuation, val);
-                                },
-                                Err(e) => {
-                                    vm = Vm::resume_with_error(continuation, e);
+                        }
+                        VmEvent::Error { pid, error } => {
+                            if pid == 1 {
+                                return Err(anyhow::anyhow!("VM Error: {}", error));
+                            }
+                        }
+                        VmEvent::Suspend { pid: _, tool_name, arg, resume_tx, continuation: _ } => {
+                            if tool_name == "sys_import" {
+                                let inner_path = match arg {
+                                    Value::Str(s) => s.to_string(),
+                                    _ => "".to_string(),
+                                };
+                                match self.load_module(&inner_path, None).await {
+                                    Ok(val) => { let _ = resume_tx.send(val); },
+                                    Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                                }
+                            } else {
+                                match self.tools.call(&tool_name, arg) {
+                                    Ok(val) => { let _ = resume_tx.send(val); },
+                                    Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
                                 }
                             }
                         }
                     }
-                    VmResult::Yielded => unreachable!("VM should handle yields internally"),
+                } else {
+                    return Err(anyhow::anyhow!("VM unexpectedly halted"));
                 }
             }
         }
@@ -170,133 +174,126 @@ impl<S: Store> Runner<S> {
         let code = compiler.compile(&program);
         
         // Run module in a fresh VM (recursive)
-        let mut vm = Vm::new(&code);
+        let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
+        let vm = Vm::new(&code, host_tx);
+        vm.start().await;
         
         loop {
-            match vm.run() {
-                VmResult::Complete(v) => {
-                    self.module_cache.insert(key, v.clone());
-                    return Ok(v);
-                }
-                VmResult::Suspended { tool_name, arg, continuation } => {
-                    // Recurse for imports inside modules!
-                    if tool_name == "sys_import" {
-                        let inner_path = match arg {
-                            Value::Str(s) => s.to_string(),
-                            _ => "".to_string(),
-                        };
-                        match self.load_module(&inner_path, Some(&abs_path)) {
-                            Ok(val) => {
-                                vm = Vm::resume_with_result(continuation, val);
-                            },
-                            Err(e) => {
-                                vm = Vm::resume_with_error(continuation, e.to_string());
-                            }
+            if let Some(event) = host_rx.recv().await {
+                match event {
+                    VmEvent::Complete { pid, result } => {
+                        if pid == 1 {
+                            self.module_cache.insert(key, result.clone());
+                            return Ok(result);
                         }
-                    } else {
-                        // Normal tool call
-                        match self.tools.call(&tool_name, arg) {
-                            Ok(val) => {
-                                vm = Vm::resume_with_result(continuation, val);
-                            },
-                            Err(e) => {
-                                vm = Vm::resume_with_error(continuation, e);
+                    }
+                    VmEvent::Error { pid, error } => {
+                        if pid == 1 {
+                            return Err(anyhow::anyhow!("VM Error: {}", error));
+                        }
+                    }
+                    VmEvent::Suspend { pid: _, tool_name, arg, resume_tx, continuation: _ } => {
+                        if tool_name == "sys_import" {
+                            let inner_path = match arg {
+                                Value::Str(s) => s.to_string(),
+                                _ => "".to_string(),
+                            };
+                            match self.load_module(&inner_path, Some(&abs_path)).await {
+                                Ok(val) => { let _ = resume_tx.send(val); },
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                            }
+                        } else {
+                            match self.tools.call(&tool_name, arg) {
+                                Ok(val) => { let _ = resume_tx.send(val); },
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
                             }
                         }
                     }
                 }
-                VmResult::Yielded => unreachable!("VM should handle yields internally"),
+            } else {
+                return Err(anyhow::anyhow!("VM unexpectedly halted"));
             }
         }
+    })
     }
 
-    pub fn run(&mut self, id: &str, source: &str, path: Option<PathBuf>) -> Result<Value> {
-        // 1. Load or Init
-        // If resuming, we load from store.
-        let mut vm = if let Ok(Some(state)) = self.store.load(id) {
-            // Check if state is valid?
-            // Resume with Null as "last result" - technically incorrect if we crashed mid-tool-return?
-            // But good enough for now.
-            Vm::resume_with_result(state, Value::Null)
+    pub async fn run(&mut self, id: &str, source: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<Value> {
+        let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
+        
+        let vm = if let Ok(Some(state)) = self.store.load(id) {
+            // Write to disk temporarily and use resume_from_disk
+            let temp_path = format!(".turn_tmp_{}.json", id);
+            let data = serde_json::to_string(&state)?;
+            std::fs::write(&temp_path, data)?;
+            let vm = Vm::resume_from_disk(&temp_path, host_tx)?;
+            let _ = std::fs::remove_file(&temp_path);
+            vm
         } else {
             let lexer = Lexer::new(source);
-            let tokens = lexer.tokenize()
-                 .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
+            let tokens = lexer.tokenize().map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
                  
             let mut parser = Parser::new(tokens);
-            let program = parser.parse()
-                 .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+            let program = parser.parse().map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
                  
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
-            let mut vm = Vm::new(&code);
             
-            // Inject OCap Secrets natively from Host
-            if let Some(root) = vm.scheduler.front_mut() {
-                for (name, secret) in &self.injected_caps {
-                    let cap_id = root.runtime.capabilities.mint(secret.clone());
-                    root.runtime.env.insert(name.clone(), Value::Cap(cap_id));
-                }
-            }
-            
-            vm
+            Vm::new(&code, host_tx)
         };
+        
+        vm.start().await;
 
-        // 2. Loop
         loop {
-            match vm.run() {
-                VmResult::Complete(v) => {
-                    // Clear store on successful completion?
-                    // self.store.delete(id)?; 
-                    // Keeping it allows inspecting final state or re-running?
-                    return Ok(v);
-                }
-                VmResult::Suspended { tool_name, arg, continuation } => {
-                    // Handle Suspend
-                    if tool_name == "sys_suspend" {
-                        self.store.save(id, &continuation)?;
-                        return Ok(Value::Null);
+            if let Some(event) = host_rx.recv().await {
+                match event {
+                    VmEvent::Complete { pid, result } => {
+                        if pid == 1 {
+                            return Ok(result);
+                        }
                     }
-
-                    // Handle Import
-                    if tool_name == "sys_import" {
-                        // 3a. Save state (checkpoint)
-                        self.store.save(id, &continuation)?;
-                        
-                        // 3b. Load Module
-                        let import_path = match arg {
-                            Value::Str(s) => s.to_string(),
-                            _ => "".to_string(),
-                        };
-                        
-                        // Use the provided path as base, or CWD
-                        let base_path = path.as_ref();
-                        
-                        match self.load_module(&import_path, base_path) {
-                            Ok(val) => {
-                                vm = Vm::resume_with_result(continuation, val);
-                            },
-                            Err(e) => {
-                                vm = Vm::resume_with_error(continuation, e.to_string());
+                    VmEvent::Error { pid, error } => {
+                        if pid == 1 {
+                            return Err(anyhow::anyhow!("VM Error: {}", error));
+                        }
+                    }
+                    VmEvent::Suspend { pid: _, tool_name, arg, resume_tx, continuation } => {
+                        if tool_name == "sys_suspend" {
+                            if let Some(c) = continuation {
+                                self.store.save(id, &c)?;
                             }
+                            return Ok(Value::Null);
                         }
-                        continue;
-                    }
 
-                    // 3. Save state (checkpoint)
-                    self.store.save(id, &continuation)?;
-                    
-                    // 4. Execute tool
-                    match self.tools.call(&tool_name, arg) {
-                        Ok(val) => {
-                             vm = Vm::resume_with_result(continuation, val);
-                        },
-                        Err(e) => {
-                             vm = Vm::resume_with_error(continuation, e);
+                        if tool_name == "sys_import" {
+                            if let Some(c) = &continuation {
+                                self.store.save(id, c)?;
+                            }
+                            
+                            let import_path = match arg {
+                                Value::Str(s) => s.to_string(),
+                                _ => "".to_string(),
+                            };
+                            
+                            let base_path = path.as_ref();
+                            match self.load_module(&import_path, base_path).await {
+                                Ok(val) => { let _ = resume_tx.send(val); },
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                            }
+                            continue;
+                        }
+
+                        if let Some(c) = &continuation {
+                            self.store.save(id, c)?;
+                        }
+                        
+                        match self.tools.call(&tool_name, arg) {
+                            Ok(val) => { let _ = resume_tx.send(val); },
+                            Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
                         }
                     }
                 }
-                VmResult::Yielded => unreachable!("VM should handle yields internally"),
+            } else {
+                return Err(anyhow::anyhow!("VM unexpectedly halted"));
             }
         }
     }

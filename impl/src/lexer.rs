@@ -34,6 +34,9 @@ pub enum Token {
     Secret, // NEW
     Tool, // NEW
     Struct,
+    Match,
+    Ok,
+    Err,
     If,
     Else,
     While,
@@ -53,6 +56,8 @@ pub enum Token {
     TypeVoid,
     TypePid,
     TypeVec,
+    TypeCap,
+    TypeResult,
 
     // Operators
     Plus,
@@ -117,9 +122,9 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("suspend", Token::Suspend), // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
-    ("try", Token::Try),
-    ("catch", Token::Catch),
-    ("throw", Token::Throw),
+    ("match", Token::Match),
+    ("ok", Token::Ok),
+    ("err", Token::Err),
     ("context", Token::Context),
     ("append", Token::Append),
     ("remember", Token::Remember),

@@ -15,6 +15,71 @@ pub struct Frame {
     pub handlers: Vec<u32>, // Stack of catch block offsets relative to code start
 }
 
+#[derive(Debug)]
+pub enum VmEvent {
+    Complete { pid: u64, result: Value },
+    Error { pid: u64, error: String },
+    Suspend {
+        pid: u64,
+        tool_name: String,
+        arg: Value,
+        resume_tx: tokio::sync::oneshot::Sender<Value>,
+        continuation: Option<VmState>,
+    },
+}
+
+#[derive(Clone)]
+pub struct Registry {
+    pub pids: Arc<std::sync::RwLock<HashMap<u64, tokio::sync::mpsc::UnboundedSender<Value>>>>,
+    pub next_pid: Arc<std::sync::RwLock<u64>>,
+    pub links: Arc<std::sync::RwLock<HashMap<u64, Vec<u64>>>>, // watched -> watchers
+    pub monitors: Arc<std::sync::RwLock<HashMap<u64, Vec<u64>>>>, // watched -> watchers
+    pub host_tx: tokio::sync::mpsc::UnboundedSender<VmEvent>,
+}
+
+impl Registry {
+    pub fn new(host_tx: tokio::sync::mpsc::UnboundedSender<VmEvent>) -> Self {
+        Self {
+            pids: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            next_pid: Arc::new(std::sync::RwLock::new(2)), // Root is 1
+            links: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            monitors: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            host_tx,
+        }
+    }
+    pub fn register(&self, pid: u64, tx: tokio::sync::mpsc::UnboundedSender<Value>) {
+        self.pids.write().unwrap().insert(pid, tx);
+    }
+    pub fn unregister(&self, pid: u64) {
+        self.pids.write().unwrap().remove(&pid);
+    }
+    pub fn send(&self, pid: u64, msg: Value) -> bool {
+        if let Some(tx) = self.pids.read().unwrap().get(&pid) {
+            tx.send(msg).is_ok()
+        } else {
+            false
+        }
+    }
+    pub fn get_next_pid(&self) -> u64 {
+        let mut n = self.next_pid.write().unwrap();
+        let pid = *n;
+        *n += 1;
+        pid
+    }
+    pub fn add_link(&self, watched: u64, watcher: u64) {
+        self.links.write().unwrap().entry(watched).or_default().push(watcher);
+    }
+    pub fn add_monitor(&self, watched: u64, watcher: u64) {
+        self.monitors.write().unwrap().entry(watched).or_default().push(watcher);
+    }
+    pub fn get_links(&self, watched: u64) -> Vec<u64> {
+        self.links.read().unwrap().get(&watched).cloned().unwrap_or_default()
+    }
+    pub fn get_monitors(&self, watched: u64) -> Vec<u64> {
+        self.monitors.read().unwrap().get(&watched).cloned().unwrap_or_default()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VmState {
     pub pid: u64,
@@ -22,9 +87,8 @@ pub struct VmState {
     pub stack: Vec<Value>,
     pub runtime: Runtime,
     pub mailbox: VecDeque<Value>,
-    pub scheduler: VecDeque<Process>,
-    pub next_pid: u64,
     pub token_budget: usize,
+    pub strictness_threshold: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -35,28 +99,24 @@ pub struct Process {
     pub runtime: Runtime,
     pub mailbox: VecDeque<Value>,
     pub token_budget: usize,
+    pub strictness_threshold: f64,
     pub links: Vec<u64>,
     pub monitors: Vec<u64>,
 }
 
-#[derive(Debug)]
-pub enum VmResult {
-    Complete(Value),
-    Suspended {
-        tool_name: String,
-        arg: Value,
-        continuation: VmState,
-    },
-    Yielded,
-}
-
 pub struct Vm {
-    pub scheduler: VecDeque<Process>,
-    pub next_pid: u64,
+    pub registry: Registry,
+    pub root_process: Option<Process>,
+    pub root_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Value>>,
 }
 
 impl Vm {
-    pub fn new(code: &[Instr]) -> Self {
+    pub fn new(code: &[Instr], host_tx: tokio::sync::mpsc::UnboundedSender<VmEvent>) -> Self {
+        let registry = Registry::new(host_tx);
+        let root_pid = 1;
+        let (root_tx, root_rx) = tokio::sync::mpsc::unbounded_channel();
+        registry.register(root_pid, root_tx);
+
         let root_frame = Frame {
             code: Arc::new(code.to_vec()),
             ip: 0,
@@ -65,69 +125,47 @@ impl Vm {
         };
         
         let root_process = Process {
-            pid: 1,
+            pid: root_pid,
             frames: vec![root_frame],
             stack: Vec::new(),
             runtime: Runtime::new(),
             mailbox: VecDeque::new(),
             token_budget: 1_000_000,
+            strictness_threshold: 0.8,
             links: Vec::new(),
             monitors: Vec::new(),
         };
 
-        let mut scheduler = VecDeque::new();
-        scheduler.push_back(root_process);
-
         Self {
-            scheduler,
-            next_pid: 2,
+            registry,
+            root_process: Some(root_process),
+            root_rx: Some(root_rx),
         }
     }
 
-    pub fn resume_with_result(state: VmState, tool_result: Value) -> Self {
-        let mut process = Process {
-            pid: state.pid,
-            frames: state.frames,
-            stack: state.stack,
-            runtime: state.runtime,
-            mailbox: state.mailbox,
-            token_budget: state.token_budget,
-            links: Vec::new(), // Reconstructed processes won't have historic links in this mocked resume yet, to be solved in Durable Heap
-            monitors: Vec::new(),
-        };
-        
-        process.stack.push(tool_result);
-        
-        let mut scheduler = state.scheduler;
-        scheduler.push_back(process);
-        
-        Self {
-            scheduler,
-            next_pid: state.next_pid,
-        }
-    }
-
-    /// Snapshots the entire VM state to a durable heap file.
-    pub fn snapshot(&self, current_process: &Process, path: &str) -> std::io::Result<()> {
+    pub fn snapshot(process: &Process, path: &str) -> std::io::Result<()> {
         let state = VmState {
-            pid: current_process.pid,
-            frames: current_process.frames.clone(),
-            stack: current_process.stack.clone(),
-            runtime: current_process.runtime.clone(),
-            mailbox: current_process.mailbox.clone(),
-            scheduler: self.scheduler.clone(),
-            next_pid: self.next_pid,
-            token_budget: current_process.token_budget,
+            pid: process.pid,
+            frames: process.frames.clone(),
+            stack: process.stack.clone(),
+            runtime: process.runtime.clone(),
+            mailbox: process.mailbox.clone(),
+            token_budget: process.token_budget,
+            strictness_threshold: process.strictness_threshold,
         };
         let data = serde_json::to_string_pretty(&state)?;
         std::fs::write(path, data)?;
         Ok(())
     }
 
-    /// Resumes the VM from a durable heap file.
-    pub fn resume_from_disk(path: &str) -> std::io::Result<Self> {
+    pub fn resume_from_disk(path: &str, host_tx: tokio::sync::mpsc::UnboundedSender<VmEvent>) -> std::io::Result<Self> {
         let data = std::fs::read_to_string(path)?;
         let state: VmState = serde_json::from_str(&data)?;
+        
+        let registry = Registry::new(host_tx);
+        let (root_tx, root_rx) = tokio::sync::mpsc::unbounded_channel();
+        registry.register(state.pid, root_tx);
+        *registry.next_pid.write().unwrap() = state.pid + 1;
         
         let process = Process {
             pid: state.pid,
@@ -136,169 +174,86 @@ impl Vm {
             runtime: state.runtime,
             mailbox: state.mailbox,
             token_budget: state.token_budget,
-            // Simple reconstruction. A true WAL would rebuild the entire process table links.
+            strictness_threshold: state.strictness_threshold,
             links: Vec::new(), 
             monitors: Vec::new(),
         };
         
-        let mut scheduler = state.scheduler;
-        scheduler.push_back(process);
-        
         Ok(Self {
-            scheduler,
-            next_pid: state.next_pid,
+            registry,
+            root_process: Some(process),
+            root_rx: Some(root_rx),
         })
     }
 
-    pub fn resume_with_error(state: VmState, error_msg: String) -> Self {
-        let process = Process {
-            pid: state.pid,
-            frames: state.frames,
-            stack: state.stack,
-            runtime: state.runtime,
-            mailbox: state.mailbox,
-            token_budget: state.token_budget,
-            links: Vec::new(),
-            monitors: Vec::new(),
-        };
-        
-        let mut scheduler = state.scheduler;
-        scheduler.push_back(process);
-        
-        let mut vm = Self {
-            scheduler,
-            next_pid: state.next_pid,
-        };
-
-        let err = Value::Str(std::sync::Arc::new(error_msg));
-        
-        // Unwind stack looking for catch
-        if let Some(p) = vm.scheduler.front_mut() {
-             loop {
-                if p.frames.is_empty() {
-                    // No frames left, push error to stack (uncaught)
-                    p.stack.push(err);
-                    break;
-                }
-
-                let f_idx = p.frames.len() - 1;
-                if let Some(h_off) = p.frames[f_idx].handlers.pop() {
-                    p.frames[f_idx].ip = h_off as usize;
-                    p.stack.push(err);
-                    break;
-                } else {
-                    p.frames.pop();
-                    if let Some(c) = p.frames.last() {
-                        p.runtime.env = c.env.clone();
-                    }
-                }
-            }
-        }
-        vm
-    }
-
-    pub fn run(&mut self) -> VmResult {
-        loop {
-            if self.scheduler.is_empty() {
-                return VmResult::Complete(Value::Null);
-            }
-
-            let mut process = self.scheduler.pop_front().unwrap();
-            let result = self.run_process(&mut process, 1000); // 1000 ops slice
-            
-            match result {
-                VmResult::Yielded => {
-                    self.scheduler.push_back(process);
-                }
-                VmResult::Complete(v) => {
-                    // Route exit signals to linked and monitored processes
-                    let reason = if let Value::Str(ref _s) = v {
-                        v.clone() // Propagate the specific return value or panic string
-                    } else if v != Value::Null {
-                        v.clone()
-                    } else {
-                        Value::Str(std::sync::Arc::new("normal".to_string()))
-                    };
-
-                    // Broadcast to links (bidirectional expectation, so a link crash usually crashes the parent unless trapped, but Turn handles this as a standard mailbox priority message for now)
-                    for linked_pid in &process.links {
-                        if let Some(target) = self.scheduler.iter_mut().find(|p| p.pid == *linked_pid) {
-                            let mut map = indexmap::IndexMap::new();
-                            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("EXIT".to_string())));
-                            map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: process.pid });
-                            map.insert("reason".to_string(), reason.clone());
-                            target.mailbox.push_back(Value::Map(std::sync::Arc::new(map)));
-                        }
-                    }
-
-                    // Broadcast to monitors (unidirectional observation)
-                    for monitor_pid in &process.monitors {
-                        if let Some(target) = self.scheduler.iter_mut().find(|p| p.pid == *monitor_pid) {
-                            let mut map = indexmap::IndexMap::new();
-                            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("DOWN".to_string())));
-                            map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: process.pid });
-                            map.insert("reason".to_string(), reason.clone());
-                            target.mailbox.push_back(Value::Map(std::sync::Arc::new(map)));
-                        }
-                    }
-
-                    if process.pid == 1 {
-                        return VmResult::Complete(v);
-                    }
-                    // Child finished, dropped.
-                }
-                VmResult::Suspended { tool_name, arg, continuation: _ } => {
-                    // Reconstruct VmState for legacy support
-                    let state = VmState {
-                        pid: process.pid,
-                        frames: process.frames.clone(),
-                        stack: process.stack.clone(),
-                        runtime: process.runtime.clone(),
-                        mailbox: process.mailbox.clone(),
-                        scheduler: self.scheduler.clone(),
-                        next_pid: self.next_pid,
-                        token_budget: process.token_budget,
-                    };
-                    return VmResult::Suspended {
-                        tool_name,
-                        arg,
-                        continuation: state,
-                    };
-                }
-            }
+    pub async fn start(self) {
+        if let (Some(mut root), Some(rx)) = (self.root_process, self.root_rx) {
+            let registry = self.registry.clone();
+            tokio::spawn(async move {
+                root.run_process(registry, rx).await;
+            });
         }
     }
+}
 
-    fn run_process(&mut self, process: &mut Process, steps: usize) -> VmResult {
-        let mut steps_left = steps;
+impl Process {
+    fn exit_process(&self, registry: &Registry, result: Value) {
+        let reason = if let Value::Str(_) = &result { result.clone() } else if result != Value::Null { result.clone() } else { Value::Str(std::sync::Arc::new("normal".to_string())) };
+        for linked_pid in registry.get_links(self.pid) {
+            let mut map = indexmap::IndexMap::new();
+            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("EXIT".to_string())));
+            map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: self.pid });
+            map.insert("reason".to_string(), reason.clone());
+            registry.send(linked_pid, Value::Map(std::sync::Arc::new(map)));
+        }
+        for monitor_pid in registry.get_monitors(self.pid) {
+            let mut map = indexmap::IndexMap::new();
+            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("DOWN".to_string())));
+            map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: self.pid });
+            map.insert("reason".to_string(), reason.clone());
+            registry.send(monitor_pid, Value::Map(std::sync::Arc::new(map)));
+        }
+        registry.unregister(self.pid);
+        let _ = registry.host_tx.send(VmEvent::Complete { pid: self.pid, result });
+    }
+
+    pub async fn run_process(&mut self, registry: Registry, mut receiver: tokio::sync::mpsc::UnboundedReceiver<Value>) {
+        let mut steps_left = 1000;
         
         loop {
-            if process.token_budget == 0 {
-                return VmResult::Complete(Value::Str(std::sync::Arc::new("Runtime Error: TokenExhaustionError - Process ran out of gas".to_string())));
+            if self.token_budget == 0 {
+                let _ = registry.host_tx.send(VmEvent::Error { 
+                    pid: self.pid, 
+                    error: "Runtime Error: TokenExhaustionError - Process ran out of gas".to_string() 
+                });
+                return;
             }
         
             if steps_left == 0 {
-                return VmResult::Yielded;
+                tokio::task::yield_now().await;
+                steps_left = 1000;
             }
             steps_left -= 1;
-            process.token_budget = process.token_budget.saturating_sub(1);
+            self.token_budget = self.token_budget.saturating_sub(1);
 
-            if process.frames.is_empty() {
-                 return VmResult::Complete(process.stack.pop().unwrap_or(Value::Null));
+            if self.frames.is_empty() {
+                 let ret_val = self.stack.pop().unwrap_or(Value::Null); self.exit_process(&registry, ret_val);
+                 return;
             }
 
-            let frame_idx = process.frames.len() - 1;
-            let frame = &mut process.frames[frame_idx];
+            let frame_idx = self.frames.len() - 1;
+            let frame = &mut self.frames[frame_idx];
             
             if frame.ip >= frame.code.len() {
-                if process.frames.len() == 1 {
-                    return VmResult::Complete(process.stack.pop().unwrap_or(Value::Null));
+                if self.frames.len() == 1 {
+                    let ret_val = self.stack.pop().unwrap_or(Value::Null); self.exit_process(&registry, ret_val);
+                    return;
                 } else {
-                    process.frames.pop();
-                    if let Some(caller) = process.frames.last() {
-                        process.runtime.env = caller.env.clone();
+                    self.frames.pop();
+                    if let Some(caller) = self.frames.last() {
+                        self.runtime.env = caller.env.clone();
                     }
-                    process.stack.push(Value::Null);
+                    self.stack.push(Value::Null);
                     continue;
                 }
             }
@@ -308,10 +263,9 @@ impl Vm {
 
             match instr {
                 Instr::Spawn => {
-                    let target = process.stack.pop().unwrap_or(Value::Null);
+                    let target = self.stack.pop().unwrap_or(Value::Null);
                     if let Value::Closure { code, ip, env, .. } = target {
-                         let new_pid = self.next_pid;
-                         self.next_pid += 1;
+                         let new_pid = registry.get_next_pid();
                          
                          let mut new_process = Process {
                              pid: new_pid,
@@ -325,170 +279,157 @@ impl Vm {
                              runtime: Runtime::new(),
                              mailbox: VecDeque::new(),
                              token_budget: 100_000, // Spawned tasks default gas limit
+                             strictness_threshold: self.strictness_threshold,
                              links: Vec::new(),
                              monitors: Vec::new(),
                          };
                          new_process.runtime.env = env;
                          
-                         self.scheduler.push_back(new_process);
-                         process.stack.push(Value::Pid { node_id: "local".to_string(), local_pid: new_pid });
+                         let (new_tx, new_rx) = tokio::sync::mpsc::unbounded_channel();
+                         registry.register(new_pid, new_tx);
+                         
+                         let reg_clone = registry.clone();
+                         tokio::task::spawn_local(async move {
+                             new_process.run_process(reg_clone, new_rx).await;
+                         });
+                         
+                         self.stack.push(Value::Pid { node_id: "local".to_string(), local_pid: new_pid });
                     } else {
-                        process.stack.push(Value::Null);
+                        self.stack.push(Value::Null);
                     }
                 }
                 Instr::SpawnRemote => {
-                    let closure_val = process.stack.pop().unwrap_or(Value::Null);
-                    let node_ip_val = process.stack.pop().unwrap_or(Value::Null);
+                    let closure_val = self.stack.pop().unwrap_or(Value::Null);
+                    let node_ip_val = self.stack.pop().unwrap_or(Value::Null);
                     
                     if let (Value::Str(node_id), Value::Closure { .. }) = (&node_ip_val, &closure_val) {
                         let mut success = false;
-                        if let Some(sb) = &process.runtime.switchboard {
-                            // By convention, a Local PID of 0 on a SpawnRemote represents the "Host System" 
-                            // asking to spawn a new root process on that node.
+                        if let Some(sb) = &self.runtime.switchboard {
                             if sb.send_remote(node_id, 0, closure_val.clone()).is_ok() {
                                 success = true;
-                                // We don't have the remote PID synchronously. For a robust actor model,
-                                // the remote node would send a message back with its PID.
-                                // For now, we return a generic "Spawned" boolean or a proxy PID.
-                                process.stack.push(Value::Bool(true));
+                                self.stack.push(Value::Bool(true));
                             }
                         }
-                        
                         if !success {
-                            println!("[VM] Warning: SpawnRemote to {} failed (no switchboard or network error).", node_id);
-                            process.stack.push(Value::Bool(false));
+                            println!("[VM] Warning: SpawnRemote to {} failed.", node_id);
+                            self.stack.push(Value::Bool(false));
                         }
                     } else {
-                        process.stack.push(Value::Null);
+                        self.stack.push(Value::Null);
                     }
                 }
                 Instr::Send => {
-                    let msg = process.stack.pop().unwrap_or(Value::Null);
-                    let pid_val = process.stack.pop().unwrap_or(Value::Null);
+                    let msg = self.stack.pop().unwrap_or(Value::Null);
+                    let pid_val = self.stack.pop().unwrap_or(Value::Null);
                     
                     if let Value::Pid { node_id, local_pid } = pid_val {
                         let mut found = false;
                         if node_id != "local" {
-                            // Remote TCP/gRPC Proxy via Host Switchboard
-                            if let Some(sb) = &process.runtime.switchboard {
+                            if let Some(sb) = &self.runtime.switchboard {
                                 if sb.send_remote(&node_id, local_pid, msg.clone()).is_ok() {
                                     found = true;
                                 }
-                            } else {
-                                println!("[VM] Warning: Remote send attempted to {}, but no NetworkSwitchboard attached.", node_id);
                             }
                         } else {
-                            // Local Memory Proxy
-                            for p in &mut self.scheduler {
-                                if p.pid == local_pid {
-                                    p.mailbox.push_back(msg.clone());
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if local_pid == process.pid {
-                                process.mailbox.push_back(msg);
+                            if local_pid == self.pid {
+                                self.mailbox.push_back(msg);
                                 found = true;
+                            } else {
+                                found = registry.send(local_pid, msg);
                             }
                         }
-                        process.stack.push(Value::Bool(found));
+                        self.stack.push(Value::Bool(found));
                     } else {
-                         process.stack.push(Value::Bool(false));
+                         self.stack.push(Value::Bool(false));
                     }
                 }
                 Instr::Receive => {
-                    if let Some(msg) = process.mailbox.pop_front() {
-                        process.stack.push(msg);
+                    while let Ok(msg) = receiver.try_recv() {
+                        self.mailbox.push_back(msg);
+                    }
+                    if let Some(msg) = self.mailbox.pop_front() {
+                        self.stack.push(msg);
                     } else {
-                        // Yield and retry same instruction later
-                        process.frames[frame_idx].ip -= 1;
-                        return VmResult::Yielded; 
+                        if let Some(msg) = receiver.recv().await {
+                            self.stack.push(msg);
+                        } else {
+                            self.stack.push(Value::Null);
+                        }
                     }
                 }
                 Instr::Link => {
-                    let pid_val = process.stack.pop().unwrap_or(Value::Null);
+                    let pid_val = self.stack.pop().unwrap_or(Value::Null);
                     if let Value::Pid { node_id, local_pid } = pid_val {
-                        // TODO: Distributed links
-                        if node_id == "local" && !process.links.contains(&local_pid) {
-                            process.links.push(local_pid);
-                            // Bidirectional link: add ourselves to the target's links
-                            for target in &mut self.scheduler {
-                                if target.pid == local_pid {
-                                    if !target.links.contains(&process.pid) {
-                                        target.links.push(process.pid);
-                                    }
-                                    break;
-                                }
-                            }
+                        if node_id == "local" && !self.links.contains(&local_pid) {
+                            self.links.push(local_pid);
+                            registry.add_link(local_pid, self.pid);
+                            registry.add_link(self.pid, local_pid);
                         }
-                        process.stack.push(Value::Bool(true));
+                        self.stack.push(Value::Bool(true));
                     } else {
-                        process.stack.push(Value::Bool(false));
+                        self.stack.push(Value::Bool(false));
                     }
                 }
                 Instr::Monitor => {
-                    let pid_val = process.stack.pop().unwrap_or(Value::Null);
+                    let pid_val = self.stack.pop().unwrap_or(Value::Null);
                     if let Value::Pid { node_id, local_pid } = pid_val {
-                        // Unidirectional monitor: Add ourselves to target's monitors array
-                        let mut found = false;
                         if node_id == "local" {
-                            for target in &mut self.scheduler {
-                                if target.pid == local_pid {
-                                    if !target.monitors.contains(&process.pid) {
-                                        target.monitors.push(process.pid);
-                                    }
-                                    found = true;
-                                    break;
-                                }
-                            }
+                            registry.add_monitor(local_pid, self.pid);
                         }
-                        process.stack.push(Value::Bool(found));
+                        self.stack.push(Value::Bool(true));
                     } else {
-                        process.stack.push(Value::Bool(false));
+                        self.stack.push(Value::Bool(false));
                     }
                 }
                 Instr::Confidence => {
-                    let v = process.stack.pop().unwrap_or(Value::Null);
+                    let v = self.stack.pop().unwrap_or(Value::Null);
                     match v {
-                        Value::Uncertain(_, p) => process.stack.push(Value::Num(p)),
-                        _ => process.stack.push(Value::Num(1.0)), // Certainty
+                        Value::Uncertain(_, p) => self.stack.push(Value::Num(p)),
+                        _ => self.stack.push(Value::Num(1.0)), // Certainty
                     }
                 }
                 Instr::Suspend => {
-                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    self.frames[frame_idx].env = self.runtime.env.clone();
                     let state = VmState {
-                        pid: process.pid,
-                        frames: process.frames.clone(),
-                        stack: process.stack.clone(),
-                        runtime: process.runtime.clone(),
-                        mailbox: process.mailbox.clone(),
-                        scheduler: self.scheduler.clone(),
-                        next_pid: self.next_pid,
-                        token_budget: process.token_budget,
+                        pid: self.pid,
+                        frames: self.frames.clone(),
+                        stack: self.stack.clone(),
+                        runtime: self.runtime.clone(),
+                        mailbox: self.mailbox.clone(),
+                        token_budget: self.token_budget,
+                        strictness_threshold: self.strictness_threshold,
                     };
                     
                     // Orthogonal Persistence: Flush active memory to local WAL
-                    let _ = self.snapshot(&process, ".turn_heap.json");
+                    let _ = Vm::snapshot(self, ".turn_heap.json");
                     
-                    return VmResult::Suspended {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let _ = registry.host_tx.send(VmEvent::Suspend {
+                                pid: self.pid,
                         tool_name: "sys_suspend".to_string(),
                         arg: Value::Null,
-                        continuation: state,
-                    };
+                        resume_tx: tx,
+                        continuation: Some(state),
+                    });
+                    if let Ok(res) = rx.await {
+                        self.stack.push(res);
+                    } else {
+                        self.stack.push(Value::Null);
+                    }
                 }
                 Instr::Infer(ty, tool_count) => {
                     let mut tools = Vec::new();
                     for _ in 0..tool_count {
-                        tools.push(process.stack.pop().unwrap_or(Value::Null));
+                        tools.push(self.stack.pop().unwrap_or(Value::Null));
                     }
                     tools.reverse(); // stack pops in reverse order
 
-                    let prompt_val = process.stack.pop().unwrap_or(Value::Null);
+                    let prompt_val = self.stack.pop().unwrap_or(Value::Null);
                     // Resolve named struct placeholders (Struct("Name", {}))
                     // against runtime-registered struct definitions before prompting LLM.
                     let resolved_ty = match ty {
                         Type::Struct(name, fields) if fields.is_empty() => {
-                            if let Some(known_fields) = process.runtime.structs.get(&name) {
+                            if let Some(known_fields) = self.runtime.structs.get(&name) {
                                 Type::Struct(name, known_fields.clone())
                             } else {
                                 Type::Struct(name, fields)
@@ -505,20 +446,20 @@ impl Vm {
                     let mut auto_context = Vec::new();
                     if let Value::Str(prompt_str) = &prompt_val {
                         if let Some(query_emb) = crate::llm_tools::get_embedding(prompt_str) {
-                            let semantic_matches = process.runtime.memory.search(&query_emb, 3);
+                            let semantic_matches = self.runtime.memory.search(&query_emb, 3);
                             for memory_val in semantic_matches {
                                 auto_context.push(memory_val);
                             }
                             // Bill tokens for the vector similarity operation
-                            if process.token_budget >= 50 {
-                                process.token_budget -= 50;
+                            if self.token_budget >= 50 {
+                                self.token_budget -= 50;
                             }
                         }
                     }
                     
                     // Combine Auto-Recall + Explicit Context stack
                     let mut combined_context = auto_context;
-                    combined_context.extend(process.runtime.context.to_values());
+                    combined_context.extend(self.runtime.context.to_values());
                     
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
@@ -528,50 +469,58 @@ impl Vm {
                         map.insert("tools".to_string(), Value::List(std::sync::Arc::new(tools)));
                     }
                     
-                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    self.frames[frame_idx].env = self.runtime.env.clone();
                     let state = VmState {
-                        pid: process.pid,
-                        frames: process.frames.clone(),
-                        stack: process.stack.clone(),
-                        runtime: process.runtime.clone(),
-                        mailbox: process.mailbox.clone(),
-                        scheduler: self.scheduler.clone(),
-                        next_pid: self.next_pid,
-                        token_budget: process.token_budget,
+                        pid: self.pid,
+                        frames: self.frames.clone(),
+                        stack: self.stack.clone(),
+                        runtime: self.runtime.clone(),
+                        mailbox: self.mailbox.clone(),
+                        token_budget: self.token_budget,
+                        strictness_threshold: self.strictness_threshold,
                     };
-                    return VmResult::Suspended {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let _ = registry.host_tx.send(VmEvent::Suspend {
+                                pid: self.pid,
                         tool_name: "llm_infer".to_string(),
                         arg: Value::Map(std::sync::Arc::new(map)),
-                        continuation: state,
-                    };
+                        resume_tx: tx,
+                        continuation: Some(state),
+                    });
+                    
+                    if let Ok(res) = rx.await {
+                        self.stack.push(res);
+                    } else {
+                        self.stack.push(Value::Null);
+                    }
                 }
                 Instr::DefineStruct(name, fields) => {
-                    process.runtime.register_struct(name, fields);
+                    self.runtime.register_struct(name, fields);
                 }
-                Instr::PushNull => process.stack.push(Value::Null),
-                Instr::PushTrue => process.stack.push(Value::Bool(true)),
-                Instr::PushFalse => process.stack.push(Value::Bool(false)),
-                Instr::PushNum(n) => process.stack.push(Value::Num(n)),
-                Instr::PushStr(s) => process.stack.push(Value::Str(std::sync::Arc::new(s))),
-                Instr::Pop => { process.stack.pop(); },
+                Instr::PushNull => self.stack.push(Value::Null),
+                Instr::PushTrue => self.stack.push(Value::Bool(true)),
+                Instr::PushFalse => self.stack.push(Value::Bool(false)),
+                Instr::PushNum(n) => self.stack.push(Value::Num(n)),
+                Instr::PushStr(s) => self.stack.push(Value::Str(std::sync::Arc::new(s))),
+                Instr::Pop => { self.stack.pop(); },
                 Instr::Load(name) => {
-                    match process.runtime.get_env(&name) {
-                        Some(v) => process.stack.push(v),
-                        None => process.stack.push(Value::Null),
+                    match self.runtime.get_env(&name) {
+                        Some(v) => self.stack.push(v),
+                        None => self.stack.push(Value::Null),
                     }
                 }
                 Instr::Store(name) => {
-                    let val = process.stack.pop().unwrap_or(Value::Null);
-                    process.runtime.push_env(name, val);
+                    let val = self.stack.pop().unwrap_or(Value::Null);
+                    self.runtime.push_env(name, val);
                 }
                 Instr::Recall => {
-                    let key = process.stack.pop().unwrap_or(Value::Null);
-                    let val = process.runtime.recall(&key);
-                    process.stack.push(val);
+                    let key = self.stack.pop().unwrap_or(Value::Null);
+                    let val = self.runtime.recall(&key);
+                    self.stack.push(val);
                 }
                 Instr::Remember => {
-                    let val = process.stack.pop().unwrap_or(Value::Null);
-                    let key = process.stack.pop().unwrap_or(Value::Null);
+                    let val = self.stack.pop().unwrap_or(Value::Null);
+                    let key = self.stack.pop().unwrap_or(Value::Null);
                     
                     // Auto-Embedding Logic for Semantic RAM
                     // If the user did not provide an explicit embedding inside a Struct/Map,
@@ -592,155 +541,234 @@ impl Vm {
                          // Generate implicit vector coordinates representing the semantic memory
                          emb = crate::llm_tools::get_embedding(&id).map(|e| std::sync::Arc::new(e));
                          // Bill the process for the background LLM operation
-                         if process.token_budget >= 50 {
-                             process.token_budget -= 50;
+                         if self.token_budget >= 50 {
+                             self.token_budget -= 50;
                          }
                     }
                     
-                    process.runtime.memory.insert(id, emb.map(|e| (*e).clone()), val);
+                    self.runtime.memory.insert(id, emb.map(|e| (*e).clone()), val);
                 }
                 Instr::Add => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(add_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(add_values(&a, &b));
                 }
                 Instr::Sub => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(sub_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(sub_values(&a, &b));
                 }
                 Instr::Mul => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(mul_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(mul_values(&a, &b));
                 }
                 Instr::Div => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(div_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(div_values(&a, &b));
                 }
                 Instr::Eq => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(eq_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(eq_values(&a, &b));
                 }
                 Instr::Ne => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(ne_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(ne_values(&a, &b));
                 }
                 Instr::Lt => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(lt_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(lt_values(&a, &b));
                 }
                 Instr::Gt => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(gt_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(gt_values(&a, &b));
                 }
                 Instr::Le => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(le_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(le_values(&a, &b));
                 }
                 Instr::Ge => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(ge_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(ge_values(&a, &b));
                 }
                 Instr::Not => {
-                    let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(not_value(&v));
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = v { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(not_value(&v));
                 }
                 Instr::And => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(and_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(and_values(&a, &b));
                 }
                 Instr::Or => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string()))); }
-                    process.stack.push(or_values(&a, &b));
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = a { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if let Value::Uncertain(_, p) = b { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    self.stack.push(or_values(&a, &b));
                 }
                 Instr::Jump(target) => {
-                    process.frames[frame_idx].ip = target as usize;
+                    self.frames[frame_idx].ip = target as usize;
                 }
                 Instr::JumpIfFalse(target) => {
-                    let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string()))); }
-                    if v.is_falsy() { process.frames[frame_idx].ip = target as usize; }
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = v { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if v.is_falsy() { self.frames[frame_idx].ip = target as usize; }
                 }
                 Instr::JumpIfTrue(target) => {
-                    let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string()))); }
-                    if v.is_truthy() { process.frames[frame_idx].ip = target as usize; }
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = v { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    if v.is_truthy() { self.frames[frame_idx].ip = target as usize; }
                 }
                 Instr::ContextAppend => {
-                    let v = process.stack.pop().unwrap_or(Value::Null);
-                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be appended to Agent context".to_string()))); }
-                    let _ = process.runtime.append_context(v);
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { self.exit_process(&registry, Value::Str(std::sync::Arc::new("PrivilegeViolation: Opaque capabilities cannot be appended to Agent context".to_string())));
+                            return; }
+                    if let Value::Uncertain(_, p) = v { if p < self.strictness_threshold { self.exit_process(&registry, Value::Str(std::sync::Arc::new(format!("ExecutionTrap: Low confidence {} below threshold {}", p, self.strictness_threshold))));
+                            return; } }
+                    let _ = self.runtime.append_context(v);
                 }
                 Instr::EnterTurn(after_addr) => {
-                    let current_ip = process.frames[frame_idx].ip;
-                    process.frames[frame_idx].ip = after_addr as usize;
-                    let code = process.frames[frame_idx].code.clone();
-                    let env = process.runtime.env.clone();
-                    process.frames.push(Frame {
+                    let current_ip = self.frames[frame_idx].ip;
+                    self.frames[frame_idx].ip = after_addr as usize;
+                    let code = self.frames[frame_idx].code.clone();
+                    let env = self.runtime.env.clone();
+                    self.frames.push(Frame {
                         code,
                         ip: current_ip,
                         env,
                         handlers: Vec::new(),
                     });
                 }
-                Instr::PushHandler(offset) => {
-                    process.frames[frame_idx].handlers.push(offset);
+                Instr::MakeOk => {
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    let mut map = IndexMap::new();
+                    map.insert("ok".to_string(), v);
+                    self.stack.push(Value::Struct(std::sync::Arc::new("Result".to_string()), std::sync::Arc::new(map)));
                 }
-                Instr::PopHandler => {
-                    process.frames[frame_idx].handlers.pop();
+                Instr::MakeErr => {
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    let mut map = IndexMap::new();
+                    map.insert("err".to_string(), v);
+                    self.stack.push(Value::Struct(std::sync::Arc::new("Result".to_string()), std::sync::Arc::new(map)));
                 }
-                Instr::Throw => {
-                    let err = process.stack.pop().unwrap_or(Value::Null);
-                    loop {
-                        if process.frames.is_empty() {
-                            return VmResult::Complete(err);
-                        }
-                        let f_idx = process.frames.len() - 1;
-                        if let Some(h_off) = process.frames[f_idx].handlers.pop() {
-                            process.frames[f_idx].ip = h_off as usize;
-                            process.stack.push(err);
-                            break;
-                        } else {
-                            process.frames.pop();
-                            if let Some(caller) = process.frames.last() {
-                                process.runtime.env = caller.env.clone();
+                Instr::MatchResult(target) => {
+                    let v = self.stack.pop().unwrap_or(Value::Null);
+                    match v {
+                        Value::Struct(name, fields) if name.as_str() == "Result" => {
+                            if let Some(err_val) = fields.get("err") {
+                                self.stack.push(err_val.clone());
+                                self.frames[frame_idx].ip = target as usize;
+                            } else if let Some(ok_val) = fields.get("ok") {
+                                self.stack.push(ok_val.clone());
+                            } else {
+                                self.stack.push(Value::Null); // Malformed Result
                             }
+                        }
+                        _ => {
+                            // If it's not a Result struct, treat it as an Error for safety, or wrap as Ok.
+                            // For strictness, let's say matching on non-Result acts as Ok(v) to fallthrough.
+                            self.stack.push(v);
                         }
                     }
                 }
                 Instr::CallMethod(name) => {
-                    let arg = process.stack.pop().unwrap_or(Value::Null);
-                    let target = process.stack.pop().unwrap_or(Value::Null);
+                    let arg = self.stack.pop().unwrap_or(Value::Null);
+                    let target = self.stack.pop().unwrap_or(Value::Null);
                     
                     let (tool_val, final_arg) = if let Some(func) = match &target {
                         Value::Map(m) | Value::Struct(_, m) => m.get(&name).cloned(),
                         _ => None
                     } {
                         (func, arg)
-                    } else if let Some(func) = process.runtime.get_env(&name) {
+                    } else if let Some(func) = self.runtime.get_env(&name) {
                         let final_arg = if arg.is_falsy() { target } else { arg };
                         (func, final_arg)
                     } else {
@@ -749,22 +777,22 @@ impl Vm {
 
                     match tool_val {
                         Value::Str(name) => {
-                            process.frames[frame_idx].env = process.runtime.env.clone();
+                            self.frames[frame_idx].env = self.runtime.env.clone();
                             let state = VmState {
-                                pid: process.pid,
-                                frames: process.frames.clone(),
-                                stack: process.stack.clone(),
-                                runtime: process.runtime.clone(),
-                                mailbox: process.mailbox.clone(),
-                                scheduler: self.scheduler.clone(),
-                                next_pid: self.next_pid,
-                                token_budget: process.token_budget,
+                                pid: self.pid,
+                                frames: self.frames.clone(),
+                                stack: self.stack.clone(),
+                                runtime: self.runtime.clone(),
+                                mailbox: self.mailbox.clone(),
+                                token_budget: self.token_budget,
+                                strictness_threshold: self.strictness_threshold,
                             };
-                            return VmResult::Suspended {
+                            let (tx, rx) = tokio::sync::oneshot::channel();
+let _ = registry.host_tx.send(VmEvent::Suspend {
+                                pid: self.pid,
                                 tool_name: name.to_string(),
                                 arg: final_arg,
-                                continuation: state,
-                            };
+                                resume_tx: tx, continuation: Some(state), }); if let Ok(res) = rx.await { self.stack.push(res); } else { self.stack.push(Value::Null); } return;
                         }
                         Value::Closure { is_tool: _, code, ip, env, params } => {
                             let mut new_env = env.clone();
@@ -824,44 +852,44 @@ impl Vm {
                                 new_env.insert("arg".to_string(), final_arg);
                             }
                             
-                            process.frames[frame_idx].env = process.runtime.env.clone();
-                            process.runtime.env = new_env;
+                            self.frames[frame_idx].env = self.runtime.env.clone();
+                            self.runtime.env = new_env;
                             for (k, v) in mem_inserts {
-                                process.runtime.memory.insert(k, None, v);
+                                self.runtime.memory.insert(k, None, v);
                             }
                             
-                            process.frames.push(Frame {
+                            self.frames.push(Frame {
                                 code,
                                 ip,
-                                env: process.runtime.env.clone(),
+                                env: self.runtime.env.clone(),
                                 handlers: Vec::new(),
                             });
                         }
-                        _ => process.stack.push(Value::Null),
+                        _ => self.stack.push(Value::Null),
                     }
                 }
                 Instr::CallTool => {
-                    let arg = process.stack.pop().unwrap_or(Value::Null);
-                    let tool_val = process.stack.pop().unwrap_or(Value::Null);
+                    let arg = self.stack.pop().unwrap_or(Value::Null);
+                    let tool_val = self.stack.pop().unwrap_or(Value::Null);
                     
                     match tool_val {
                         Value::Str(name) => {
-                            process.frames[frame_idx].env = process.runtime.env.clone();
+                            self.frames[frame_idx].env = self.runtime.env.clone();
                             let state = VmState {
-                                pid: process.pid,
-                                frames: process.frames.clone(),
-                                stack: process.stack.clone(),
-                                runtime: process.runtime.clone(),
-                                mailbox: process.mailbox.clone(),
-                                scheduler: self.scheduler.clone(),
-                                next_pid: self.next_pid,
-                                token_budget: process.token_budget,
+                                pid: self.pid,
+                                frames: self.frames.clone(),
+                                stack: self.stack.clone(),
+                                runtime: self.runtime.clone(),
+                                mailbox: self.mailbox.clone(),
+                                token_budget: self.token_budget,
+                                strictness_threshold: self.strictness_threshold,
                             };
-                            return VmResult::Suspended {
+                            let (tx, rx) = tokio::sync::oneshot::channel();
+let _ = registry.host_tx.send(VmEvent::Suspend {
+                                pid: self.pid,
                                 tool_name: name.to_string(),
                                 arg,
-                                continuation: state,
-                            };
+                                resume_tx: tx, continuation: Some(state), }); if let Ok(res) = rx.await { self.stack.push(res); } else { self.stack.push(Value::Null); } return;
                         }
                         Value::Closure { is_tool: _, code, ip, env, params } => {
                             let mut new_env = env.clone();
@@ -921,64 +949,65 @@ impl Vm {
                                 new_env.insert("arg".to_string(), arg);
                             }
                             
-                            process.frames[frame_idx].env = process.runtime.env.clone();
-                            process.runtime.env = new_env;
+                            self.frames[frame_idx].env = self.runtime.env.clone();
+                            self.runtime.env = new_env;
                             for (k, v) in mem_inserts {
-                                process.runtime.memory.insert(k, None, v);
+                                self.runtime.memory.insert(k, None, v);
                             }
                             
-                            process.frames.push(Frame {
+                            self.frames.push(Frame {
                                 code,
                                 ip,
-                                env: process.runtime.env.clone(),
+                                env: self.runtime.env.clone(),
                                 handlers: Vec::new(),
                             });
                         }
-                        _ => process.stack.push(Value::Null),
+                        _ => self.stack.push(Value::Null),
                     }
                 }
                 Instr::Return => {
-                    let ret_val = process.stack.pop().unwrap_or(Value::Null);
-                    if process.frames.len() > 1 {
-                        process.frames.pop();
-                        if let Some(caller) = process.frames.last() {
-                            process.runtime.env = caller.env.clone();
+                    let ret_val = self.stack.pop().unwrap_or(Value::Null);
+                    if self.frames.len() > 1 {
+                        self.frames.pop();
+                        if let Some(caller) = self.frames.last() {
+                            self.runtime.env = caller.env.clone();
                         }
-                        process.stack.push(ret_val);
+                        self.stack.push(ret_val);
                     } else {
-                        return VmResult::Complete(ret_val);
+                        self.exit_process(&registry, ret_val);
+                            return;
                     }
                 }
                 Instr::MakeList(count) => {
                     let mut items = Vec::new();
-                    for _ in 0..count { items.push(process.stack.pop().unwrap_or(Value::Null)); }
+                    for _ in 0..count { items.push(self.stack.pop().unwrap_or(Value::Null)); }
                     items.reverse();
-                    process.stack.push(Value::List(std::sync::Arc::new(items)));
+                    self.stack.push(Value::List(std::sync::Arc::new(items)));
                 }
                 Instr::MakeMap(count) => {
                     let mut map = IndexMap::new();
                     for _ in 0..count {
-                        let val = process.stack.pop().unwrap_or(Value::Null);
-                        let k_val = process.stack.pop().unwrap_or(Value::Null);
+                        let val = self.stack.pop().unwrap_or(Value::Null);
+                        let k_val = self.stack.pop().unwrap_or(Value::Null);
                         let k = match k_val { Value::Str(s) => s.to_string(), _ => k_val.to_string() };
                         map.insert(k, val);
                     }
-                    process.stack.push(Value::Map(std::sync::Arc::new(map)));
+                    self.stack.push(Value::Map(std::sync::Arc::new(map)));
                 }
                 Instr::MakeStruct(name, count) => {
                     let mut map = IndexMap::new();
                     for _ in 0..count {
-                        let val = process.stack.pop().unwrap_or(Value::Null);
-                        let k_val = process.stack.pop().unwrap_or(Value::Null);
+                        let val = self.stack.pop().unwrap_or(Value::Null);
+                        let k_val = self.stack.pop().unwrap_or(Value::Null);
                         let k = match k_val { Value::Str(s) => s.to_string(), _ => k_val.to_string() };
                         map.insert(k, val);
                     }
-                    process.stack.push(Value::Struct(std::sync::Arc::new(name), std::sync::Arc::new(map)));
+                    self.stack.push(Value::Struct(std::sync::Arc::new(name), std::sync::Arc::new(map)));
                 }
                 Instr::MakeVec(count) => {
                     let mut items = Vec::new();
                     for _ in 0..count {
-                        let v = process.stack.pop().unwrap_or(Value::Null);
+                        let v = self.stack.pop().unwrap_or(Value::Null);
                         if let Value::Num(n) = v {
                             items.push(n);
                         } else {
@@ -987,20 +1016,20 @@ impl Vm {
                         }
                     }
                     items.reverse();
-                    process.stack.push(Value::Vec(std::sync::Arc::new(items)));
+                    self.stack.push(Value::Vec(std::sync::Arc::new(items)));
                 }
                 Instr::Similarity => {
-                    let b = process.stack.pop().unwrap_or(Value::Null);
-                    let a = process.stack.pop().unwrap_or(Value::Null);
+                    let b = self.stack.pop().unwrap_or(Value::Null);
+                    let a = self.stack.pop().unwrap_or(Value::Null);
                     if let (Value::Vec(v1), Value::Vec(v2)) = (a, b) {
-                        process.stack.push(Value::Num(cosine_similarity(&v1, &v2)));
+                        self.stack.push(Value::Num(cosine_similarity(&v1, &v2)));
                     } else {
-                        process.stack.push(Value::Null);
+                        self.stack.push(Value::Null);
                     }
                 }
                 Instr::Index => {
-                    let idx = process.stack.pop().unwrap_or(Value::Null);
-                    let tgt = process.stack.pop().unwrap_or(Value::Null);
+                    let idx = self.stack.pop().unwrap_or(Value::Null);
+                    let tgt = self.stack.pop().unwrap_or(Value::Null);
                     let res = match tgt {
                         Value::List(l) => if let Value::Num(n) = idx { l.get(n as usize).cloned().unwrap_or(Value::Null) } else { Value::Null },
                         Value::Map(m) | Value::Struct(_, m) => {
@@ -1019,44 +1048,56 @@ impl Vm {
                         },
                         _ => Value::Null,
                     };
-                    process.stack.push(res);
+                    self.stack.push(res);
                 }
                 Instr::MakeTurn(offset, is_tool, params) => {
-                    let code = process.frames[frame_idx].code.clone();
-                    let env = process.runtime.env.clone();
-                    process.stack.push(Value::Closure { is_tool, code, ip: offset as usize, env, params: params.clone() });
+                    let code = self.frames[frame_idx].code.clone();
+                    let env = self.runtime.env.clone();
+                    self.stack.push(Value::Closure { is_tool, code, ip: offset as usize, env, params: params.clone() });
                 }
                 Instr::LoadModule => {
-                    let p_val = process.stack.pop().unwrap_or(Value::Null);
+                    let p_val = self.stack.pop().unwrap_or(Value::Null);
                     let path = match p_val { Value::Str(s) => s.clone(), _ => std::sync::Arc::new("".to_string()) };
-                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    self.frames[frame_idx].env = self.runtime.env.clone();
                     let state = VmState {
-                        pid: process.pid,
-                        frames: process.frames.clone(),
-                        stack: process.stack.clone(),
-                        runtime: process.runtime.clone(),
-                        mailbox: process.mailbox.clone(),
-                        scheduler: self.scheduler.clone(),
-                        next_pid: self.next_pid,
-                        token_budget: process.token_budget,
+                        pid: self.pid,
+                        frames: self.frames.clone(),
+                        stack: self.stack.clone(),
+                        runtime: self.runtime.clone(),
+                        mailbox: self.mailbox.clone(),
+                        token_budget: self.token_budget,
+                        strictness_threshold: self.strictness_threshold,
                     };
-                    return VmResult::Suspended { tool_name: "sys_import".to_string(), arg: Value::Str(path), continuation: state };
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let _ = registry.host_tx.send(VmEvent::Suspend {
+                                pid: self.pid,
+                        tool_name: "sys_import".to_string(),
+                        arg: Value::Str(path),
+                        resume_tx: tx,
+                        continuation: Some(state),
+                    });
+                    if let Ok(res) = rx.await {
+                        self.stack.push(res);
+                    } else {
+                        self.stack.push(Value::Null);
+                    }
                 }
                 Instr::CheckType(ref ty) => {
-                    let val = process.stack.last().unwrap_or(&Value::Null);
+                    let val = self.stack.last().unwrap_or(&Value::Null);
                     if !self.check_value_type(ty, val) {
                         let err = Value::Str(std::sync::Arc::new(format!("Runtime Type Error: Expected {:?}, got {:?}", ty, val)));
                          // Unwind
                          loop {
-                             if process.frames.is_empty() { return VmResult::Complete(err); }
-                             let f_idx = process.frames.len() - 1;
-                             if let Some(off) = process.frames[f_idx].handlers.pop() {
-                                 process.frames[f_idx].ip = off as usize;
-                                 process.stack.push(err);
+                             if self.frames.is_empty() { self.exit_process(&registry, err);
+                            return; }
+                             let f_idx = self.frames.len() - 1;
+                             if let Some(off) = self.frames[f_idx].handlers.pop() {
+                                 self.frames[f_idx].ip = off as usize;
+                                 self.stack.push(err);
                                  break;
                              } else {
-                                 process.frames.pop();
-                                 if let Some(c) = process.frames.last() { process.runtime.env = c.env.clone(); }
+                                 self.frames.pop();
+                                 if let Some(c) = self.frames.last() { self.runtime.env = c.env.clone(); }
                              }
                          }
                     }
@@ -1082,7 +1123,7 @@ impl Vm {
                 }
                 true
             },
-            (Type::Map(inner), Value::Map(map)) => {
+            (Type::Map(_k, inner), Value::Map(map)) => {
                 if **inner == Type::Any { return true; }
                 for (_, val) in map.iter() {
                     if !self.check_value_type(inner, val) { return false; }
@@ -1110,19 +1151,23 @@ impl Vm {
 
     // Helper to push to CURRENT running process stack (root or first available)
     // Used by tests mainly.
+}
+
+impl Vm {
     pub fn push(&mut self, v: Value) {
-        if let Some(p) = self.scheduler.front_mut() {
+        if let Some(p) = self.root_process.as_mut() {
             p.stack.push(v);
         }
     }
 
     pub fn pop(&mut self) -> Option<Value> {
-        self.scheduler.front_mut().and_then(|p| p.stack.pop())
+        self.root_process.as_mut().and_then(|p| p.stack.pop())
     }
 
     pub fn peek(&self) -> Option<&Value> {
-        self.scheduler.front().and_then(|p| p.stack.last())
+        self.root_process.as_ref().and_then(|p| p.stack.last())
     }
+
 }
 
 fn add_values(a: &Value, b: &Value) -> Value {

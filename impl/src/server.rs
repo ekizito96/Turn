@@ -68,19 +68,20 @@ async fn run_handler(
     let source = payload.source.clone();
 
     // Offload the blocking runner to a thread
-    let result = tokio::task::spawn_blocking(move || {
+    let handle = tokio::spawn(async move {
         let store = FileStore::new(store_path);
         let tools = ToolRegistry::new();
-                let mut runner = Runner::new(store, tools);
-                runner.run(&id, &source, None)
-            })
-    .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ErrorResponse {
-            error: format!("Task join error: {}", e),
-        }),
-    ))?;
+        let mut runner = Runner::new(store, tools);
+        runner.run(&id, &source, None).await
+    });
+    let result = handle.await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Task join error: {}", e),
+            }),
+        )
+    })?;
 
     match result {
         Ok(value) => Ok(Json(RunResponse { result: value })),

@@ -69,8 +69,9 @@ fn turn_type_to_json_schema(ty: &Type) -> JsonValue {
                 "additionalProperties": false
             })
         },
-        Type::Map(_) => json!({
-            "type": "object"
+        Type::Map(_key_ty, val_ty) => json!({
+            "type": "object",
+            "additionalProperties": turn_type_to_json_schema(val_ty)
         }),
         _ => json!({ "type": ["string", "number", "boolean", "object", "array", "null"] })
     }
@@ -99,7 +100,7 @@ fn json_value_to_turn_value(ty: &Type, j: &JsonValue) -> Result<Value, String> {
             }
             Ok(Value::Struct(std::sync::Arc::new(name.clone()), std::sync::Arc::new(map)))
         },
-        (Type::Map(v_ty), JsonValue::Object(obj)) => {
+        (Type::Map(_k_ty, v_ty), JsonValue::Object(obj)) => {
             let mut map = indexmap::IndexMap::new();
             for (k, v) in obj {
                 map.insert(k.clone(), json_value_to_turn_value(v_ty, v)?);

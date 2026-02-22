@@ -31,7 +31,7 @@ impl Compiler {
             Instr::JumpIfFalse(ref mut t) => *t = target,
             Instr::JumpIfTrue(ref mut t) => *t = target,
             Instr::EnterTurn(ref mut t) => *t = target,
-            Instr::PushHandler(ref mut t) => *t = target,
+            Instr::MatchResult(ref mut t) => *t = target,
             _ => {}
         }
     }
@@ -116,33 +116,34 @@ impl Compiler {
                 self.emit(Instr::Jump(loop_start));
                 self.patch_jump(exit_jump, self.code.len() as u32);
             }
-            Stmt::TryCatch {
-                try_block,
-                catch_var,
-                catch_block,
+            Stmt::Match {
+                expr,
+                ok_binding,
+                ok_block,
+                err_binding,
+                err_block,
                 ..
             } => {
-                let push_handler_idx = self.emit(Instr::PushHandler(0)); // Placeholder
-                
-                self.compile_block(try_block);
-                self.emit(Instr::PopHandler);
-                let jump_after_catch = self.emit(Instr::Jump(0));
-                
-                // Catch block starts here
-                let catch_start = self.code.len() as u32;
-                // Patch PushHandler to point here
-                self.patch_jump(push_handler_idx, catch_start);
-                
-                // Catch block expects error on stack. Store it in catch_var.
-                self.emit(Instr::Store(catch_var.clone()));
-                self.compile_block(catch_block);
-                
-                let after_catch = self.code.len() as u32;
-                self.patch_jump(jump_after_catch, after_catch);
-            }
-            Stmt::Throw { expr, .. } => {
+                // Compile the target expression. It leaves Result(Ok | Err) on stack
                 self.compile_expr(expr);
-                self.emit(Instr::Throw);
+                
+                // Emits a conditional jump. If stack top is Ok(v), it unwraps `v` and falls through.
+                // If stack top is Err(e), it unwraps `e` and jumps to the target offset.
+                let match_instr = self.emit(Instr::MatchResult(0));
+                
+                // Fallthrough (Ok path)
+                self.emit(Instr::Store(ok_binding.clone()));
+                self.compile_block(ok_block);
+                let jump_to_end = self.emit(Instr::Jump(0));
+                
+                // Err path
+                let err_start = self.code.len() as u32;
+                self.patch_jump(match_instr, err_start);
+                self.emit(Instr::Store(err_binding.clone()));
+                self.compile_block(err_block);
+                
+                let end = self.code.len() as u32;
+                self.patch_jump(jump_to_end, end);
             }
             Stmt::ExprStmt { expr, .. } => {
                 self.compile_expr(expr);
@@ -193,6 +194,14 @@ impl Compiler {
             },
             Expr::Id { name, .. } => {
                 self.emit(Instr::Load(name.clone()));
+            }
+            Expr::Ok(inner, _) => {
+                self.compile_expr(inner);
+                self.emit(Instr::MakeOk);
+            }
+            Expr::Err(inner, _) => {
+                self.compile_expr(inner);
+                self.emit(Instr::MakeErr);
             }
             Expr::Recall { key, .. } => {
                 self.compile_expr(key);

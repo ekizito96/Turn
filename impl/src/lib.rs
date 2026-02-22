@@ -89,26 +89,32 @@ pub fn run_with_tools(
     let program = parser::Parser::new(tokens).parse()?;
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
-    let mut vm = vm::Vm::new(&code);
-    loop {
-        match vm.run() {
-            vm::VmResult::Complete(v) => return Ok(v),
-            vm::VmResult::Suspended {
-                tool_name,
-                arg,
-                continuation,
-            } => {
-                // Execute tool
-                match tools.call(&tool_name, arg) {
-                    Ok(result) => {
-                        vm = vm::Vm::resume_with_result(continuation, result);
-                    },
-                    Err(e) => {
-                        vm = vm::Vm::resume_with_error(continuation, e);
+    Ok(tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
+        let vm = vm::Vm::new(&code, host_tx);
+        vm.start().await;
+        
+        loop {
+            if let Some(event) = host_rx.recv().await {
+                match event {
+                    vm::VmEvent::Complete { pid, result } => {
+                        if pid == 1 {
+                            return Ok(result);
+                        }
+                    }
+                    vm::VmEvent::Error { pid, error } => {
+                        if pid == 1 {
+                            return Err(error.to_string());
+                        }
+                    }
+                    vm::VmEvent::Suspend { tool_name, arg, resume_tx, .. } => {
+                        let result = tools.call(&tool_name, arg).unwrap_or_else(|e| value::Value::Str(std::sync::Arc::new(e.to_string())));
+                        let _ = resume_tx.send(result);
                     }
                 }
+            } else {
+                return Err("VM unexpectedly halted".to_string());
             }
-            vm::VmResult::Yielded => unreachable!("VM should handle yields internally"),
         }
-    }
+    })?)
 }

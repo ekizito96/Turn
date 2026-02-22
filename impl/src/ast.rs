@@ -10,7 +10,7 @@ pub enum Type {
     Str,
     Bool,
     List(Box<Type>),
-    Map(Box<Type>),
+    Map(Box<Type>, Box<Type>), // Key -> Value
     Function(Box<Type>, Box<Type>), // Arg -> Ret
     Struct(String, IndexMap<String, Type>), // Name, Fields
     Any,
@@ -18,6 +18,7 @@ pub enum Type {
     Pid,
     Vec,
     Cap,
+    Result(Box<Type>, Box<Type>),
 }
 
 #[derive(Debug, Clone)]
@@ -88,14 +89,12 @@ pub enum Stmt {
     Suspend {
         span: Span,
     },
-    TryCatch {
-        try_block: Block,
-        catch_var: String,
-        catch_block: Block,
-        span: Span,
-    },
-    Throw {
+    Match {
         expr: Expr,
+        ok_binding: String,
+        ok_block: Block,
+        err_binding: String,
+        err_block: Block,
         span: Span,
     },
 }
@@ -121,6 +120,8 @@ pub enum Expr {
     Use { module: Box<Expr>, span: Span },
     Spawn { expr: Box<Expr>, span: Span },
     SpawnRemote { node_id: Box<Expr>, closure: Box<Expr>, span: Span },
+    Ok(Box<Expr>, Span),
+    Err(Box<Expr>, Span),
     Send { pid: Box<Expr>, msg: Box<Expr>, span: Span },
     Receive { span: Span },
     Link { pid: Box<Expr>, span: Span },
@@ -178,6 +179,8 @@ pub enum Expr {
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
+            Expr::Ok(_, span) => *span,
+            Expr::Err(_, span) => *span,
             Expr::SpawnRemote { span, .. } => *span,
             Expr::Send { span, .. } => *span,
             Expr::Receive { span } => *span,

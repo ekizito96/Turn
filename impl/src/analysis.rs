@@ -11,9 +11,9 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
         Box::new(Type::Str), 
         Box::new(Type::Str)
     ));
-    // fs_write: (Map<Str>) -> Void
+    // fs_write: (Map<Str, Str>) -> Void
     map.insert("fs_write".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
+        Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
         Box::new(Type::Void)
     ));
     // echo: (Any) -> Any
@@ -31,9 +31,9 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
         Box::new(Type::Str),
         Box::new(Type::Str)
     ));
-    // env_set: (Map<Str>) -> Void
+    // env_set: (Map<Str, Str>) -> Void
     map.insert("env_set".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
+        Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
         Box::new(Type::Void)
     ));
     // http_get: (Str) -> Str
@@ -41,9 +41,9 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
         Box::new(Type::Str),
         Box::new(Type::Str)
     ));
-    // http_post: (Map<Any>) -> Str
+    // http_post: (Map<Str, Any>) -> Str
     map.insert("http_post".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Any))),
+        Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Any))),
         Box::new(Type::Str)
     ));
     // json_parse: (Str) -> Any
@@ -66,14 +66,14 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
         Box::new(Type::Any),
         Box::new(Type::Num)
     ));
-    // regex_match: (Map<Str>) -> Bool
+    // regex_match: (Map<Str, Str>) -> Bool
     map.insert("regex_match".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
+        Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
         Box::new(Type::Bool)
     ));
-    // regex_replace: (Map<Str>) -> Str
+    // regex_replace: (Map<Str, Str>) -> Str
     map.insert("regex_replace".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
+        Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
         Box::new(Type::Str)
     ));
     map
@@ -214,7 +214,7 @@ impl Analysis {
                 ty.clone()
             }
             Type::List(inner) => Type::List(Box::new(self.resolve_type(inner))),
-            Type::Map(inner) => Type::Map(Box::new(self.resolve_type(inner))),
+            Type::Map(k, v) => Type::Map(Box::new(self.resolve_type(k)), Box::new(self.resolve_type(v))),
             Type::Function(arg, ret) => Type::Function(
                 Box::new(self.resolve_type(arg)),
                 Box::new(self.resolve_type(ret))
@@ -302,13 +302,14 @@ impl Analysis {
                 Some(Type::List(Box::new(Type::Any)))
             }
             Expr::Map { entries, .. } => {
-                 // Similar logic for Map values
+                 // Map keys are Strings. We infer values.
+                 // In Turn AST, object literal keys are parsed as strings in the lexer/parser.
                 if let Some((_, first_val)) = entries.first() {
                     if let Some(inner) = self.infer_expr_type(first_val) {
-                         return Some(Type::Map(Box::new(inner)));
+                         return Some(Type::Map(Box::new(Type::Str), Box::new(inner)));
                     }
                 }
-                Some(Type::Map(Box::new(Type::Any)))
+                Some(Type::Map(Box::new(Type::Str), Box::new(Type::Any)))
             }
             Expr::Id { name, .. } => {
                 let mut current_idx = Some(self.active_scope_idx);
@@ -397,8 +398,8 @@ impl Analysis {
                 } else if params.is_empty() {
                     Type::Void
                 } else {
-                    // Multiple params = Map<Any> (can't specify keys yet)
-                    Type::Map(Box::new(Type::Any))
+                    // Multiple params = Map<Str, Any>
+                    Type::Map(Box::new(Type::Str), Box::new(Type::Any))
                 };
                 
                 let ret = ret_ty.clone().unwrap_or(Type::Any);
@@ -450,7 +451,7 @@ impl Analysis {
         match (target, source) {
             (Type::Vec, Type::Vec) => true,
             (Type::List(t), Type::List(s)) => self.is_compatible(t, s),
-            (Type::Map(t), Type::Map(s)) => self.is_compatible(t, s),
+            (Type::Map(kt, vt), Type::Map(ks, vs)) => self.is_compatible(kt, ks) && self.is_compatible(vt, vs),
             (Type::Struct(name1, _), Type::Struct(name2, _)) => name1 == name2,
             _ => target == source,
         }
@@ -516,15 +517,21 @@ impl Analysis {
                 self.visit_expr(cond);
                 self.visit_block(body);
             }
-            Stmt::TryCatch { try_block, catch_var, catch_block, span: _ } => {
-                self.visit_block(try_block);
+            Stmt::Match { expr, ok_binding, ok_block, err_binding, err_block, span: _ } => {
+                self.visit_expr(expr);
                 
-                // Catch block definitely needs a new scope for the catch_var
-                self.enter_scope(catch_block.span, None);
-                // We don't have span for catch_var ID. Use block start?
-                let var_span = Span { start: catch_block.span.start, end: catch_block.span.start }; 
-                self.add_definition(catch_var, var_span, Some(Type::Any)); // Catch var is Any (usually Error string)
-                self.visit_block(catch_block);
+                // Ok block scope
+                self.enter_scope(ok_block.span, None);
+                let ok_var_span = Span { start: ok_block.span.start, end: ok_block.span.start }; 
+                self.add_definition(ok_binding, ok_var_span, Some(Type::Any));
+                self.visit_block(ok_block);
+                self.exit_scope();
+                
+                // Err block scope
+                self.enter_scope(err_block.span, None);
+                let err_var_span = Span { start: err_block.span.start, end: err_block.span.start }; 
+                self.add_definition(err_binding, err_var_span, Some(Type::Any));
+                self.visit_block(err_block);
                 self.exit_scope();
             }
             Stmt::StructDef { name, fields, span: _ } => {
@@ -560,7 +567,6 @@ impl Analysis {
                 self.visit_expr(tool);
                 self.visit_expr(arg);
             }
-            Stmt::Throw { expr, .. } => self.visit_expr(expr),
             Stmt::Suspend { .. } => {},
         }
     }
@@ -638,6 +644,9 @@ impl Analysis {
                 self.visit_expr(right);
             }
             Expr::Unary { expr, .. } => self.visit_expr(expr),
+            Expr::Unary { expr, .. } => self.visit_expr(expr),
+            Expr::Ok(inner, _) => self.visit_expr(inner),
+            Expr::Err(inner, _) => self.visit_expr(inner),
             Expr::Paren(expr) => self.visit_expr(expr),
             Expr::Call { name, arg, .. } => {
                 self.visit_expr(name);
@@ -692,6 +701,7 @@ impl Analysis {
                 self.visit_expr(pid);
                 self.check_assignment(&Some(Type::Pid), pid, *span);
             }
+            Expr::Ok(_, _) | Expr::Err(_, _) => {},
             Expr::Literal { .. } => {}
         }
     }
