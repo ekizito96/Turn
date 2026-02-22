@@ -186,9 +186,30 @@ Turn is intended to be evaluated on:
 
 ---
 
-## 8. Implementation Status (Alpha)
+## 8. Implementation Status (v0.5.0-alpha)
 
-Turn includes a reference VM and tool/effect suspension mechanism. The implementation status for specific primitives and policies is tracked in `VISION.md` and `spec/`.
+The reference implementation is a production-grade Rust bytecode VM. The following subsystems are fully operational in v0.5.0-alpha:
+
+| Subsystem | Status | Notes |
+|---|---|---|
+| Lexer, Parser, AST | ✅ Complete | Recursive-descent, full Turn grammar |
+| Bytecode Compiler | ✅ Complete | AST → typed instruction set |
+| Async VM Executor | ✅ Complete | `tokio`-based work-stealing scheduler |
+| `infer` + Cognitive Type Safety | ✅ Complete | Provider-agnostic host trap; schema-validated |
+| `suspend` / WAL Persistence | ✅ Complete | Write-ahead log; cross-restart replay |
+| Actor Model (`spawn`, `send`, `receive`) | ✅ Complete | Isolated process mailboxes |
+| Supervisor Trees (`link`, `monitor`) | ✅ Complete | Erlang-style fault propagation |
+| HNSW Semantic Memory | ✅ Complete | `O(log N)` vector retrieval with Ebbinghaus decay GC |
+| Structural Sharing (`Arc<T>`) | ✅ Complete | Zero-copy message passing |
+| Object-Capability Security | ✅ Complete | `Value::Cap` with `PrivilegeViolation` traps |
+| Generic Type Boundaries (`List<T>`) | ✅ Complete | AST + semantic analyzer + schema generator |
+| Monadic Error Routing (`Result<T,E>`) | ✅ Complete | Replaces `try/catch` for stochastic paths |
+| Confidence Execution Traps | ✅ Complete | Strictness threshold guards `if`/arithmetic |
+| Distributed Swarms (`spawn_remote`) | ✅ Complete | TCP/gRPC Switchboard for cross-node agents |
+| Standard Library | ✅ Complete | `std/fs`, `std/http`, `std/math`, `std/json`, `std/time`, `std/regex` |
+| Language Server (LSP) | ✅ Complete | Hover, go-to-definition, live diagnostics |
+| VS Code Extension | ✅ Complete | Syntax highlighting + LSP client |
+| Provider Adapters | ✅ Complete | OpenAI, Anthropic, Gemini, Grok, Ollama, vLLM |
 
 ---
 

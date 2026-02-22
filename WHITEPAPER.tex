@@ -1,0 +1,549 @@
+\documentclass[sigplan,10pt,review,anonymous]{acmart}
+
+\setcopyright{acmcopyright}
+\acmConference[PLDI '26]{Programming Language Design and Implementation}{2026}{Worldwide}
+
+%% ============================================================
+%%  Packages
+%% ============================================================
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathpartir}          % inferrule macro
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{stmaryrd}            % semantic brackets
+\usepackage{microtype}
+
+%% ============================================================
+%%  Turn syntax highlighting
+%% ============================================================
+\definecolor{turnblue}{rgb}{0.06,0.39,0.67}
+\definecolor{turngreen}{rgb}{0.13,0.55,0.13}
+\definecolor{turngray}{rgb}{0.46,0.46,0.46}
+\lstdefinelanguage{Turn}{
+  keywords={let,return,if,else,while,fn,tool,infer,suspend,spawn,send,receive,
+             link,monitor,call,remember,recall,confidence,with,secret,use,
+             struct,true,false,null,turn},
+  keywordstyle=\color{turnblue}\bfseries,
+  comment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  commentstyle=\color{turngray}\itshape,
+  stringstyle=\color{turngreen},
+  string=[b]",
+  morestring=[b]',
+  sensitive=true
+}
+\lstset{language=Turn, basicstyle=\ttfamily\small, frame=single,
+        xleftmargin=1em, numbers=left, numberstyle=\tiny\color{turngray}}
+
+%% ============================================================
+%%  Theorem environments
+%% ============================================================
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{corollary}[theorem]{Corollary}
+
+%% ============================================================
+%%  Semantic macros
+%% ============================================================
+\newcommand{\reduces}{\longrightarrow}
+\newcommand{\reducesmany}{\longrightarrow^{*}}
+\newcommand{\vmstate}[1]{\langle #1 \rangle}
+\newcommand{\typecheck}[3]{#1 \vdash #2 : #3}
+\newcommand{\infer}{\mathbf{infer}}
+\newcommand{\suspend}{\mathbf{suspend}}
+\newcommand{\spawn}{\mathbf{spawn}}
+\newcommand{\conf}[2]{\mathbf{confidence}(#1,\, #2)}
+\newcommand{\uncertain}[2]{\mathbf{Uncertain}(#1,\, #2)}
+\newcommand{\result}[1]{\mathbf{Result}\langle #1 \rangle}
+\newcommand{\captype}{\mathbf{Cap}}
+
+%% ============================================================
+%%  Title block
+%% ============================================================
+\title{Turn: A Systems Language for Agentic Computation}
+\subtitle{Formal Semantics, Distributed Runtime, and Provider-Agnostic Inference}
+
+\author{Muyukani Ephraim Kizito}
+\affiliation{\institution{Independent Research}}
+\email{muyukaniephraim@yahoo.com}
+
+%%
+\begin{document}
+\maketitle
+
+%% ============================================================
+\begin{abstract}
+%% ============================================================
+Agentic software—programs that interleave deterministic computation with
+probabilistic LLM inference, long-lived state, and distributed message-passing
+—imposes constraints that existing general-purpose languages do not model at
+the semantic level. Practitioners are forced to layer ad-hoc retry logic,
+context management, API key handling, and message routing on top of languages
+designed for synchronous, deterministic computation.
+
+We present \textbf{Turn}, a compiled, statically-typed language whose
+primitives encode the physical constraints of agentic computation: (1) finite
+context capacity, (2) stochastic inference, (3) durable state across
+suspension boundaries, and (4) budgeted execution over token expenditure.
+Turn's most critical guarantee is \emph{provider agnosticism}: \texttt{infer}
+is a first-class language construct that compiles to a generic host trap, not
+an HTTP call. LLM provider migrations require no changes to Turn programs.
+
+We describe Turn's type system—including a novel \texttt{Uncertain(T, f64)}
+probabilistic type and an object-capability type \texttt{Cap}—its operational
+semantics for suspension and resumption, a distributed actor model with
+globally-addressed PIDs, and a reference implementation consisting of a
+multi-threaded Tokio-backed VM with an HNSW semantic memory index using
+Ebbinghaus exponential decay for episodic memory garbage collection.
+
+\end{abstract}
+
+%%
+\keywords{programming languages, agentic systems, LLM, operational semantics,
+          actor model, object-capabilities, probabilistic types}
+
+%% ============================================================
+\section{Introduction}
+%% ============================================================
+
+Large language models have created a new category of software: \emph{agents}.
+An agent is a long-running program that alternates between deterministic
+computation and stochastic inference, maintains state across many interaction
+turns, and coordinates work across parallel sub-processes. Building such
+systems today requires manually encoding several non-trivial constraints in
+application code:
+
+\begin{enumerate}
+  \item \emph{Context overflow avoidance} — the model's context window is
+        finite; state must be actively managed and summarized.
+  \item \emph{Schema enforcement} — LLM outputs are strings; structured
+        values must be parsed and retried on schema violation.
+  \item \emph{Durability} — agents must survive process restarts without
+        replaying the entire inference history.
+  \item \emph{Vendor coupling} — API schemas, endpoint paths, and model
+        names change; every change can break deployed agents.
+  \item \emph{Secret leakage} — API keys are routinely passed through
+        prompt templates, exposing them to log pipelines and the model itself.
+\end{enumerate}
+
+Turn addresses these constraints at the \emph{language level}, eliminating
+the need for framework conventions or ad-hoc implementation patterns.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item A type system with first-class probabilistic values
+        ($\uncertain{T}{p}$, $p \in [0,1]$) and an object-capability
+        primitive (\captype{}) with enforced non-serializability.
+  \item Formal small-step operational semantics for the \texttt{infer},
+        \texttt{suspend}, and \texttt{spawn} primitives.
+  \item A provider-agnostic inference model in which \texttt{infer}
+        compiles to a typed host trap; the language has no knowledge of
+        REST endpoints or vendor-specific schemas.
+  \item A distributed actor model with globally-addressed PIDs and an
+        Erlang-style supervisor tree for fault propagation.
+  \item A reference implementation: a multi-threaded Tokio-based bytecode
+        VM with an HNSW semantic memory index and Ebbinghaus decay GC.
+\end{itemize}
+
+%% ============================================================
+\section{Background and Related Work}
+%% ============================================================
+
+\paragraph{Agent frameworks.}
+LangChain~\cite{langchain}, AutoGen~\cite{autogen}, and CrewAI are library
+frameworks for Python. They provide high-level APIs for chaining LLM calls but
+do not provide language-level guarantees for type safety, suspension, or secret
+isolation. Error recovery and provider migration are programmer responsibilities.
+
+\paragraph{Actor languages.}
+Erlang~\cite{erlang} and Elixir provide the actor model that Turn's
+\texttt{spawn}/\texttt{send}/\texttt{receive}/\texttt{link} primitives build upon.
+Turn extends this model with \emph{distributed PIDs} that are addressable across
+physical machines without user-level networking code.
+
+\paragraph{Effect systems.}
+Koka~\cite{koka} and Frank~\cite{frank} model computational effects and handlers
+as first-class semantic constructs. Turn's \texttt{suspend} and \texttt{infer}
+are typed effect boundaries in a similar spirit, though Turn's design prioritizes
+agentic-specific constraints (token budgets, semantic memory) over effect generality.
+
+\paragraph{Probabilistic types.}
+Languages such as Uncertain\textless T\textgreater~\cite{uncertain} have explored
+first-class uncertainty propagation. Turn's \texttt{Uncertain(T, f64)} type is
+operationally integrated with \emph{confidence execution traps} that halt
+computation when uncertainty violates a declared threshold.
+
+\paragraph{Object-capabilities.}
+The object-capability model~\cite{ocap} has been applied in languages such as
+E and Pony. Turn applies OCap specifically to the agentic security problem:
+LLM tool-call schemas must never include credential values. The \captype{} type
+enforces this at the VM level via privilege-violation traps.
+
+%% ============================================================
+\section{The Turn Language}
+%% ============================================================
+
+\subsection{Syntax Overview}
+
+A Turn program is a sequence of statements. The core grammar is given in
+Figure~\ref{fig:grammar}. Expressions include literals, identifiers,
+struct initialization, the \texttt{infer} expression, tool invocation via
+\texttt{call}, embedding similarity via $\mathtt{\sim>}$, and probabilistic
+confidence extraction.
+
+\begin{figure}[t]
+\begin{lstlisting}[caption={Core Turn grammar (excerpt)}, label=fig:grammar]
+stmt   ::= let x [: Type] = expr ;
+         | return expr ;
+         | expr ;
+
+expr   ::= literal | id
+         | infer Type { expr ; }
+         | infer Type with [expr,...] { expr ; }
+         | call(expr, expr)
+         | spawn(expr) | send pid , expr
+         | receive | suspend
+         | link(pid) | monitor(pid)
+         | remember(expr, expr) | recall(expr)
+         | confidence(expr)
+         | tool turn(params) -> Type { stmt* }
+         | spawn_remote(expr, expr)
+
+Type   ::= Str | Num | Bool | Null | Any
+         | List<Type> | Map<Type, Type>
+         | Struct(name) | Cap | Uncertain(Type)
+         | Result<Type, Type> | Option<Type>
+         | Pid | Fn(Type) -> Type
+\end{lstlisting}
+\end{figure}
+
+\subsection{Type System}
+
+Turn is statically typed with inference. The judgment form is:
+$$\typecheck{\Gamma}{e}{\tau}$$
+Selected typing rules are given in Figure~\ref{fig:typing}.
+
+\begin{figure}[t]
+\begin{mathpar}
+\inferrule*[left=T-Infer]
+  { \typecheck{\Gamma}{e}{\mathtt{Str}}
+  \\ \tau \in \mathit{CognitiveTypes} }
+  { \typecheck{\Gamma}{\infer_\tau\{e\}}{\uncertain{\tau}{}} }
+
+\inferrule*[left=T-Uncertain-Elim]
+  { \typecheck{\Gamma}{e}{\uncertain{\tau}{}} 
+  \\ p \in [0,1] }
+  { \typecheck{\Gamma}{\conf{e}{p}}{\mathtt{Bool}} }
+
+\inferrule*[left=T-Cap-Intro]
+  { x : \captype{} \in \Gamma }
+  { \typecheck{\Gamma}{x}{\captype{}} }
+
+\inferrule*[left=T-Cap-NoSerialize]
+  { \typecheck{\Gamma}{e}{\captype{}} }
+  { \typecheck{\Gamma}{\mathtt{print}(e)}{\bot}
+    \quad \textrm{(PrivilegeViolation)} }
+
+\inferrule*[left=T-Spawn]
+  { \typecheck{\Gamma}{e}{\mathtt{Fn}(\tau_1) \to \tau_2} }
+  { \typecheck{\Gamma}{\spawn(e)}{\mathtt{Pid}} }
+
+\inferrule*[left=T-Suspend]
+  { }
+  { \typecheck{\Gamma}{\suspend}{\mathtt{Null}} }
+\end{mathpar}
+\caption{Selected typing rules.}
+\label{fig:typing}
+\end{figure}
+
+\paragraph{Probabilistic values.}
+The $\uncertain{T}{}$ type represents a value produced by stochastic inference.
+It carries a confidence score $p \in [0,1]$. Operators over uncertain values
+propagate uncertainty: $\uncertain{T_1}{p_1} + \uncertain{T_2}{p_2}$ yields
+$\uncertain{T}{p_1 \cdot p_2}$.
+
+\paragraph{Object-capabilities.}
+\captype{} is an opaque integer handle referencing a host-side secret. Rule
+T-Cap-NoSerialize makes printing or serializing a capability a static and
+dynamic type error respectively. The value never crosses the VM boundary.
+
+%% ============================================================
+\section{Operational Semantics}
+%% ============================================================
+
+\subsection{VM State}
+
+At any instant, a Turn process state $S$ is a tuple:
+
+$$S = \vmstate{pc,\, \sigma,\, \phi,\, \rho,\, \mathcal{M},\, \mathcal{B}}$$
+
+where $pc$ is the instruction pointer, $\sigma$ is the value stack, $\phi$ is
+the call-frame stack, $\rho$ is the environment (scope chain), $\mathcal{M}$
+is the semantic memory (HNSW index), and $\mathcal{B}$ is the token-budget
+counter.
+
+\subsection{Reduction Rules}
+
+The reduction relation $S \reduces S'$ defines single-step execution.
+Selected rules are given in Figure~\ref{fig:semantics}.
+
+\begin{figure}[t]
+\begin{mathpar}
+
+\inferrule*[left=E-Infer]
+  { \sigma = v \cdot \sigma'
+  \\ \textit{hostTrap}(\texttt{llm\_infer}, v) = \uncertain{w}{p} }
+  { \vmstate{pc_\mathtt{Infer}, \sigma, \phi, \rho, \mathcal{M}, \mathcal{B}} \reduces
+    \vmstate{pc{+}1, \uncertain{w}{p} \cdot \sigma', \phi, \rho, \mathcal{M}, \mathcal{B}} }
+
+\inferrule*[left=E-Suspend]
+  { S' = \textit{serialize}(S) }
+  { \vmstate{pc_\mathtt{Suspend}, \sigma, \phi, \rho, \mathcal{M}, \mathcal{B}} \reduces
+    \textit{Write}(S') }
+
+\inferrule*[left=E-Resume]
+  { S = \textit{deserialize}(\textit{Read}()) }
+  { \textit{boot} \reduces S }
+
+\inferrule*[left=E-Spawn]
+  { \textit{fresh}(\textit{pid}) }
+  { \vmstate{pc_\mathtt{Spawn}, cl \cdot \sigma, \phi, \rho, \mathcal{M}, \mathcal{B}} \reduces
+    \vmstate{pc{+}1, \textit{pid} \cdot \sigma, \phi, \rho, \mathcal{M}, \mathcal{B}}
+  \quad | \quad \textit{fork}(cl, \textit{pid}) }
+
+\inferrule*[left=E-ConfTrap]
+  { \uncertain{v}{p} \in \sigma
+  \\ p < \theta_S }
+  { \vmstate{pc_\mathtt{If}, \sigma, \phi, \rho, \mathcal{M}, \mathcal{B}} \reduces
+    \textit{Trap}(\texttt{ConfidenceViolation}) }
+
+\inferrule*[left=E-CapTrap]
+  { \captype{} \in \sigma }
+  { \vmstate{pc_\mathtt{Print}, \sigma, \phi, \rho, \mathcal{M}, \mathcal{B}} \reduces
+    \textit{Trap}(\texttt{PrivilegeViolation}) }
+
+\end{mathpar}
+\caption{Small-step operational semantics (selected rules). $\theta_S$ is the
+         process strictness threshold; \textit{hostTrap} is the host dispatch interface.}
+\label{fig:semantics}
+\end{figure}
+
+\subsection{Provider Agnosticism}
+
+Rule E-Infer delegates to $\textit{hostTrap}(\texttt{llm\_infer}, -)$, a
+function defined by the \emph{host runtime}, not the language specification.
+The Turn AST has no representation of vendor-specific concepts such as REST
+endpoints, model names, or proprietary schema formats. Changes to LLM provider
+APIs require updating only the host adapter; Turn programs are unaffected.
+
+\subsection{Semantic Memory and Ebbinghaus Decay}
+
+The memory $\mathcal{M}$ is an HNSW approximate nearest-neighbor index. Each
+entry stores a value, an embedding vector, and temporal metadata
+$(t_{\textit{created}}, t_{\textit{accessed}}, \lambda)$.
+
+Retrieval strength at time $t$ is defined as:
+$$\mathit{RS}(q, m, t) = \cos(\vec{q}, \vec{m}) \cdot e^{-\lambda (t - t_{\textit{accessed}})}$$
+
+A background garbage-collector prunes entries whose $\mathit{RS}$ falls below
+a global noise threshold $\varepsilon$. Direct recall resets
+$t_{\textit{accessed}} \coloneq \textit{now}$, implementing spaced repetition.
+
+%% ============================================================
+\section{Distributed Actor Model}
+%% ============================================================
+
+Processes in Turn are globally addressable via structured PIDs:
+$$\textit{Pid} ::= \{ \textit{node\_id} : \mathtt{Str},\; \textit{local\_id} : \mathbb{N} \}$$
+
+A \emph{Switchboard} running on each node routes messages. If
+$\textit{pid}.\textit{node\_id} = \texttt{"local"}$, the message is deposited
+into an in-process \texttt{tokio::mpsc} channel. Otherwise, the Switchboard
+serializes the message and dispatches it over TCP/gRPC to the target node's
+Switchboard.
+
+\texttt{spawn\_remote("node\_ip", closure)} deploys a closure onto a remote
+node. Object-capabilities held locally cannot be serialized over the wire; the
+Capability Routing Protocol proxies tool execution back to the originating
+host's registry to satisfy remote \texttt{infer} calls that require credential
+access.
+
+\paragraph{Supervisor Trees.}
+\texttt{link(pid)} establishes a bi-directional link between two processes.
+When a process terminates (normally or due to an unhandled error), the VM
+emits a $\textsc{ProcessExit}$ signal to all linked PIDs. The receiving process
+may trap the signal to implement restart strategies, mirroring Erlang's OTP
+supervision model~\cite{erlang}.
+
+%% ============================================================
+\section{Reference Implementation}
+%% ============================================================
+
+\subsection{Architecture}
+
+The Turn v0.5.0-alpha reference implementation is a Rust bytecode VM. The
+pipeline is: \textbf{Lexer} $\to$ \textbf{Recursive-Descent Parser} $\to$
+\textbf{AST} $\to$ \textbf{Semantic Analyzer} $\to$ \textbf{Bytecode Compiler}
+$\to$ \textbf{Async VM}.
+
+\subsection{Async Scheduler}
+
+Each spawned Turn process maps to a \texttt{tokio::spawn} green thread. The
+VM executor is \texttt{async fn}, enabling cooperative multi-tasking without
+blocking the thread pool. Host traps (LLM calls, tool execution) suspend the
+current task and resume it upon completion, allowing other processes to run.
+
+\subsection{Implementation Status}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llr@{}}
+\toprule
+Subsystem & Status & Notes \\
+\midrule
+Lexer / Parser / AST      & \checkmark & Full Turn grammar \\
+Bytecode Compiler         & \checkmark & Type-annotated instruction set \\
+Async VM Executor         & \checkmark & Tokio work-stealing \\
+\texttt{infer} + Cognitive Types & \checkmark & Provider-agnostic host trap \\
+\texttt{suspend} / WAL    & \checkmark & Cross-restart replay \\
+Actor Model               & \checkmark & Isolated tokio::mpsc mailboxes \\
+Supervisor Trees          & \checkmark & Erlang-style fault propagation \\
+HNSW Semantic Memory      & \checkmark & Ebbinghaus decay GC \\
+Arc Structural Sharing    & \checkmark & Zero-copy message passing \\
+Object-Capability (Cap)   & \checkmark & PrivilegeViolation traps \\
+Generic Types (List\textless T\textgreater) & \checkmark & AST + schema generator \\
+Monadic Errors            & \checkmark & Result\textless T,E\textgreater, Option\textless T\textgreater \\
+Confidence Traps          & \checkmark & Strictness threshold enforced \\
+Distributed Swarms        & \checkmark & TCP/gRPC Switchboard \\
+Standard Library          & \checkmark & fs, http, math, json, time, regex \\
+Language Server (LSP)     & \checkmark & Hover, go-to-definition, diagnostics \\
+VS Code Extension         & \checkmark & Syntax + LSP client \\
+Provider Adapters         & \checkmark & OpenAI, Anthropic, Gemini, Ollama \\
+\bottomrule
+\end{tabular}
+\caption{Implementation status as of v0.5.0-alpha.}
+\end{table}
+
+%% ============================================================
+\section{Example Programs}
+%% ============================================================
+
+\subsection{Provider-Agnostic Inference with Type Safety}
+
+\begin{lstlisting}
+struct Invoice { amount: Num, vendor: Str }
+
+let invoice = infer Invoice {
+    "Extract invoice details from: " + raw_text;
+};
+
+// The VM retried on schema mismatch.
+// `invoice` is guaranteed to be a valid Invoice.
+print(invoice.amount);
+\end{lstlisting}
+
+\subsection{Secure Tool with Capability}
+
+\begin{lstlisting}
+let payment_tool = tool turn(
+    amount: Num,
+    secret api_key: Cap    // never in LLM schema
+) -> Str {
+    return call("stripe_charge", amount);
+};
+
+let result = infer Str with [payment_tool] {
+    "Charge the customer $42 for invoice #1234";
+};
+\end{lstlisting}
+
+\subsection{Distributed Supervisor}
+
+\begin{lstlisting}
+let worker_pid = spawn_remote("10.0.0.5", fn() {
+    while true {
+        let job = receive;
+        let result = infer Str { job; };
+        send supervisor_pid, result;
+    }
+});
+
+link(worker_pid);
+// If worker crashes, this process receives a
+// ProcessExit signal and may restart it.
+\end{lstlisting}
+
+%% ============================================================
+\section{Discussion}
+%% ============================================================
+
+\paragraph{What Turn is not.}
+Turn is not a general-purpose systems language competing with Rust or C++.
+Its primitive set is deliberately narrow and agentic-specific. A Turn program
+is expected to call out to tools and external services for computation outside
+its cognitive domain.
+
+\paragraph{Token budgets.}
+The current reference implementation tracks instruction cycles and delegates
+token counting to host adapters (since tokenization is model-specific). Future
+work will standardize a token-budget opcode that the VM enforces before each
+\texttt{infer} dispatch.
+
+\paragraph{Formal verification.}
+The type safety theorem (progress + preservation) for Turn's core calculus is
+left as formal future work. The operational semantics presented here provide
+the necessary foundation; we expect progress and preservation to hold by
+construction of the host-trap boundary.
+
+%% ============================================================
+\section{Conclusion}
+%% ============================================================
+
+Turn demonstrates that the constraints of agentic computation—stochastic
+inference, durable state, finite context capacity, secret isolation, and
+distributed coordination—can be expressed as first-class language primitives
+with sound operational semantics. The result is a language where programs are
+immune to LLM provider churn, agent secrets cannot leak through LLM schemas,
+and distributed actor orchestration requires no external middleware.
+
+The v0.5.0-alpha reference implementation delivers all described features and
+is available at \url{https://github.com/ekizito96/Turn}.
+
+%% ============================================================
+\bibliographystyle{ACM-Reference-Format}
+\begin{thebibliography}{9}
+
+\bibitem{langchain}
+Chase, H. (2022). \textit{LangChain}. GitHub.
+\url{https://github.com/langchain-ai/langchain}
+
+\bibitem{autogen}
+Wu, Q. et al. (2023). AutoGen: Enabling Next-Gen LLM Applications via
+Multi-Agent Conversation Framework. \textit{arXiv:2308.08155}.
+
+\bibitem{erlang}
+Armstrong, J., Virding, R., Wikstr{\"o}m, C., and Williams, M. (1996).
+\textit{Concurrent Programming in Erlang}, 2nd ed. Prentice Hall.
+
+\bibitem{koka}
+Leijen, D. (2014). Koka: Programming with Row Polymorphic Effect Types.
+\textit{MSFP 2014}.
+
+\bibitem{frank}
+Lindley, S., McBride, C., and McLaughlin, C. (2017). Do Be Do Be Do.
+\textit{POPL 2017}.
+
+\bibitem{uncertain}
+Bornholt, J., Mytkowicz, T., and McKinley, K.S. (2014).
+Uncertain\textless T\textgreater: A First-Order Type for Uncertain Data.
+\textit{ASPLOS 2014}.
+
+\bibitem{ocap}
+Miller, M.S. (2006). \textit{Robust Composition: Towards a Unified Approach
+to Access Control and Concurrency Control}. PhD thesis, Johns Hopkins University.
+
+\end{thebibliography}
+
+\end{document}

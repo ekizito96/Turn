@@ -13,7 +13,7 @@
 
 ## Status
 
-**v0.5.0-alpha is the current release.** The implementation is a Rust bytecode VM — not Python or TypeScript, whose overhead contradicts Turn's goals of being fast, cost-efficient, and production-grade.
+**v0.5.0-alpha is the current release.** The Turn compiler and Virtual Machine are implemented in **Rust**, chosen for its zero-cost abstractions, native async support, and memory safety guarantees. Turn scripts themselves can call any external service or tool regardless of what language that backend is written in.
 
 ---
 
