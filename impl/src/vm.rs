@@ -24,6 +24,7 @@ pub struct VmState {
     pub mailbox: VecDeque<Value>,
     pub scheduler: VecDeque<Process>,
     pub next_pid: u64,
+    pub token_budget: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -33,6 +34,7 @@ pub struct Process {
     pub stack: Vec<Value>,
     pub runtime: Runtime,
     pub mailbox: VecDeque<Value>,
+    pub token_budget: usize,
 }
 
 #[derive(Debug)]
@@ -66,6 +68,7 @@ impl Vm {
             stack: Vec::new(),
             runtime: Runtime::new(),
             mailbox: VecDeque::new(),
+            token_budget: 1_000_000,
         };
 
         let mut scheduler = VecDeque::new();
@@ -84,6 +87,7 @@ impl Vm {
             stack: state.stack,
             runtime: state.runtime,
             mailbox: state.mailbox,
+            token_budget: state.token_budget,
         };
         
         process.stack.push(tool_result);
@@ -104,6 +108,7 @@ impl Vm {
             stack: state.stack,
             runtime: state.runtime,
             mailbox: state.mailbox,
+            token_budget: state.token_budget,
         };
         
         let mut scheduler = state.scheduler;
@@ -170,6 +175,7 @@ impl Vm {
                         mailbox: process.mailbox.clone(),
                         scheduler: self.scheduler.clone(),
                         next_pid: self.next_pid,
+                        token_budget: process.token_budget,
                     };
                     return VmResult::Suspended {
                         tool_name,
@@ -185,10 +191,15 @@ impl Vm {
         let mut steps_left = steps;
         
         loop {
+            if process.token_budget == 0 {
+                return VmResult::Complete(Value::Str("Runtime Error: TokenExhaustionError - Process ran out of gas".to_string()));
+            }
+        
             if steps_left == 0 {
                 return VmResult::Yielded;
             }
             steps_left -= 1;
+            process.token_budget = process.token_budget.saturating_sub(1);
 
             if process.frames.is_empty() {
                  return VmResult::Complete(process.stack.pop().unwrap_or(Value::Null));
@@ -231,6 +242,7 @@ impl Vm {
                              stack: Vec::new(),
                              runtime: Runtime::new(),
                              mailbox: VecDeque::new(),
+                             token_budget: 100_000, // Spawned tasks default gas limit
                          };
                          new_process.runtime.env = env;
                          
@@ -288,6 +300,7 @@ impl Vm {
                         mailbox: process.mailbox.clone(),
                         scheduler: self.scheduler.clone(),
                         next_pid: self.next_pid,
+                        token_budget: process.token_budget,
                     };
                     return VmResult::Suspended {
                         tool_name: "sys_suspend".to_string(),
@@ -314,7 +327,7 @@ impl Vm {
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
                     map.insert("schema".to_string(), Value::Str(ty_str));
-                    map.insert("context".to_string(), Value::List(process.runtime.context.clone()));
+                    map.insert("context".to_string(), Value::List(process.runtime.context.to_values()));
                     
                     process.frames[frame_idx].env = process.runtime.env.clone();
                     let state = VmState {
@@ -325,6 +338,7 @@ impl Vm {
                         mailbox: process.mailbox.clone(),
                         scheduler: self.scheduler.clone(),
                         next_pid: self.next_pid,
+                        token_budget: process.token_budget,
                     };
                     return VmResult::Suspended {
                         tool_name: "llm_infer".to_string(),
@@ -504,6 +518,7 @@ impl Vm {
                                 mailbox: process.mailbox.clone(),
                                 scheduler: self.scheduler.clone(),
                                 next_pid: self.next_pid,
+                                token_budget: process.token_budget,
                             };
                             return VmResult::Suspended {
                                 tool_name: name,
@@ -572,7 +587,7 @@ impl Vm {
                             process.frames[frame_idx].env = process.runtime.env.clone();
                             process.runtime.env = new_env;
                             for (k, v) in mem_inserts {
-                                process.runtime.memory.insert(k, v);
+                                process.runtime.memory.insert(k, None, v);
                             }
                             
                             process.frames.push(Frame {
@@ -600,6 +615,7 @@ impl Vm {
                                 mailbox: process.mailbox.clone(),
                                 scheduler: self.scheduler.clone(),
                                 next_pid: self.next_pid,
+                                token_budget: process.token_budget,
                             };
                             return VmResult::Suspended {
                                 tool_name: name,
@@ -668,7 +684,7 @@ impl Vm {
                             process.frames[frame_idx].env = process.runtime.env.clone();
                             process.runtime.env = new_env;
                             for (k, v) in mem_inserts {
-                                process.runtime.memory.insert(k, v);
+                                process.runtime.memory.insert(k, None, v);
                             }
                             
                             process.frames.push(Frame {
@@ -782,6 +798,7 @@ impl Vm {
                         mailbox: process.mailbox.clone(),
                         scheduler: self.scheduler.clone(),
                         next_pid: self.next_pid,
+                        token_budget: process.token_budget,
                     };
                     return VmResult::Suspended { tool_name: "sys_import".to_string(), arg: Value::Str(path), continuation: state };
                 }
