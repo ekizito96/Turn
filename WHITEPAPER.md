@@ -1,7 +1,7 @@
 # Turn: A Systems Language for Agentic Computation
 
-**Version:** 0.4.0 (Alpha)  
-**Date:** February 18, 2026  
+**Version:** 0.5.0 (Alpha)  
+**Date:** February 23, 2026  
 **Authors:** Muyukani Ephraim Kizito et al.
 
 ---
