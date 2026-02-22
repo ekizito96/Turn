@@ -33,5 +33,4 @@ async fn test_runner_persistence() {
 }
 
 #[tokio::test]
-async fn test_vm_state_serialization() {
-}
+async fn test_vm_state_serialization() {}

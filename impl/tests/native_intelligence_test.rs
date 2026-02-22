@@ -1,3 +1,2 @@
 #[tokio::test]
-async fn test_placeholder() {
-}
+async fn test_placeholder() {}
