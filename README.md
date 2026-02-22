@@ -4,7 +4,7 @@
 
 > **v0.5.0-alpha** — Distributed Sovereign Runtime. This release elevates Turn from an experimental interpreter into a multi-threaded, distributed, provider-agnostic agentic OS.
 
-**Created by [Muyukani Ephraim Kizito](https://github.com/ekizito96), Founder of [AI Dojo](https://ai-dojo.io) and Prescott Data.** Built with research and resources developed at Prescott Data.
+**Created by [Muyukani Ephraim Kizito](https://github.com/ekizito96), Founder of [AI Dojo](https://ai-dojo.io) and [Prescott Data](https://prescottdata.io).** Built with research and resources developed at [Prescott Data](https://prescottdata.io).
 
 **Quick Links:**
 - [Vision](VISION.md) — Language vision, philosophy, and roadmap
