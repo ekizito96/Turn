@@ -21,7 +21,10 @@ impl MemoryStore {
 
 impl Store for MemoryStore {
     fn save(&mut self, id: &str, state: &VmState) -> Result<()> {
-        self.data.write().unwrap().insert(id.to_string(), state.clone());
+        self.data
+            .write()
+            .unwrap()
+            .insert(id.to_string(), state.clone());
         Ok(())
     }
 
@@ -30,6 +33,7 @@ impl Store for MemoryStore {
     }
 }
 
+#[allow(clippy::approx_constant)]
 #[tokio::test]
 async fn test_module_import() {
     let temp_dir = tempfile::tempdir().unwrap();

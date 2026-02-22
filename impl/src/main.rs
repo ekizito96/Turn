@@ -100,7 +100,7 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
-            
+
             rt.block_on(async {
                 match runner.run(&id, &source_content, Some(file.clone())).await {
                     Ok(result) => println!("{}", result),
@@ -111,13 +111,11 @@ fn main() -> Result<()> {
                             lex_err
                                 .offset()
                                 .map(|o| turn::offset_to_line_col(&source_content, o))
-                        } else if let Some(parse_err) = e.downcast_ref::<turn::parser::ParseError>() {
-                            Some(turn::offset_to_line_col(
-                                &source_content,
-                                parse_err.offset(),
-                            ))
                         } else {
-                            None
+                            e.downcast_ref::<turn::parser::ParseError>()
+                                .map(|parse_err| {
+                                    turn::offset_to_line_col(&source_content, parse_err.offset())
+                                })
                         };
                         match loc {
                             Some((l, c)) => eprintln!("{}:{}:{}: {}", file.display(), l, c, msg),

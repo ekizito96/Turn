@@ -19,7 +19,10 @@ async fn test_std_math_module() {
     return [a, b, c];
     "#;
 
-    let result = runner.run("test_agent", source, None).await.expect("Run failed");
+    let result = runner
+        .run("test_agent", source, None)
+        .await
+        .expect("Run failed");
 
     if let Value::List(items) = result {
         assert_eq!(items[0], Value::Num(20.0));
@@ -46,7 +49,10 @@ async fn test_std_fs_module() {
     return fs;
     "#;
 
-    let result = runner.run("test_agent", source, None).await.expect("Run failed");
+    let result = runner
+        .run("test_agent", source, None)
+        .await
+        .expect("Run failed");
 
     if let Value::Map(m) = result {
         assert!(m.contains_key("read"));

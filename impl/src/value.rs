@@ -1,9 +1,9 @@
 //! Runtime values for the Turn VM.
 
-use serde::{Deserialize, Serialize};
-use indexmap::IndexMap;
-use std::sync::Arc;
 use crate::bytecode::Instr;
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use std::collections::HashMap;
 
@@ -24,10 +24,16 @@ pub enum Value {
         env: HashMap<String, Value>,
         params: Vec<(String, Option<crate::ast::Type>, bool)>,
     },
-    Pid { node_id: String, local_pid: u64 }, // Globally Addressable Process ID
+    Pid {
+        node_id: String,
+        local_pid: u64,
+    }, // Globally Addressable Process ID
     Vec(Arc<Vec<f64>>),
     Cap(usize), // Local OCap Handle
-    CapProxy { origin_node: String, id: usize }, // Remote OCap
+    CapProxy {
+        origin_node: String,
+        id: usize,
+    }, // Remote OCap
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
 }
 
@@ -66,7 +72,9 @@ impl std::fmt::Display for Value {
             Value::List(l) => {
                 write!(f, "[")?;
                 for (i, v) in l.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", v)?;
                 }
                 write!(f, "]")
@@ -74,7 +82,9 @@ impl std::fmt::Display for Value {
             Value::Map(m) => {
                 write!(f, "{{")?;
                 for (i, (k, v)) in m.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", k, v)?;
                 }
                 write!(f, "}}")
@@ -82,7 +92,9 @@ impl std::fmt::Display for Value {
             Value::Struct(name, m) => {
                 write!(f, "{} {{", name)?;
                 for (i, (k, v)) in m.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", k, v)?;
                 }
                 write!(f, "}}")
@@ -91,13 +103,17 @@ impl std::fmt::Display for Value {
             Value::Vec(v) => {
                 write!(f, "vec[")?;
                 for (i, val) in v.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", val)?;
                 }
                 write!(f, "]")
             }
             Value::Cap(c) => write!(f, "<capability {}>", c),
-            Value::CapProxy { origin_node, id } => write!(f, "<capability_proxy {}@{}>", id, origin_node),
+            Value::CapProxy { origin_node, id } => {
+                write!(f, "<capability_proxy {}@{}>", id, origin_node)
+            }
             Value::Uncertain(v, p) => write!(f, "{} ({}%)", v, p * 100.0),
         }
     }

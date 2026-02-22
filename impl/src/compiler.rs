@@ -126,22 +126,22 @@ impl Compiler {
             } => {
                 // Compile the target expression. It leaves Result(Ok | Err) on stack
                 self.compile_expr(expr);
-                
+
                 // Emits a conditional jump. If stack top is Ok(v), it unwraps `v` and falls through.
                 // If stack top is Err(e), it unwraps `e` and jumps to the target offset.
                 let match_instr = self.emit(Instr::MatchResult(0));
-                
+
                 // Fallthrough (Ok path)
                 self.emit(Instr::Store(ok_binding.clone()));
                 self.compile_block(ok_block);
                 let jump_to_end = self.emit(Instr::Jump(0));
-                
+
                 // Err path
                 let err_start = self.code.len() as u32;
                 self.patch_jump(match_instr, err_start);
                 self.emit(Instr::Store(err_binding.clone()));
                 self.compile_block(err_block);
-                
+
                 let end = self.code.len() as u32;
                 self.patch_jump(jump_to_end, end);
             }
@@ -216,7 +216,13 @@ impl Compiler {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
             }
-            Expr::Turn { is_tool, params, ret_ty: _, body, .. } => {
+            Expr::Turn {
+                is_tool,
+                params,
+                ret_ty: _,
+                body,
+                ..
+            } => {
                 let jump_over = self.emit(Instr::Jump(0));
                 let start_addr = self.code.len() as u32;
 
@@ -232,19 +238,30 @@ impl Compiler {
 
                 self.compile_block(body);
                 // Implicit return
-                let has_return = body.stmts.last().map_or(false, |s| matches!(s, Stmt::Return { .. }));
+                let has_return = body
+                    .stmts
+                    .last()
+                    .is_some_and(|s| matches!(s, Stmt::Return { .. }));
                 if !has_return {
                     self.emit(Instr::PushNull);
                     self.emit(Instr::Return);
                 }
                 let after_addr = self.code.len() as u32;
                 self.patch_jump(jump_over, after_addr);
-                let param_info = params.iter().map(|(n, _, ty, is_sec)| (n.clone(), ty.clone(), *is_sec)).collect();
+                let param_info = params
+                    .iter()
+                    .map(|(n, _, ty, is_sec)| (n.clone(), ty.clone(), *is_sec))
+                    .collect();
                 self.emit(Instr::MakeTurn(start_addr, *is_tool, param_info));
             }
-            Expr::Infer { target_ty, tools, body, .. } => {
+            Expr::Infer {
+                target_ty,
+                tools,
+                body,
+                ..
+            } => {
                 let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
-                
+
                 // Compile body as an expression (leave result on stack, acts as the prompt)
                 let len = body.stmts.len();
                 if len == 0 {
@@ -260,7 +277,7 @@ impl Compiler {
                                 _ => {
                                     self.compile_stmt(stmt);
                                     // Result is Null if stmt is not an expression
-                                    self.emit(Instr::PushNull); 
+                                    self.emit(Instr::PushNull);
                                 }
                             }
                         } else {
@@ -275,7 +292,7 @@ impl Compiler {
                         self.compile_expr(t);
                     }
                 }
-                
+
                 self.emit(Instr::Infer(target_ty.clone(), tool_count as u32));
             }
             Expr::Index { target, index, .. } => {
@@ -305,23 +322,51 @@ impl Compiler {
                 }
                 self.emit(Instr::MakeMap(len));
             }
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
-                    BinOp::Add => { self.emit(Instr::Add); }
-                    BinOp::Sub => { self.emit(Instr::Sub); }
-                    BinOp::Mul => { self.emit(Instr::Mul); }
-                    BinOp::Div => { self.emit(Instr::Div); }
-                    BinOp::Eq => { self.emit(Instr::Eq); }
-                    BinOp::Ne => { self.emit(Instr::Ne); }
-                    BinOp::Lt => { self.emit(Instr::Lt); }
-                    BinOp::Gt => { self.emit(Instr::Gt); }
-                    BinOp::Le => { self.emit(Instr::Le); }
-                    BinOp::Ge => { self.emit(Instr::Ge); }
-                    BinOp::And => { self.emit(Instr::And); }
-                    BinOp::Or => { self.emit(Instr::Or); }
-                    BinOp::Similarity => { self.emit(Instr::Similarity); }
+                    BinOp::Add => {
+                        self.emit(Instr::Add);
+                    }
+                    BinOp::Sub => {
+                        self.emit(Instr::Sub);
+                    }
+                    BinOp::Mul => {
+                        self.emit(Instr::Mul);
+                    }
+                    BinOp::Div => {
+                        self.emit(Instr::Div);
+                    }
+                    BinOp::Eq => {
+                        self.emit(Instr::Eq);
+                    }
+                    BinOp::Ne => {
+                        self.emit(Instr::Ne);
+                    }
+                    BinOp::Lt => {
+                        self.emit(Instr::Lt);
+                    }
+                    BinOp::Gt => {
+                        self.emit(Instr::Gt);
+                    }
+                    BinOp::Le => {
+                        self.emit(Instr::Le);
+                    }
+                    BinOp::Ge => {
+                        self.emit(Instr::Ge);
+                    }
+                    BinOp::And => {
+                        self.emit(Instr::And);
+                    }
+                    BinOp::Or => {
+                        self.emit(Instr::Or);
+                    }
+                    BinOp::Similarity => {
+                        self.emit(Instr::Similarity);
+                    }
                 }
             }
             Expr::Unary { op, expr, .. } => {
@@ -342,7 +387,9 @@ impl Compiler {
                 self.compile_expr(expr);
                 self.emit(Instr::Spawn);
             }
-            Expr::SpawnRemote { node_id, closure, .. } => {
+            Expr::SpawnRemote {
+                node_id, closure, ..
+            } => {
                 self.compile_expr(node_id);
                 self.compile_expr(closure);
                 self.emit(Instr::SpawnRemote);
@@ -377,7 +424,9 @@ impl Compiler {
                 }
                 self.emit(Instr::MakeStruct(name.clone(), len));
             }
-            Expr::MethodCall { target, name, arg, .. } => {
+            Expr::MethodCall {
+                target, name, arg, ..
+            } => {
                 self.compile_expr(target);
                 self.compile_expr(arg);
                 self.emit(Instr::CallMethod(name.clone()));

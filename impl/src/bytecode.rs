@@ -1,7 +1,7 @@
 //! Bytecode instruction definitions for the Turn VM.
 
-use serde::{Deserialize, Serialize};
 use crate::ast::Type;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instr {
@@ -18,7 +18,7 @@ pub enum Instr {
     MakeMap(usize),
     MakeStruct(String, usize),
     MakeVec(usize),
-    
+
     // Variables
     Load(String),
     Store(String),
@@ -38,10 +38,10 @@ pub enum Instr {
     Or,
     Not,
     Similarity, // ~>
-    
+
     // Structs
     DefineStruct(String, indexmap::IndexMap<String, Type>),
-    
+
     // Control
     Pop, // discard top of stack
 
@@ -60,19 +60,19 @@ pub enum Instr {
     SpawnRemote,
     Send,
     Receive,
-    Link, // NEW: Bidirectional lifecycle binding
-    Monitor, // NEW: Unidirectional death notification
-    Confidence, // NEW
+    Link,             // NEW: Bidirectional lifecycle binding
+    Monitor,          // NEW: Unidirectional death notification
+    Confidence,       // NEW
     Infer(Type, u32), // NEW
-    Suspend, // NEW
-    
+    Suspend,          // NEW
+
     // Control flow
     Jump(u32),
     JumpIfFalse(u32),
     JumpIfTrue(u32),
 
-    MakeOk, // NEW
-    MakeErr, // NEW
+    MakeOk,           // NEW
+    MakeErr,          // NEW
     MatchResult(u32), // NEW: jumps to offset if Err, continues if Ok
 
     // Turn

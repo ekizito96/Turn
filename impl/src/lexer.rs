@@ -15,7 +15,7 @@ pub enum Token {
     Vec,
     Turn,
     Let,
-    Suspend, // NEW
+    Suspend,    // NEW
     Confidence, // NEW
     Use,
     Context,
@@ -29,10 +29,10 @@ pub enum Token {
     Impl,
     Type, // 'type' keyword for aliases
     Return,
-    Infer, // NEW
-    With, // NEW
+    Infer,  // NEW
+    With,   // NEW
     Secret, // NEW
-    Tool, // NEW
+    Tool,   // NEW
     Struct,
     Match,
     Ok,
@@ -65,7 +65,7 @@ pub enum Token {
     Star,
     Slash,
     Similarity, // ~>
-    Eq, // = (assignment)
+    Eq,         // = (assignment)
     EqEq,
     Ne,
     Less,
@@ -73,7 +73,7 @@ pub enum Token {
     LessEq,
     GreaterEq,
     Arrow, // ->
-    Bang, // !
+    Bang,  // !
 
     // Literals
     Num(f64),
@@ -119,7 +119,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
-    ("suspend", Token::Suspend), // NEW
+    ("suspend", Token::Suspend),       // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
     ("match", Token::Match),
@@ -131,10 +131,10 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("recall", Token::Recall),
     ("call", Token::Call),
     ("return", Token::Return),
-    ("infer", Token::Infer), // NEW
-    ("with", Token::With), // NEW
+    ("infer", Token::Infer),   // NEW
+    ("with", Token::With),     // NEW
     ("secret", Token::Secret), // NEW
-    ("tool", Token::Tool), // NEW
+    ("tool", Token::Tool),     // NEW
     ("spawn", Token::Spawn),
     ("spawn_remote", Token::SpawnRemote),
     ("send", Token::Send),

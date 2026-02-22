@@ -1,8 +1,8 @@
 //! Azure OpenAI + weather tools for LLM agents.
 
+use crate::ast::Type;
 use crate::tools::{ToolHandler, ToolRegistry};
 use crate::value::Value;
-use crate::ast::Type;
 use serde_json::{json, Value as JsonValue};
 use std::env;
 
@@ -35,7 +35,7 @@ fn fetch_weather(lat: f64, lon: f64) -> String {
 fn weather_code_to_desc(code: u64) -> &'static str {
     match code {
         0 => "clear",
-        1 | 2 | 3 => "partly cloudy",
+        1..=3 => "partly cloudy",
         45 | 48 => "foggy",
         51..=67 => "rainy",
         71..=77 => "snowy",
@@ -68,12 +68,12 @@ fn turn_type_to_json_schema(ty: &Type) -> JsonValue {
                 "required": required,
                 "additionalProperties": false
             })
-        },
+        }
         Type::Map(_key_ty, val_ty) => json!({
             "type": "object",
             "additionalProperties": turn_type_to_json_schema(val_ty)
         }),
-        _ => json!({ "type": ["string", "number", "boolean", "object", "array", "null"] })
+        _ => json!({ "type": ["string", "number", "boolean", "object", "array", "null"] }),
     }
 }
 
@@ -88,38 +88,45 @@ fn json_value_to_turn_value(ty: &Type, j: &JsonValue) -> Result<Value, String> {
                 items.push(json_value_to_turn_value(inner_ty, item)?);
             }
             Ok(Value::List(std::sync::Arc::new(items)))
-        },
+        }
         (Type::Struct(name, fields), JsonValue::Object(obj)) => {
             let mut map = indexmap::IndexMap::new();
             for (k, expected_ty) in fields {
                 if let Some(field_val) = obj.get(k) {
                     map.insert(k.clone(), json_value_to_turn_value(expected_ty, field_val)?);
                 } else {
-                    return Err(format!("Missing required field '{}' in struct '{}'", k, name));
+                    return Err(format!(
+                        "Missing required field '{}' in struct '{}'",
+                        k, name
+                    ));
                 }
             }
-            Ok(Value::Struct(std::sync::Arc::new(name.clone()), std::sync::Arc::new(map)))
-        },
+            Ok(Value::Struct(
+                std::sync::Arc::new(name.clone()),
+                std::sync::Arc::new(map),
+            ))
+        }
         (Type::Map(_k_ty, v_ty), JsonValue::Object(obj)) => {
             let mut map = indexmap::IndexMap::new();
             for (k, v) in obj {
                 map.insert(k.clone(), json_value_to_turn_value(v_ty, v)?);
             }
             Ok(Value::Map(std::sync::Arc::new(map)))
-        },
+        }
         (Type::Any, _) => {
             // fallback
             Ok(Value::Str(std::sync::Arc::new(j.to_string())))
-        },
+        }
         (Type::Cap, _) => Err("PrivilegeViolation: LLMs cannot forge a Capability".to_string()),
-        _ => Err(format!("Type mismatch: expected {:?}, got {:?}", ty, j))
+        _ => Err(format!("Type mismatch: expected {:?}, got {:?}", ty, j)),
     }
 }
 
 pub fn get_embedding(text: &str) -> Option<Vec<f64>> {
     let endpoint = env::var("AZURE_OPENAI_ENDPOINT").unwrap_or_default();
     let api_key = env::var("AZURE_OPENAI_API_KEY").unwrap_or_default();
-    let deployment = env::var("AZURE_OPENAI_EMBEDDING_DEPLOYMENT").unwrap_or_else(|_| "text-embedding-3-small".to_string());
+    let deployment = env::var("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+        .unwrap_or_else(|_| "text-embedding-3-small".to_string());
 
     if endpoint.is_empty() || api_key.is_empty() {
         return None;
@@ -137,18 +144,25 @@ pub fn get_embedding(text: &str) -> Option<Vec<f64>> {
         "model": deployment
     });
 
-    match client.post(&url).header("api-key", &api_key).header("Content-Type", "application/json").json(&body).send() {
+    match client
+        .post(&url)
+        .header("api-key", &api_key)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+    {
         Ok(resp) if resp.status().is_success() => {
             let j: JsonValue = resp.json().unwrap_or(json!({}));
-            let vec: Option<Vec<f64>> = j.get("data")
+            let vec: Option<Vec<f64>> = j
+                .get("data")
                 .and_then(|d| d.as_array())
                 .and_then(|a| a.first())
                 .and_then(|e| e.get("embedding"))
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|x| x.as_f64()).collect());
             vec
-        },
-        _ => None
+        }
+        _ => None,
     }
 }
 
@@ -159,10 +173,14 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
             let s = match &arg {
                 Value::Str(s) => s.to_string(),
                 Value::Num(n) => n.to_string(),
-                _ => return Ok(Value::Str(std::sync::Arc::new("{\"error\":\"expected lat,lon string\"}".to_string()))),
+                _ => {
+                    return Ok(Value::Str(std::sync::Arc::new(
+                        "{\"error\":\"expected lat,lon string\"}".to_string(),
+                    )))
+                }
             };
             let parts: Vec<&str> = s.split(',').map(|x| x.trim()).collect();
-            let (lat, lon) = match (parts.get(0), parts.get(1)) {
+            let (lat, lon) = match (parts.first(), parts.get(1)) {
                 (Some(a), Some(b)) => (
                     a.parse::<f64>().unwrap_or(0.0),
                     b.parse::<f64>().unwrap_or(0.0),
@@ -224,17 +242,17 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                     if *is_tool {
                         let mut properties = serde_json::Map::new();
                         let mut required = Vec::new();
-                        
+
                         for (p_name, ty_opt, is_secret) in params {
                             // Phase 2: First-Class Tooling & Cognitive Offloading
                             // Exclude secret parameters entirely so LLMs do not need to generate them.
                             if *is_secret { continue; }
                             if matches!(ty_opt, Some(Type::Cap)) { continue; } // Phase 8: Hard capability omission
-                            
-                            let p_ty_json = if let Some(ty) = ty_opt { 
-                                turn_type_to_json_schema(&ty) 
-                            } else { 
-                                json!({"type":"string"}) 
+
+                            let p_ty_json = if let Some(ty) = ty_opt {
+                                turn_type_to_json_schema(ty)
+                            } else {
+                                json!({"type":"string"})
                             };
                             properties.insert(p_name.clone(), p_ty_json);
                             required.push(p_name.clone());
@@ -280,7 +298,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                     "messages": messages,
                     "max_tokens": 500,
                 });
-                
+
                 if !oai_tools.is_empty() {
                     body_obj.as_object_mut().unwrap().insert("tools".to_string(), json!(oai_tools));
                     body_obj.as_object_mut().unwrap().insert("tool_choice".to_string(), json!("auto"));
@@ -348,7 +366,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 let tool_calls = msg.get("tool_calls").and_then(|t| t.as_array());
                 if tool_calls.map(|a| a.is_empty()).unwrap_or(true) {
                     let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                    
+
                     if turn_type != Type::Any {
                         match serde_json::from_str::<JsonValue>(content) {
                             Ok(parsed_json) => {
@@ -360,7 +378,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                                 } else {
                                     parsed_json
                                 };
-                                
+
                                 match json_value_to_turn_value(&turn_type, &actual_json) {
                                     Ok(turn_val) => return Ok(turn_val),
                                     Err(err) => {

@@ -1,8 +1,8 @@
 //! Agent state and runtime per spec/03-runtime-model.md.
 
 use crate::value::Value;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::ast::Type;
 use indexmap::IndexMap;
@@ -51,7 +51,7 @@ impl PriorityStack {
             let evicted = self.items.remove(worst_idx);
             self.current_tokens -= evicted.token_cost;
         }
-        
+
         self.current_tokens += item.token_cost;
         self.items.push(item);
     }
@@ -67,7 +67,9 @@ fn estimate_tokens(val: &Value) -> usize {
 }
 
 pub fn cosine_similarity(v1: &[f64], v2: &[f64]) -> f64 {
-    if v1.len() != v2.len() || v1.is_empty() { return 0.0; }
+    if v1.len() != v2.len() || v1.is_empty() {
+        return 0.0;
+    }
     let mut dot = 0.0;
     let mut norm1 = 0.0;
     let mut norm2 = 0.0;
@@ -76,7 +78,9 @@ pub fn cosine_similarity(v1: &[f64], v2: &[f64]) -> f64 {
         norm1 += a * a;
         norm2 += b * b;
     }
-    if norm1 == 0.0 || norm2 == 0.0 { return 0.0; }
+    if norm1 == 0.0 || norm2 == 0.0 {
+        return 0.0;
+    }
     dot / (norm1.sqrt() * norm2.sqrt())
 }
 
@@ -86,9 +90,9 @@ pub struct MemoryItem {
     pub embedding: Option<Vec<f64>>,
     pub value: Value,
     pub neighbors: Vec<usize>, // HNSW Level 0 Graph edges
-    pub created_at: u64, // UNIX epoch
-    pub last_accessed: u64, // UNIX epoch
-    pub velocity: f64, // Orbit speed/Volatility scalar
+    pub created_at: u64,       // UNIX epoch
+    pub last_accessed: u64,    // UNIX epoch
+    pub velocity: f64,         // Orbit speed/Volatility scalar
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -99,49 +103,53 @@ pub struct SemanticMemory {
 
 impl SemanticMemory {
     pub fn new() -> Self {
-        Self { 
+        Self {
             items: Vec::new(),
             entry_point: None,
         }
     }
-    
+
     pub fn insert(&mut self, key: String, embedding: Option<Vec<f64>>, value: Value) {
         // Prevent dupes
         for item in &mut self.items {
             if item.key == key {
                 item.value = value.clone();
-                if embedding.is_some() { item.embedding = embedding.clone(); }
+                if embedding.is_some() {
+                    item.embedding = embedding.clone();
+                }
                 return;
             }
         }
-        
+
         // Get current time
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or(std::time::Duration::from_secs(0))
             .as_secs();
-            
+
         // Append raw node
         let new_idx = self.items.len();
-        self.items.push(MemoryItem { 
-            key, 
-            embedding: embedding.clone(), 
+        self.items.push(MemoryItem {
+            key,
+            embedding: embedding.clone(),
             value,
             neighbors: Vec::new(),
             created_at: now,
             last_accessed: now,
             velocity: 1.0, // Default baseline velocity
         });
-        
+
         // If we lack vectors, we can't graft it into the HNSW graph cleanly
         let q_emb = match embedding {
             Some(v) => v,
             None => {
-                if self.entry_point.is_none() { self.entry_point = Some(new_idx); }
+                if self.entry_point.is_none() {
+                    self.entry_point = Some(new_idx);
+                }
                 return;
             }
         };
-        
+
         if let Some(ep) = self.entry_point {
             // HNSW greedy-search to find closest existing node to bind to
             let mut curr = ep;
@@ -151,7 +159,7 @@ impl SemanticMemory {
             } else {
                 f64::MAX
             };
-            
+
             let mut found_closer = true;
             while found_closer {
                 found_closer = false;
@@ -167,48 +175,50 @@ impl SemanticMemory {
                     }
                 }
             }
-            
+
             // Connect to local minimum
             self.items[curr].neighbors.push(new_idx);
             self.items[new_idx].neighbors.push(curr);
-            
+
             // Reassign entry point if this is structurally central (mock optimization)
-            if new_idx % 10 == 0 {
+            if new_idx.is_multiple_of(10) {
                 self.entry_point = Some(new_idx);
             }
         } else {
             self.entry_point = Some(new_idx);
         }
     }
-    
+
     pub fn get(&mut self, key: &str) -> Option<Value> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or(std::time::Duration::from_secs(0))
             .as_secs();
-        
+
         for item in &mut self.items {
-            if item.key == key { 
+            if item.key == key {
                 item.last_accessed = now; // Spaced Repetition reset
-                return Some(item.value.clone()); 
+                return Some(item.value.clone());
             }
         }
         None
     }
-    
+
     // O(log N) Greedy Search across HNSW Layer 0
     pub fn search(&self, query_emb: &[f64], top_k: usize) -> Vec<Value> {
-        if self.items.is_empty() { return Vec::new(); }
-        
+        if self.items.is_empty() {
+            return Vec::new();
+        }
+
         let ep = self.entry_point.unwrap_or(0);
         let mut curr = ep;
-        
+
         let mut best_dist = if let Some(ref e) = self.items[curr].embedding {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or(std::time::Duration::from_secs(0))
                 .as_secs();
-                
+
             let dt = now.saturating_sub(self.items[curr].last_accessed) as f64;
             // Ebbinghaus Decay: Score = Cosine * e^(-lambda * dt)
             // lambda = 0.0001 (approx 10% decay every 1000 seconds for standard items)
@@ -219,18 +229,20 @@ impl SemanticMemory {
         } else {
             f64::MAX
         };
-        
+
         let mut visited = std::collections::HashSet::new();
         visited.insert(curr);
-        
+
         let mut found_closer = true;
         while found_closer {
             found_closer = false;
             let neighbors = self.items[curr].neighbors.clone();
             for &nxt in &neighbors {
-                if visited.contains(&nxt) { continue; }
+                if visited.contains(&nxt) {
+                    continue;
+                }
                 visited.insert(nxt);
-                
+
                 if let Some(ref e) = self.items[nxt].embedding {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -240,7 +252,7 @@ impl SemanticMemory {
                     let decay_factor = (-0.0001 * self.items[nxt].velocity * dt).exp();
                     let base_score = cosine_similarity(query_emb, e);
                     let d = 1.0 - (base_score * decay_factor);
-                    
+
                     if d < best_dist {
                         best_dist = d;
                         curr = nxt;
@@ -249,28 +261,30 @@ impl SemanticMemory {
                 }
             }
         }
-        
+
         // Fetch Top K around local minima
         let mut scored = Vec::new();
         let mut frontier = vec![curr];
         let mut k_visited = std::collections::HashSet::new();
         k_visited.insert(curr);
-        
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or(std::time::Duration::from_secs(0))
             .as_secs();
 
         while let Some(node) = frontier.pop() {
-            if scored.len() >= top_k { break; }
-            if let Some(ref e) = self.items[node].embedding {
-                 let dt = now.saturating_sub(self.items[node].last_accessed) as f64;
-                 let decay_factor = (-0.0001 * self.items[node].velocity * dt).exp();
-                 let base_score = cosine_similarity(query_emb, e);
-                 let final_score = base_score * decay_factor;
-                 scored.push((final_score, node));
+            if scored.len() >= top_k {
+                break;
             }
-            
+            if let Some(ref e) = self.items[node].embedding {
+                let dt = now.saturating_sub(self.items[node].last_accessed) as f64;
+                let decay_factor = (-0.0001 * self.items[node].velocity * dt).exp();
+                let base_score = cosine_similarity(query_emb, e);
+                let final_score = base_score * decay_factor;
+                scored.push((final_score, node));
+            }
+
             for &n in &self.items[node].neighbors {
                 if !k_visited.contains(&n) {
                     k_visited.insert(n);
@@ -278,9 +292,9 @@ impl SemanticMemory {
                 }
             }
         }
-        
+
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         let mut results = Vec::new();
         for (_, node_idx) in scored.into_iter().take(top_k) {
             // Unsafe mutable bypass since `search` takes `&self` not `&mut self`.
@@ -331,7 +345,10 @@ pub struct NoOpSwitchboard {}
 
 impl NetworkSwitchboard for NoOpSwitchboard {
     fn send_remote(&self, node_id: &str, _local_pid: u64, _msg: Value) -> Result<(), RuntimeError> {
-        println!("[Switchboard] Dropped message to remote node {}. Switchboard not connected.", node_id);
+        println!(
+            "[Switchboard] Dropped message to remote node {}. Switchboard not connected.",
+            node_id
+        );
         Ok(())
     }
     fn register_local_node(&mut self, _node_id: String) {}
@@ -380,7 +397,7 @@ impl Runtime {
     pub fn append_context(&mut self, value: Value) -> Result<(), RuntimeError> {
         let mut priority = 2; // Default to P2 (History)
         let mut actual_value = value.clone();
-        
+
         if let Value::Struct(ref name, ref m) = value {
             if name.as_str() == "ContextItem" || m.contains_key("priority") {
                 if let Some(Value::Num(p)) = m.get("priority") {
@@ -402,30 +419,33 @@ impl Runtime {
                 actual_value = v.clone();
             }
         }
-        
+
         let token_cost = estimate_tokens(&actual_value);
         self.context.push(ContextItem {
             priority,
             token_cost,
             value: actual_value,
         });
-        
+
         Ok(())
     }
 
     pub fn remember(&mut self, key: Value, val: Value) -> Result<(), RuntimeError> {
         let (id, embedding) = match key {
             Value::Map(ref m) | Value::Struct(_, ref m) => {
-                let id = m.get("id").and_then(|v| value_to_key(v).ok()).unwrap_or_else(|| "unnamed".to_string());
+                let id = m
+                    .get("id")
+                    .and_then(|v| value_to_key(v).ok())
+                    .unwrap_or_else(|| "unnamed".to_string());
                 let emb = match m.get("embedding") {
                     Some(Value::Vec(v)) => Some((**v).clone()),
                     _ => None,
                 };
                 (id, emb)
             }
-            _ => (value_to_key(&key)?, None)
+            _ => (value_to_key(&key)?, None),
         };
-        
+
         self.memory.insert(id, embedding, val);
         Ok(())
     }
@@ -434,7 +454,7 @@ impl Runtime {
         if let Value::Vec(v) = key {
             let results = self.memory.search(v, 1);
             if let Some(val) = results.first() {
-                // To formally reset the timestamp on the retrieved node without mutating `search`, 
+                // To formally reset the timestamp on the retrieved node without mutating `search`,
                 // we lookup the item by exact match since it's the only one returned (top_k=1).
                 // Or simply rely on `search` not needing exactly accurate `last_accessed` for Vector inputs.
                 // However, since we updated `get()` above, we should implement a dedicated mut search later if needed.
@@ -442,7 +462,7 @@ impl Runtime {
             }
             return Value::Null;
         }
-        
+
         let key_str = match value_to_key(key) {
             Ok(s) => s,
             Err(_) => return Value::Null,
@@ -469,23 +489,23 @@ impl Runtime {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or(std::time::Duration::from_secs(0))
             .as_secs();
-        
+
         let noise_threshold = 0.05; // 5% minimum contextual relevance
-        
+
         let mut to_remove = Vec::new();
-        
+
         for (i, item) in self.memory.items.iter().enumerate() {
             let dt = now.saturating_sub(item.last_accessed) as f64;
             let decay_factor = (-0.0001 * item.velocity * dt).exp();
-            
+
             // For now, base score assumes a perfect match 1.0 against itself for decay tracking
             let retrieval_strength = 1.0 * decay_factor;
-            
+
             if retrieval_strength < noise_threshold {
                 to_remove.push(i);
             }
         }
-        
+
         // Remove from highest index to lowest to avoid shifting issues
         to_remove.sort_by(|a, b| b.cmp(a));
         for idx in to_remove {
@@ -500,7 +520,7 @@ impl Runtime {
             // In a production Turn Engine, this is a full Graph re-indexing operation.
             // For alpha v0.4.0, we just clear all graphs edges to force greedy flat search if needed,
             // or simply leave it. We'll clear the entry point to force a new graft eventually.
-            self.memory.entry_point = None; 
+            self.memory.entry_point = None;
         }
     }
 }
@@ -511,7 +531,15 @@ pub fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         Value::Num(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Err(RuntimeError::InvalidMemoryKey),
-        Value::List(_) | Value::Map(_) | Value::Struct(_, _) | Value::Closure { .. } | Value::Pid { .. } | Value::Vec(_) | Value::Cap(_) | Value::CapProxy { .. } | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
+        Value::List(_)
+        | Value::Map(_)
+        | Value::Struct(_, _)
+        | Value::Closure { .. }
+        | Value::Pid { .. }
+        | Value::Vec(_)
+        | Value::Cap(_)
+        | Value::CapProxy { .. }
+        | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
     }
 }
 

@@ -22,7 +22,10 @@ async fn test_std_json_module_parse_and_stringify() {
     return [name, text];
     "#;
 
-    let result = runner.run("test_agent", source, None).await.expect("Run failed");
+    let result = runner
+        .run("test_agent", source, None)
+        .await
+        .expect("Run failed");
     if let Value::List(items) = result {
         assert_eq!(
             items[0],
@@ -49,7 +52,10 @@ async fn test_std_time_module_now() {
     return time.now();
     "#;
 
-    let result = runner.run("test_agent", source, None).await.expect("Run failed");
+    let result = runner
+        .run("test_agent", source, None)
+        .await
+        .expect("Run failed");
     match result {
         Value::Num(n) => assert!(n > 0.0),
         _ => panic!("Expected Num timestamp, got {:?}", result),
@@ -66,7 +72,10 @@ async fn test_std_regex_module() {
     return [is_match, out];
     "#;
 
-    let result = runner.run("test_agent", source, None).await.expect("Run failed");
+    let result = runner
+        .run("test_agent", source, None)
+        .await
+        .expect("Run failed");
     if let Value::List(items) = result {
         assert_eq!(items[0], Value::Bool(true));
         assert_eq!(

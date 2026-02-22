@@ -1,8 +1,6 @@
-use turn::value::Value;
-
 #[tokio::test]
 async fn test_uncertainty_not() {
-    let source = "let x = 0.5; let res = !x; return res;"; 
+    let _source = "let x = 0.5; let res = !x; return res;";
 }
 
 #[tokio::test]

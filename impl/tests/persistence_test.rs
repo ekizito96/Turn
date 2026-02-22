@@ -15,7 +15,10 @@ impl MockStore {
 }
 impl Store for MockStore {
     fn save(&mut self, id: &str, state: &VmState) -> anyhow::Result<()> {
-        self.data.write().unwrap().insert(id.to_string(), state.clone());
+        self.data
+            .write()
+            .unwrap()
+            .insert(id.to_string(), state.clone());
         Ok(())
     }
     fn load(&self, id: &str) -> anyhow::Result<Option<VmState>> {
@@ -25,7 +28,7 @@ impl Store for MockStore {
 
 #[tokio::test]
 async fn test_runner_persistence() {
-    let store = MockStore::new();
+    let _store = MockStore::new();
     // Test successfully mapped!
     assert!(true);
 }

@@ -49,7 +49,8 @@ return sum;
             &fs::read_to_string(&main_path).unwrap(),
             Some(main_path.clone()),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
     assert_eq!(result.to_string(), "30");
 }

@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::post,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -52,7 +47,7 @@ pub async fn serve(port: u16, store_path: PathBuf) -> Result<(), Box<dyn std::er
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("listening on {}", addr);
-    
+
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 

@@ -20,7 +20,10 @@ impl MemoryStore {
 
 impl Store for MemoryStore {
     fn save(&mut self, id: &str, state: &VmState) -> Result<()> {
-        self.data.write().unwrap().insert(id.to_string(), state.clone());
+        self.data
+            .write()
+            .unwrap()
+            .insert(id.to_string(), state.clone());
         Ok(())
     }
 
