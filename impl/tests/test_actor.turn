@@ -1,0 +1,16 @@
+// test_actor.turn
+// Demonstrates Erlang-style process isolation and mailboxes
+
+let worker = turn() -> Str {
+    let msg = receive;
+    return "Worker Process Resolved: " + msg;
+};
+
+// Spawn an isolated lightweight process
+let pid = spawn worker;
+
+// Send a message to its mailbox
+let success = send pid, "Hello from the Supervisor!";
+
+// Wait a bit to let the scheduler run the child
+return "Execution Complete. Message sent? " + success;

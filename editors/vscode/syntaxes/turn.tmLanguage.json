@@ -1,0 +1,90 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Turn",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#types"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#functions"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.turn",
+                    "match": "//.*$"
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.turn",
+                    "match": "\\b(if|else|while|for|return|break|continue|try|catch|throw)\\b"
+                },
+                {
+                    "name": "keyword.declaration.turn",
+                    "match": "\\b(let|use|impl|type|struct|fn|turn)\\b"
+                },
+                {
+                    "name": "keyword.agentic.turn",
+                    "match": "\\b(infer|suspend|confidence|spawn|send|receive|remember|recall|context|call|link|monitor)\\b"
+                },
+                {
+                    "name": "constant.language.turn",
+                    "match": "\\b(true|false|null)\\b"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.turn",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.turn",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "support.type.turn",
+                    "match": "\\b(Num|Str|Bool|List|Map|Context|Any|Void|Pid|Vec)\\b"
+                },
+                {
+                    "name": "entity.name.type.turn",
+                    "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+                }
+            ]
+        },
+        "numbers": {
+            "name": "constant.numeric.turn",
+            "match": "\\b\\d+(\\.\\d+)?\\b"
+        },
+        "functions": {
+            "patterns": [
+                {
+                    "name": "entity.name.function.turn",
+                    "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+                }
+            ]
+        }
+    },
+    "scopeName": "source.turn"
+}

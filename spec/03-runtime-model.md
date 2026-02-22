@@ -11,7 +11,7 @@ The **configuration** is the full state of the **process** at any point. It is a
 | Component      | Type / meaning | Lifetime |
 |----------------|----------------|----------|
 | **env**        | Map from identifier to value. Current lexical bindings (variables, let-bound names). | Updated on `let`; pushed/popped on block entry/exit. |
-| **context**    | Managed context buffer. Bounded by a runtime invariant (by entries, bytes, or tokens). | Per process. Updated by `context.append`. On overflow, runtime follows the error/policy model. |
+| **context**    | Managed context buffer with **Priority Stack Architecture** (System, Plan, Scratchpad, History). | Per process. Updated by `context.append`. Monitored by token budget scheduler. |
 | **memory**     | Managed memory store. Key-value map plus optional semantic addressing metadata. | Per process; may be persisted across runs (implementation-defined). Updated by `remember`; read by `recall`. |
 | **mailbox**    | Queue of messages for actor-style concurrency (`send`/`receive`). | Per process. Updated by `send`; consumed by `receive`. |
 | **tool_registry** | Tool registry: map from tool name (string) to handler. | Set at startup. Used when evaluating `call(name, arg)` and `infer` (via an inference effect). |
@@ -30,8 +30,9 @@ For **serialization** (checkpoint, replay, debug): we serialize `env`, `context`
 
 The following must hold at **every** step (and the runtime must enforce them so that the transition relation never produces a configuration that violates them):
 
-1. **Context bound:** |context| ≤ N (or total context size ≤ M, if the runtime measures in tokens or bytes). On `context.append(expr)` when at the bound, the runtime either evicts (e.g. drop oldest) or fails (see error model); it does **not** allow context to grow beyond N.
-2. **Configuration well-formedness:** `env` is a finite map; `context` is a sequence of values; `memory` is a key-value map; `tool_registry` is a map from tool names to handlers; `program` is a valid remaining program (or the empty program). No component is undefined or malformed.
+1. **Context bound (Token Economics / Gas):** `context` is measured in exact token counts (like Gas in EVM). A `token_budget` is set. On `context.append(expr)`, if appending would exceed the budget, the VM executes the **Entropic Expansion Policy**: semantic summarization or Priority Stack eviction. The VM does **not** allow context to silently overflow context windows.
+2. **Priority Stack Preservation:** The `context` is internally a priority stack. P0 (System/Mission) is never evicted. P1 (Working Plan/Scratchpad) is summarized. P2 (Chat/History) is dropped first.
+3. **Configuration well-formedness:** `env` is a finite map; `context` is a valid priority stack; `memory` is a key-value map; `tool_registry` is a map from tool names to handlers; `program` is a valid remaining program (or the empty program). No component is undefined or malformed.
 3. **Serializable state:** The tuple `(env, context, memory, mailbox, turn_state)` is sufficient to restore execution (with program and tool_registry provided separately). So checkpointing does not lose information needed to resume.
 
 Implementations must maintain these invariants. The transition relation is defined so that every step preserves them (context bound by eviction or fail on append; well-formedness by construction; serializable state unchanged by step).
