@@ -25,8 +25,9 @@ fn test_spawn_syntax() {
     return pid; // Should return a PID value
     "#;
     let val = run(source);
-    if let Value::Pid(id) = val {
-        assert!(id > 1); // Root is 1, child is > 1
+    if let Value::Pid { node_id, local_pid } = val {
+        assert_eq!(node_id, "local");
+        assert!(local_pid > 1); // Root is 1, child is > 1
     } else {
         panic!("Expected PID, got {:?}", val);
     }
@@ -99,4 +100,79 @@ fn test_send_receive_syntax() {
     
     let val = run(source);
     assert_eq!(val, Value::Bool(true));
+}
+
+#[test]
+fn test_monitor_unidirectional_signal() {
+    let source = r#"
+    // Spawn a child that immediately panics (throws)
+    let child = spawn turn() {
+        throw "I panicked";
+    };
+    
+    // Parent monitors child
+    monitor child;
+    
+    // Attempt to receive the DOWN signal
+    // The VM scheduler will complete the child due to the unhandled throw,
+    // and route a DOWN message back to the parent mailbox.
+    let msg = receive;
+    return msg;
+    "#;
+    
+    let val = run(source);
+    
+    if let Value::Map(m) = val {
+        assert_eq!(m.get("type"), Some(&Value::Str("DOWN".to_string())));
+        assert_eq!(m.get("reason"), Some(&Value::Str("I panicked".to_string())));
+    } else {
+        panic!("Expected DOWN message Map, got {:?}", val);
+    }
+}
+
+#[test]
+fn test_link_bidirectional_exit_signal() {
+    let source = r#"
+    // Spawn a child that returns cleanly
+    let child = spawn turn() {
+        return "clean exit";
+    };
+    
+    // Parent links child
+    link child;
+    
+    // The VM scheduler will complete the child cleanly,
+    // and route an EXIT message back to the parent mailbox because of the link.
+    let msg = receive;
+    return msg; // We should get the exit message map
+    "#;
+    
+    let val = run(source);
+    
+    if let Value::Map(m) = val {
+        assert_eq!(m.get("type"), Some(&Value::Str("EXIT".to_string())));
+        assert_eq!(m.get("reason"), Some(&Value::Str("clean exit".to_string())));
+    } else {
+        panic!("Expected EXIT message Map, got {:?}", val);
+    }
+}
+
+#[test]
+fn test_spawn_remote_syntax() {
+    let source = r#"
+    let success = spawn_remote("192.168.1.5", turn() {
+        return 42;
+    });
+    return success;
+    "#;
+    
+    let val = run(source);
+    // Since we don't have a real network switchboard attached in the test runner,
+    // the generic `send_remote` proxy will fail and return false, printing a warning.
+    // This correctly tests that the syntax parses, compiles, and evaluates.
+    if let Value::Bool(b) = val {
+        assert_eq!(b, false);
+    } else {
+        panic!("Expected boolean result from spawn_remote, got {:?}", val);
+    }
 }

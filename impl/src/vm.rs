@@ -35,6 +35,8 @@ pub struct Process {
     pub runtime: Runtime,
     pub mailbox: VecDeque<Value>,
     pub token_budget: usize,
+    pub links: Vec<u64>,
+    pub monitors: Vec<u64>,
 }
 
 #[derive(Debug)]
@@ -69,6 +71,8 @@ impl Vm {
             runtime: Runtime::new(),
             mailbox: VecDeque::new(),
             token_budget: 1_000_000,
+            links: Vec::new(),
+            monitors: Vec::new(),
         };
 
         let mut scheduler = VecDeque::new();
@@ -88,6 +92,8 @@ impl Vm {
             runtime: state.runtime,
             mailbox: state.mailbox,
             token_budget: state.token_budget,
+            links: Vec::new(), // Reconstructed processes won't have historic links in this mocked resume yet, to be solved in Durable Heap
+            monitors: Vec::new(),
         };
         
         process.stack.push(tool_result);
@@ -101,6 +107,49 @@ impl Vm {
         }
     }
 
+    /// Snapshots the entire VM state to a durable heap file.
+    pub fn snapshot(&self, current_process: &Process, path: &str) -> std::io::Result<()> {
+        let state = VmState {
+            pid: current_process.pid,
+            frames: current_process.frames.clone(),
+            stack: current_process.stack.clone(),
+            runtime: current_process.runtime.clone(),
+            mailbox: current_process.mailbox.clone(),
+            scheduler: self.scheduler.clone(),
+            next_pid: self.next_pid,
+            token_budget: current_process.token_budget,
+        };
+        let data = serde_json::to_string_pretty(&state)?;
+        std::fs::write(path, data)?;
+        Ok(())
+    }
+
+    /// Resumes the VM from a durable heap file.
+    pub fn resume_from_disk(path: &str) -> std::io::Result<Self> {
+        let data = std::fs::read_to_string(path)?;
+        let state: VmState = serde_json::from_str(&data)?;
+        
+        let process = Process {
+            pid: state.pid,
+            frames: state.frames,
+            stack: state.stack,
+            runtime: state.runtime,
+            mailbox: state.mailbox,
+            token_budget: state.token_budget,
+            // Simple reconstruction. A true WAL would rebuild the entire process table links.
+            links: Vec::new(), 
+            monitors: Vec::new(),
+        };
+        
+        let mut scheduler = state.scheduler;
+        scheduler.push_back(process);
+        
+        Ok(Self {
+            scheduler,
+            next_pid: state.next_pid,
+        })
+    }
+
     pub fn resume_with_error(state: VmState, error_msg: String) -> Self {
         let process = Process {
             pid: state.pid,
@@ -109,6 +158,8 @@ impl Vm {
             runtime: state.runtime,
             mailbox: state.mailbox,
             token_budget: state.token_budget,
+            links: Vec::new(),
+            monitors: Vec::new(),
         };
         
         let mut scheduler = state.scheduler;
@@ -160,6 +211,37 @@ impl Vm {
                     self.scheduler.push_back(process);
                 }
                 VmResult::Complete(v) => {
+                    // Route exit signals to linked and monitored processes
+                    let reason = if let Value::Str(ref _s) = v {
+                        v.clone() // Propagate the specific return value or panic string
+                    } else if v != Value::Null {
+                        v.clone()
+                    } else {
+                        Value::Str("normal".to_string())
+                    };
+
+                    // Broadcast to links (bidirectional expectation, so a link crash usually crashes the parent unless trapped, but Turn handles this as a standard mailbox priority message for now)
+                    for linked_pid in &process.links {
+                        if let Some(target) = self.scheduler.iter_mut().find(|p| p.pid == *linked_pid) {
+                            let mut map = indexmap::IndexMap::new();
+                            map.insert("type".to_string(), Value::Str("EXIT".to_string()));
+                            map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: process.pid });
+                            map.insert("reason".to_string(), reason.clone());
+                            target.mailbox.push_back(Value::Map(map));
+                        }
+                    }
+
+                    // Broadcast to monitors (unidirectional observation)
+                    for monitor_pid in &process.monitors {
+                        if let Some(target) = self.scheduler.iter_mut().find(|p| p.pid == *monitor_pid) {
+                            let mut map = indexmap::IndexMap::new();
+                            map.insert("type".to_string(), Value::Str("DOWN".to_string()));
+                            map.insert("pid".to_string(), Value::Pid { node_id: "local".to_string(), local_pid: process.pid });
+                            map.insert("reason".to_string(), reason.clone());
+                            target.mailbox.push_back(Value::Map(map));
+                        }
+                    }
+
                     if process.pid == 1 {
                         return VmResult::Complete(v);
                     }
@@ -243,11 +325,39 @@ impl Vm {
                              runtime: Runtime::new(),
                              mailbox: VecDeque::new(),
                              token_budget: 100_000, // Spawned tasks default gas limit
+                             links: Vec::new(),
+                             monitors: Vec::new(),
                          };
                          new_process.runtime.env = env;
                          
                          self.scheduler.push_back(new_process);
-                         process.stack.push(Value::Pid(new_pid));
+                         process.stack.push(Value::Pid { node_id: "local".to_string(), local_pid: new_pid });
+                    } else {
+                        process.stack.push(Value::Null);
+                    }
+                }
+                Instr::SpawnRemote => {
+                    let closure_val = process.stack.pop().unwrap_or(Value::Null);
+                    let node_ip_val = process.stack.pop().unwrap_or(Value::Null);
+                    
+                    if let (Value::Str(node_id), Value::Closure { .. }) = (&node_ip_val, &closure_val) {
+                        let mut success = false;
+                        if let Some(sb) = &process.runtime.switchboard {
+                            // By convention, a Local PID of 0 on a SpawnRemote represents the "Host System" 
+                            // asking to spawn a new root process on that node.
+                            if sb.send_remote(node_id, 0, closure_val.clone()).is_ok() {
+                                success = true;
+                                // We don't have the remote PID synchronously. For a robust actor model,
+                                // the remote node would send a message back with its PID.
+                                // For now, we return a generic "Spawned" boolean or a proxy PID.
+                                process.stack.push(Value::Bool(true));
+                            }
+                        }
+                        
+                        if !success {
+                            println!("[VM] Warning: SpawnRemote to {} failed (no switchboard or network error).", node_id);
+                            process.stack.push(Value::Bool(false));
+                        }
                     } else {
                         process.stack.push(Value::Null);
                     }
@@ -256,18 +366,30 @@ impl Vm {
                     let msg = process.stack.pop().unwrap_or(Value::Null);
                     let pid_val = process.stack.pop().unwrap_or(Value::Null);
                     
-                    if let Value::Pid(pid) = pid_val {
+                    if let Value::Pid { node_id, local_pid } = pid_val {
                         let mut found = false;
-                        for p in &mut self.scheduler {
-                            if p.pid == pid {
-                                p.mailbox.push_back(msg.clone());
-                                found = true;
-                                break;
+                        if node_id != "local" {
+                            // Remote TCP/gRPC Proxy via Host Switchboard
+                            if let Some(sb) = &process.runtime.switchboard {
+                                if sb.send_remote(&node_id, local_pid, msg.clone()).is_ok() {
+                                    found = true;
+                                }
+                            } else {
+                                println!("[VM] Warning: Remote send attempted to {}, but no NetworkSwitchboard attached.", node_id);
                             }
-                        }
-                        if pid == process.pid {
-                            process.mailbox.push_back(msg);
-                            found = true;
+                        } else {
+                            // Local Memory Proxy
+                            for p in &mut self.scheduler {
+                                if p.pid == local_pid {
+                                    p.mailbox.push_back(msg.clone());
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if local_pid == process.pid {
+                                process.mailbox.push_back(msg);
+                                found = true;
+                            }
                         }
                         process.stack.push(Value::Bool(found));
                     } else {
@@ -281,6 +403,48 @@ impl Vm {
                         // Yield and retry same instruction later
                         process.frames[frame_idx].ip -= 1;
                         return VmResult::Yielded; 
+                    }
+                }
+                Instr::Link => {
+                    let pid_val = process.stack.pop().unwrap_or(Value::Null);
+                    if let Value::Pid { node_id, local_pid } = pid_val {
+                        // TODO: Distributed links
+                        if node_id == "local" && !process.links.contains(&local_pid) {
+                            process.links.push(local_pid);
+                            // Bidirectional link: add ourselves to the target's links
+                            for target in &mut self.scheduler {
+                                if target.pid == local_pid {
+                                    if !target.links.contains(&process.pid) {
+                                        target.links.push(process.pid);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        process.stack.push(Value::Bool(true));
+                    } else {
+                        process.stack.push(Value::Bool(false));
+                    }
+                }
+                Instr::Monitor => {
+                    let pid_val = process.stack.pop().unwrap_or(Value::Null);
+                    if let Value::Pid { node_id, local_pid } = pid_val {
+                        // Unidirectional monitor: Add ourselves to target's monitors array
+                        let mut found = false;
+                        if node_id == "local" {
+                            for target in &mut self.scheduler {
+                                if target.pid == local_pid {
+                                    if !target.monitors.contains(&process.pid) {
+                                        target.monitors.push(process.pid);
+                                    }
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        process.stack.push(Value::Bool(found));
+                    } else {
+                        process.stack.push(Value::Bool(false));
                     }
                 }
                 Instr::Confidence => {
@@ -302,13 +466,23 @@ impl Vm {
                         next_pid: self.next_pid,
                         token_budget: process.token_budget,
                     };
+                    
+                    // Orthogonal Persistence: Flush active memory to local WAL
+                    let _ = self.snapshot(&process, ".turn_heap.json");
+                    
                     return VmResult::Suspended {
                         tool_name: "sys_suspend".to_string(),
                         arg: Value::Null,
                         continuation: state,
                     };
                 }
-                Instr::Infer(ty) => {
+                Instr::Infer(ty, tool_count) => {
+                    let mut tools = Vec::new();
+                    for _ in 0..tool_count {
+                        tools.push(process.stack.pop().unwrap_or(Value::Null));
+                    }
+                    tools.reverse(); // stack pops in reverse order
+
                     let prompt_val = process.stack.pop().unwrap_or(Value::Null);
                     // Resolve named struct placeholders (Struct("Name", {}))
                     // against runtime-registered struct definitions before prompting LLM.
@@ -322,12 +496,37 @@ impl Vm {
                         }
                         other => other,
                     };
-                    let ty_str = format!("{:?}", resolved_ty);
+                    let ty_str = serde_json::to_string(&resolved_ty).unwrap_or_else(|_| "{}".to_string());
+                    
+                    // Semantic Auto-Recall (Phase 3)
+                    // Take the user's prompt string, generate a vector representation behind the scenes,
+                    // query the HNSW Semantic Graph for the Top 3 most semantically similar memories,
+                    // and prepend them into the Token Budget context payload automatically.
+                    let mut auto_context = Vec::new();
+                    if let Value::Str(prompt_str) = &prompt_val {
+                        if let Some(query_emb) = crate::llm_tools::get_embedding(prompt_str) {
+                            let semantic_matches = process.runtime.memory.search(&query_emb, 3);
+                            for memory_val in semantic_matches {
+                                auto_context.push(memory_val);
+                            }
+                            // Bill tokens for the vector similarity operation
+                            if process.token_budget >= 50 {
+                                process.token_budget -= 50;
+                            }
+                        }
+                    }
+                    
+                    // Combine Auto-Recall + Explicit Context stack
+                    let mut combined_context = auto_context;
+                    combined_context.extend(process.runtime.context.to_values());
                     
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
                     map.insert("schema".to_string(), Value::Str(ty_str));
-                    map.insert("context".to_string(), Value::List(process.runtime.context.to_values()));
+                    map.insert("context".to_string(), Value::List(combined_context));
+                    if tool_count > 0 {
+                        map.insert("tools".to_string(), Value::List(tools));
+                    }
                     
                     process.frames[frame_idx].env = process.runtime.env.clone();
                     let state = VmState {
@@ -373,70 +572,108 @@ impl Vm {
                 Instr::Remember => {
                     let val = process.stack.pop().unwrap_or(Value::Null);
                     let key = process.stack.pop().unwrap_or(Value::Null);
-                    let _ = process.runtime.remember(key, val);
+                    
+                    // Auto-Embedding Logic for Semantic RAM
+                    // If the user did not provide an explicit embedding inside a Struct/Map,
+                    // the Virtual Machine generates one implicitly via Azure OpenAI
+                    let (mut id, mut emb) = match &key {
+                        Value::Map(m) | Value::Struct(_, m) => {
+                            let k_id = m.get("id").and_then(|v| crate::runtime::value_to_key(v).ok()).unwrap_or_else(|| "unnamed".to_string());
+                            let k_emb = match m.get("embedding") {
+                                Some(Value::Vec(v)) => Some(v.clone()),
+                                _ => None,
+                            };
+                            (k_id, k_emb)
+                        }
+                        _ => (crate::runtime::value_to_key(&key).unwrap_or_default(), None)
+                    };
+                    
+                    if emb.is_none() && !id.is_empty() {
+                         // Generate implicit vector coordinates representing the semantic memory
+                         emb = crate::llm_tools::get_embedding(&id);
+                         // Bill the process for the background LLM operation
+                         if process.token_budget >= 50 {
+                             process.token_budget -= 50;
+                         }
+                    }
+                    
+                    process.runtime.memory.insert(id, emb, val);
                 }
                 Instr::Add => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(add_values(&a, &b));
                 }
                 Instr::Sub => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(sub_values(&a, &b));
                 }
                 Instr::Mul => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(mul_values(&a, &b));
                 }
                 Instr::Div => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(div_values(&a, &b));
                 }
                 Instr::Eq => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(eq_values(&a, &b));
                 }
                 Instr::Ne => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(ne_values(&a, &b));
                 }
                 Instr::Lt => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(lt_values(&a, &b));
                 }
                 Instr::Gt => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(gt_values(&a, &b));
                 }
                 Instr::Le => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(le_values(&a, &b));
                 }
                 Instr::Ge => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(ge_values(&a, &b));
                 }
                 Instr::Not => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(not_value(&v));
                 }
                 Instr::And => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(and_values(&a, &b));
                 }
                 Instr::Or => {
                     let b = process.stack.pop().unwrap_or(Value::Null);
                     let a = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(a, Value::Cap(_)) || matches!(b, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be observed".to_string())); }
                     process.stack.push(or_values(&a, &b));
                 }
                 Instr::Jump(target) => {
@@ -444,14 +681,17 @@ impl Vm {
                 }
                 Instr::JumpIfFalse(target) => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string())); }
                     if v.is_falsy() { process.frames[frame_idx].ip = target as usize; }
                 }
                 Instr::JumpIfTrue(target) => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be branched upon".to_string())); }
                     if v.is_truthy() { process.frames[frame_idx].ip = target as usize; }
                 }
                 Instr::ContextAppend => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
+                    if matches!(v, Value::Cap(_)) { return VmResult::Complete(Value::Str("PrivilegeViolation: Opaque capabilities cannot be appended to Agent context".to_string())); }
                     let _ = process.runtime.append_context(v);
                 }
                 Instr::EnterTurn(after_addr) => {
@@ -526,12 +766,12 @@ impl Vm {
                                 continuation: state,
                             };
                         }
-                        Value::Closure { code, ip, env, params } => {
+                        Value::Closure { is_tool: _, code, ip, env, params } => {
                             let mut new_env = env.clone();
                             let mut mem_inserts = Vec::new();
 
                             if params.len() == 1 {
-                                let name = &params[0];
+                                let name = &params[0].0;
                                 match final_arg {
                                     Value::Map(m) => {
                                         if m.contains_key(name) {
@@ -575,8 +815,8 @@ impl Vm {
                             } else if let Value::List(items) = final_arg {
                                 for (i, item) in items.into_iter().enumerate() {
                                     if i < params.len() {
-                                        mem_inserts.push((params[i].clone(), item.clone()));
-                                        new_env.insert(params[i].clone(), item);
+                                        mem_inserts.push((params[i].0.clone(), item.clone()));
+                                        new_env.insert(params[i].0.clone(), item);
                                     }
                                 }
                             } else if !final_arg.is_falsy() {
@@ -623,12 +863,12 @@ impl Vm {
                                 continuation: state,
                             };
                         }
-                        Value::Closure { code, ip, env, params } => {
+                        Value::Closure { is_tool: _, code, ip, env, params } => {
                             let mut new_env = env.clone();
                             let mut mem_inserts = Vec::new();
 
                             if params.len() == 1 {
-                                let name = &params[0];
+                                let name = &params[0].0;
                                 match arg {
                                     Value::Map(m) => {
                                         if m.contains_key(name) {
@@ -672,8 +912,8 @@ impl Vm {
                             } else if let Value::List(items) = arg {
                                 for (i, item) in items.into_iter().enumerate() {
                                     if i < params.len() {
-                                        mem_inserts.push((params[i].clone(), item.clone()));
-                                        new_env.insert(params[i].clone(), item);
+                                        mem_inserts.push((params[i].0.clone(), item.clone()));
+                                        new_env.insert(params[i].0.clone(), item);
                                     }
                                 }
                             } else if !arg.is_falsy() {
@@ -781,10 +1021,10 @@ impl Vm {
                     };
                     process.stack.push(res);
                 }
-                Instr::MakeTurn(offset, params) => {
+                Instr::MakeTurn(offset, is_tool, params) => {
                     let code = process.frames[frame_idx].code.clone();
                     let env = process.runtime.env.clone();
-                    process.stack.push(Value::Closure { code, ip: offset as usize, env, params });
+                    process.stack.push(Value::Closure { is_tool, code, ip: offset as usize, env, params: params.clone() });
                 }
                 Instr::LoadModule => {
                     let p_val = process.stack.pop().unwrap_or(Value::Null);
@@ -861,7 +1101,7 @@ impl Vm {
                 true
             },
             (Type::Function(_arg_ty, _ret_ty), Value::Closure { .. }) => true,
-            (Type::Pid, Value::Pid(_)) => true,
+            (Type::Pid, Value::Pid { .. }) => true,
             (Type::Any, _) => true,
             (Type::Void, Value::Null) => true,
             _ => false,

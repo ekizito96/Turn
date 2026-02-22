@@ -207,13 +207,13 @@ impl Compiler {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
             }
-            Expr::Turn { params, ret_ty: _, body, .. } => {
+            Expr::Turn { is_tool, params, ret_ty: _, body, .. } => {
                 let jump_over = self.emit(Instr::Jump(0));
                 let start_addr = self.code.len() as u32;
 
                 // Parameter type checks
                 // Assumes arguments are already in env (via CallTool)
-                for (name, _, ty) in params {
+                for (name, _, ty, _) in params {
                     if let Some(t) = ty {
                         self.emit(Instr::Load(name.clone()));
                         self.emit(Instr::CheckType(t.clone()));
@@ -230,11 +230,13 @@ impl Compiler {
                 }
                 let after_addr = self.code.len() as u32;
                 self.patch_jump(jump_over, after_addr);
-                let param_names = params.iter().map(|(n, _, _)| n.clone()).collect();
-                self.emit(Instr::MakeTurn(start_addr, param_names));
+                let param_info = params.iter().map(|(n, _, ty, is_sec)| (n.clone(), ty.clone(), *is_sec)).collect();
+                self.emit(Instr::MakeTurn(start_addr, *is_tool, param_info));
             }
-            Expr::Infer { target_ty, body, .. } => {
-                // Compile body as an expression (leave result on stack)
+            Expr::Infer { target_ty, tools, body, .. } => {
+                let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
+                
+                // Compile body as an expression (leave result on stack, acts as the prompt)
                 let len = body.stmts.len();
                 if len == 0 {
                     self.emit(Instr::PushNull);
@@ -249,9 +251,6 @@ impl Compiler {
                                 _ => {
                                     self.compile_stmt(stmt);
                                     // Result is Null if stmt is not an expression
-                                    // But wait, if stmt was `Let`, stack is empty (Let pops).
-                                    // So we must push Null to satisfy `Infer` instruction expectation.
-                                    // But `compile_stmt` keeps stack balanced (0 net change usually).
                                     self.emit(Instr::PushNull); 
                                 }
                             }
@@ -260,7 +259,15 @@ impl Compiler {
                         }
                     }
                 }
-                self.emit(Instr::Infer(target_ty.clone()));
+
+                // Compile tools AFTER body, so they sit on top of the prompt in the stack
+                if let Some(ts) = tools {
+                    for t in ts {
+                        self.compile_expr(t);
+                    }
+                }
+                
+                self.emit(Instr::Infer(target_ty.clone(), tool_count as u32));
             }
             Expr::Index { target, index, .. } => {
                 self.compile_expr(target);
@@ -326,6 +333,11 @@ impl Compiler {
                 self.compile_expr(expr);
                 self.emit(Instr::Spawn);
             }
+            Expr::SpawnRemote { node_id, closure, .. } => {
+                self.compile_expr(node_id);
+                self.compile_expr(closure);
+                self.emit(Instr::SpawnRemote);
+            }
             Expr::Send { pid, msg, .. } => {
                 self.compile_expr(pid);
                 self.compile_expr(msg);
@@ -333,6 +345,14 @@ impl Compiler {
             }
             Expr::Receive { .. } => {
                 self.emit(Instr::Receive);
+            }
+            Expr::Link { pid, .. } => {
+                self.compile_expr(pid);
+                self.emit(Instr::Link);
+            }
+            Expr::Monitor { pid, .. } => {
+                self.compile_expr(pid);
+                self.emit(Instr::Monitor);
             }
             Expr::Confidence { expr, .. } => {
                 self.compile_expr(expr);

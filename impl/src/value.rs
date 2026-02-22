@@ -18,13 +18,16 @@ pub enum Value {
     Map(IndexMap<String, Value>),
     Struct(String, IndexMap<String, Value>),
     Closure {
+        is_tool: bool,
         code: Arc<Vec<Instr>>,
         ip: usize,
         env: HashMap<String, Value>,
-        params: Vec<String>,
+        params: Vec<(String, Option<crate::ast::Type>, bool)>,
     },
-    Pid(u64), // Process ID
+    Pid { node_id: String, local_pid: u64 }, // Globally Addressable Process ID
     Vec(Vec<f64>),
+    Cap(usize), // Local OCap Handle
+    CapProxy { origin_node: String, id: usize }, // Remote OCap
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
 }
 
@@ -38,8 +41,10 @@ impl Value {
             Value::List(l) => l.is_empty(),
             Value::Map(m) => m.is_empty(),
             Value::Struct(_, m) => m.is_empty(),
-            Value::Pid(_) => false,
+            Value::Pid { .. } => false,
             Value::Vec(v) => v.is_empty(),
+            Value::Cap(_) => false,
+            Value::CapProxy { .. } => false,
             Value::Uncertain(v, _) => v.is_falsy(),
             Value::Closure { .. } => false,
         }
@@ -82,7 +87,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
-            Value::Pid(id) => write!(f, "<pid {}>", id),
+            Value::Pid { node_id, local_pid } => write!(f, "<pid {}@{}>", local_pid, node_id),
             Value::Vec(v) => {
                 write!(f, "vec[")?;
                 for (i, val) in v.iter().enumerate() {
@@ -91,6 +96,8 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             }
+            Value::Cap(c) => write!(f, "<capability {}>", c),
+            Value::CapProxy { origin_node, id } => write!(f, "<capability_proxy {}@{}>", id, origin_node),
             Value::Uncertain(v, p) => write!(f, "{} ({}%)", v, p * 100.0),
         }
     }

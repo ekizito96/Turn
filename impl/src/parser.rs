@@ -477,10 +477,41 @@ impl Parser {
             Some(Token::Infer) => {
                 self.next();
                 let target_ty = self.parse_type()?;
+                let tools = if matches!(self.peek(), Some(Token::With)) {
+                    self.next(); // consume `with`
+                    self.expect(Token::LBracket)?;
+                    let mut items = Vec::new();
+                    while !matches!(self.peek(), Some(Token::RBracket) | Some(Token::Eof)) {
+                        items.push(self.parse_expr()?);
+                        if matches!(self.peek(), Some(Token::Comma)) {
+                            self.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RBracket)?;
+                    Some(items)
+                } else {
+                    None
+                };
                 let body = self.parse_block()?;
                 Ok(Expr::Infer {
                     target_ty,
+                    tools,
                     body,
+                    span,
+                })
+            }
+            Some(Token::SpawnRemote) => {
+                self.next();
+                self.expect(Token::LParen)?;
+                let node_id = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let closure = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SpawnRemote {
+                    node_id: Box::new(node_id),
+                    closure: Box::new(closure),
                     span,
                 })
             }
@@ -496,6 +527,22 @@ impl Parser {
                 Ok(Expr::Send {
                     pid: Box::new(pid),
                     msg: Box::new(msg),
+                    span,
+                })
+            }
+            Some(Token::Link) => {
+                self.next();
+                let pid = self.parse_unary()?;
+                Ok(Expr::Link {
+                    pid: Box::new(pid),
+                    span,
+                })
+            }
+            Some(Token::Monitor) => {
+                self.next();
+                let pid = self.parse_unary()?;
+                Ok(Expr::Monitor {
+                    pid: Box::new(pid),
                     span,
                 })
             }
@@ -691,11 +738,22 @@ impl Parser {
                 self.expect(Token::RBracket)?;
                 Ok(Expr::Vec { items, span })
             }
-            Token::Turn => {
+            Token::Tool | Token::Turn => {
+                let is_tool = t.token == Token::Tool;
+                if is_tool {
+                    self.expect(Token::Turn)?;
+                }
+                
                 let mut params = Vec::new();
                 if matches!(self.peek(), Some(Token::LParen)) {
                     self.next(); // consume (
                     while !matches!(self.peek(), Some(Token::RParen) | Some(Token::Eof)) {
+                         let mut is_secret = false;
+                         if matches!(self.peek(), Some(Token::Secret)) {
+                             self.next();
+                             is_secret = true;
+                         }
+
                          let name_token = self.next().ok_or(ParseError::UnexpectedEof)?;
                          let (name, name_span) = match name_token.token {
                              Token::Id(s) => (s, name_token.span),
@@ -709,7 +767,7 @@ impl Parser {
                              None
                          };
                          
-                         params.push((name, name_span, ty));
+                         params.push((name, name_span, ty, is_secret));
                          
                          if matches!(self.peek(), Some(Token::Comma)) {
                              self.next();
@@ -728,7 +786,7 @@ impl Parser {
                 };
 
                 let body = self.parse_block()?;
-                Ok(Expr::Turn { params, ret_ty, body, span })
+                Ok(Expr::Turn { is_tool, params, ret_ty, body, span })
             }
             Token::LParen => {
                 let inner = self.parse_expr()?;

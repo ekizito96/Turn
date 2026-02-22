@@ -30,8 +30,8 @@ fn test_infer_suspension_flow() {
             
             if let Value::Map(m) = arg {
                 assert_eq!(m.get("prompt").unwrap(), &Value::Str("Calculate 2+2".to_string()));
-                // Type debug format of Num is "Num"
-                assert_eq!(m.get("schema").unwrap(), &Value::Str("Num".to_string()));
+                // Type stringified by Serde is "\"Num\""
+                assert_eq!(m.get("schema").unwrap(), &Value::Str("\"Num\"".to_string()));
             } else {
                 panic!("Expected Map arg, got {:?}", arg);
             }

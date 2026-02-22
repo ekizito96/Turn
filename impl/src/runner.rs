@@ -13,6 +13,7 @@ pub struct Runner<S: Store> {
     store: S,
     tools: ToolRegistry,
     module_cache: HashMap<String, Value>,
+    injected_caps: HashMap<String, String>,
 }
 
 impl<S: Store> Runner<S> {
@@ -21,7 +22,12 @@ impl<S: Store> Runner<S> {
             store, 
             tools,
             module_cache: HashMap::new(),
+            injected_caps: HashMap::new(),
         }
+    }
+
+    pub fn inject_capability(&mut self, name: &str, secret: &str) {
+        self.injected_caps.insert(name.to_string(), secret.to_string());
     }
 
     fn load_module(&mut self, path: &str, current_file: Option<&PathBuf>) -> Result<Value> {
@@ -223,7 +229,17 @@ impl<S: Store> Runner<S> {
                  
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
-            Vm::new(&code)
+            let mut vm = Vm::new(&code);
+            
+            // Inject OCap Secrets natively from Host
+            if let Some(root) = vm.scheduler.front_mut() {
+                for (name, secret) in &self.injected_caps {
+                    let cap_id = root.runtime.capabilities.mint(secret.clone());
+                    root.runtime.env.insert(name.clone(), Value::Cap(cap_id));
+                }
+            }
+            
+            vm
         };
 
         // 2. Loop

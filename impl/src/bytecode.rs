@@ -53,14 +53,17 @@ pub enum Instr {
     CallMethod(String), // NEW
     LoadModule,
     Index,
-    MakeTurn(u32, Vec<String>),
+    MakeTurn(u32, bool, Vec<(String, Option<Type>, bool)>),
 
     // Concurrency
     Spawn,
+    SpawnRemote,
     Send,
     Receive,
+    Link, // NEW: Bidirectional lifecycle binding
+    Monitor, // NEW: Unidirectional death notification
     Confidence, // NEW
-    Infer(Type), // NEW
+    Infer(Type, u32), // NEW
     Suspend, // NEW
     
     // Control flow

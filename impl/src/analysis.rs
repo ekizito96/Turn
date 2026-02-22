@@ -382,9 +382,9 @@ impl Analysis {
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::And | BinOp::Or => Some(Type::Bool),
                 }
             }
-            Expr::Turn { params, ret_ty, .. } => {
+            Expr::Turn { is_tool: _, params, ret_ty, .. } => {
                 // Infer type as Function(Map<Any>, ret_ty)
-                // Wait, params are (name, span, ty).
+                // Wait, params are (name, span, ty, is_secret).
                 // Function type takes a single Type for arg?
                 // Our tools take a single Value (often Map).
                 // Turn functions take named arguments, which means the caller passes a Map or single value.
@@ -606,6 +606,10 @@ impl Analysis {
                     }
                 }
             }
+            Expr::SpawnRemote { node_id, closure, span: _ } => {
+                self.visit_expr(node_id);
+                self.visit_expr(closure);
+            }
             Expr::Send { pid, msg, span } => {
                 self.visit_expr(pid);
                 self.visit_expr(msg);
@@ -621,9 +625,9 @@ impl Analysis {
             Expr::Id { name, span } => {
                 self.record_usage(name, *span);
             }
-            Expr::Turn { params, ret_ty, body, span, .. } => {
+            Expr::Turn { is_tool: _, params, ret_ty, body, span, .. } => {
                 self.enter_scope(*span, ret_ty.clone());
-                for (name, param_span, ty) in params {
+                for (name, param_span, ty, _is_secret) in params {
                      self.add_definition(name, *param_span, ty.clone());
                 }
                 self.visit_block(body);
@@ -679,6 +683,14 @@ impl Analysis {
                 for (_, val) in entries {
                     self.visit_expr(val);
                 }
+            }
+            Expr::Link { pid, span } => {
+                self.visit_expr(pid);
+                self.check_assignment(&Some(Type::Pid), pid, *span);
+            }
+            Expr::Monitor { pid, span } => {
+                self.visit_expr(pid);
+                self.check_assignment(&Some(Type::Pid), pid, *span);
             }
             Expr::Literal { .. } => {}
         }

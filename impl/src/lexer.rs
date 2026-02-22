@@ -7,8 +7,11 @@ use std::str::Chars;
 pub enum Token {
     // Keywords
     Spawn,
+    SpawnRemote,
     Send,
     Receive,
+    Link,
+    Monitor,
     Vec,
     Turn,
     Let,
@@ -27,6 +30,9 @@ pub enum Token {
     Type, // 'type' keyword for aliases
     Return,
     Infer, // NEW
+    With, // NEW
+    Secret, // NEW
+    Tool, // NEW
     Struct,
     If,
     Else,
@@ -103,6 +109,8 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("spawn", Token::Spawn),
     ("send", Token::Send),
     ("receive", Token::Receive),
+    ("link", Token::Link),
+    ("monitor", Token::Monitor),
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
@@ -119,6 +127,15 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("call", Token::Call),
     ("return", Token::Return),
     ("infer", Token::Infer), // NEW
+    ("with", Token::With), // NEW
+    ("secret", Token::Secret), // NEW
+    ("tool", Token::Tool), // NEW
+    ("spawn", Token::Spawn),
+    ("spawn_remote", Token::SpawnRemote),
+    ("send", Token::Send),
+    ("receive", Token::Receive),
+    ("link", Token::Link),
+    ("monitor", Token::Monitor),
     ("struct", Token::Struct),
     ("impl", Token::Impl),
     ("type", Token::Type),

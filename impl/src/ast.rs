@@ -17,6 +17,7 @@ pub enum Type {
     Void,
     Pid,
     Vec,
+    Cap,
 }
 
 #[derive(Debug, Clone)]
@@ -119,8 +120,11 @@ pub enum Expr {
     Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
     Use { module: Box<Expr>, span: Span },
     Spawn { expr: Box<Expr>, span: Span },
+    SpawnRemote { node_id: Box<Expr>, closure: Box<Expr>, span: Span },
     Send { pid: Box<Expr>, msg: Box<Expr>, span: Span },
     Receive { span: Span },
+    Link { pid: Box<Expr>, span: Span },
+    Monitor { pid: Box<Expr>, span: Span },
     Vec { items: Vec<Expr>, span: Span },
     Confidence { expr: Box<Expr>, span: Span },
     StructInit {
@@ -130,13 +134,15 @@ pub enum Expr {
     },
     Index { target: Box<Expr>, index: Box<Expr>, span: Span },
     Turn {
-        params: Vec<(String, Span, Option<Type>)>,
+        is_tool: bool,
+        params: Vec<(String, Span, Option<Type>, bool)>, // bool is `is_secret`
         ret_ty: Option<Type>,
         body: Block,
         span: Span,
     },
     Infer {
         target_ty: Type,
+        tools: Option<Vec<Expr>>, // `with [tool1, tool2]`
         body: Block,
         span: Span,
     },
@@ -172,8 +178,11 @@ pub enum Expr {
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
+            Expr::SpawnRemote { span, .. } => *span,
             Expr::Send { span, .. } => *span,
             Expr::Receive { span } => *span,
+            Expr::Link { span, .. } => *span,
+            Expr::Monitor { span, .. } => *span,
             Expr::Vec { span, .. } => *span,
             Expr::Confidence { span, .. } => *span,
             Expr::Index { span, .. } => *span,

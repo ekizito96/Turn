@@ -13,6 +13,7 @@ pub mod value;
 pub mod vm;
 pub mod lsp;
 pub mod std_lib;
+pub mod llm_tools;
 
 pub use analysis::*;
 pub use ast::*;
@@ -28,6 +29,7 @@ pub use tools::*;
 pub use value::*;
 pub use vm::*;
 pub use lsp::*;
+pub use llm_tools::*;
 
 /// Converts a byte offset into source to (line, column) for error messages.
 pub fn offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {

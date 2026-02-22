@@ -87,10 +87,15 @@ fn main() -> Result<()> {
             
             // Setup Store and Tools
             let store = FileStore::new(store);
-            let tools = ToolRegistry::new();
+            let mut tools = ToolRegistry::new();
+            turn::llm_tools::register_advanced_llm(&mut tools);
             
             // Setup Runner
             let mut runner = Runner::new(store, tools);
+            
+            if let Ok(key) = std::env::var("AZURE_OPENAI_API_KEY") {
+                runner.inject_capability("AZURE_OPENAI_API_KEY", &key);
+            }
             
             // Run
             match runner.run(&id, &source_content, Some(file.clone())) {

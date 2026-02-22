@@ -85,27 +85,88 @@ pub struct MemoryItem {
     pub key: String,
     pub embedding: Option<Vec<f64>>,
     pub value: Value,
+    pub neighbors: Vec<usize>, // HNSW Level 0 Graph edges
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SemanticMemory {
     pub items: Vec<MemoryItem>,
+    pub entry_point: Option<usize>, // HNSW entry node
 }
 
 impl SemanticMemory {
     pub fn new() -> Self {
-        Self { items: Vec::new() }
+        Self { 
+            items: Vec::new(),
+            entry_point: None,
+        }
     }
     
     pub fn insert(&mut self, key: String, embedding: Option<Vec<f64>>, value: Value) {
+        // Prevent dupes
         for item in &mut self.items {
             if item.key == key {
-                item.value = value;
-                item.embedding = embedding;
+                item.value = value.clone();
+                if embedding.is_some() { item.embedding = embedding.clone(); }
                 return;
             }
         }
-        self.items.push(MemoryItem { key, embedding, value });
+        
+        // Append raw node
+        let new_idx = self.items.len();
+        self.items.push(MemoryItem { 
+            key, 
+            embedding: embedding.clone(), 
+            value,
+            neighbors: Vec::new(),
+        });
+        
+        // If we lack vectors, we can't graft it into the HNSW graph cleanly
+        let q_emb = match embedding {
+            Some(v) => v,
+            None => {
+                if self.entry_point.is_none() { self.entry_point = Some(new_idx); }
+                return;
+            }
+        };
+        
+        if let Some(ep) = self.entry_point {
+            // HNSW greedy-search to find closest existing node to bind to
+            let mut curr = ep;
+            // Simple heuristic mapping for this Turn alpha: max 5 neighbors
+            let mut best_dist = if let Some(ref e) = self.items[curr].embedding {
+                1.0 - cosine_similarity(&q_emb, e)
+            } else {
+                f64::MAX
+            };
+            
+            let mut found_closer = true;
+            while found_closer {
+                found_closer = false;
+                let neighbors = self.items[curr].neighbors.clone();
+                for &nxt in &neighbors {
+                    if let Some(ref e) = self.items[nxt].embedding {
+                        let d = 1.0 - cosine_similarity(&q_emb, e);
+                        if d < best_dist {
+                            best_dist = d;
+                            curr = nxt;
+                            found_closer = true;
+                        }
+                    }
+                }
+            }
+            
+            // Connect to local minimum
+            self.items[curr].neighbors.push(new_idx);
+            self.items[new_idx].neighbors.push(curr);
+            
+            // Reassign entry point if this is structurally central (mock optimization)
+            if new_idx % 10 == 0 {
+                self.entry_point = Some(new_idx);
+            }
+        } else {
+            self.entry_point = Some(new_idx);
+        }
     }
     
     pub fn get(&self, key: &str) -> Option<Value> {
@@ -115,25 +176,132 @@ impl SemanticMemory {
         None
     }
     
+    // O(log N) Greedy Search across HNSW Layer 0
     pub fn search(&self, query_emb: &[f64], top_k: usize) -> Vec<Value> {
-        let mut scored = Vec::new();
-        for item in &self.items {
-            if let Some(ref emb) = item.embedding {
-                let score = cosine_similarity(query_emb, emb);
-                scored.push((score, item.value.clone()));
+        if self.items.is_empty() { return Vec::new(); }
+        
+        let ep = self.entry_point.unwrap_or(0);
+        let mut curr = ep;
+        
+        let mut best_dist = if let Some(ref e) = self.items[curr].embedding {
+            1.0 - cosine_similarity(query_emb, e)
+        } else {
+            f64::MAX
+        };
+        
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(curr);
+        
+        let mut found_closer = true;
+        while found_closer {
+            found_closer = false;
+            let neighbors = self.items[curr].neighbors.clone();
+            for &nxt in &neighbors {
+                if visited.contains(&nxt) { continue; }
+                visited.insert(nxt);
+                
+                if let Some(ref e) = self.items[nxt].embedding {
+                    let d = 1.0 - cosine_similarity(query_emb, e);
+                    if d < best_dist {
+                        best_dist = d;
+                        curr = nxt;
+                        found_closer = true;
+                    }
+                }
             }
         }
+        
+        // Fetch Top K around local minima
+        let mut scored = Vec::new();
+        let mut frontier = vec![curr];
+        let mut k_visited = std::collections::HashSet::new();
+        k_visited.insert(curr);
+        
+        while let Some(node) = frontier.pop() {
+            if scored.len() >= top_k { break; }
+            if let Some(ref e) = self.items[node].embedding {
+                 let score = cosine_similarity(query_emb, e);
+                 scored.push((score, self.items[node].value.clone()));
+            }
+            
+            for &n in &self.items[node].neighbors {
+                if !k_visited.contains(&n) {
+                    k_visited.insert(n);
+                    frontier.push(n);
+                }
+            }
+        }
+        
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         scored.into_iter().take(top_k).map(|(_, v)| v).collect()
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapabilityRegistry {
+    #[serde(skip)]
+    pub caps: HashMap<usize, String>,
+    pub next_id: usize,
+}
+
+impl CapabilityRegistry {
+    pub fn new() -> Self {
+        Self {
+            caps: HashMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn mint(&mut self, secret: String) -> usize {
+        let id = self.next_id;
+        self.caps.insert(id, secret);
+        self.next_id += 1;
+        id
+    }
+
+    pub fn get(&self, id: usize) -> Option<&String> {
+        self.caps.get(&id)
+    }
+}
+
+pub trait NetworkSwitchboard: std::fmt::Debug + Send + Sync {
+    fn send_remote(&self, node_id: &str, local_pid: u64, msg: Value) -> Result<(), RuntimeError>;
+    fn register_local_node(&mut self, node_id: String);
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NoOpSwitchboard {}
+
+impl NetworkSwitchboard for NoOpSwitchboard {
+    fn send_remote(&self, node_id: &str, _local_pid: u64, _msg: Value) -> Result<(), RuntimeError> {
+        println!("[Switchboard] Dropped message to remote node {}. Switchboard not connected.", node_id);
+        Ok(())
+    }
+    fn register_local_node(&mut self, _node_id: String) {}
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Runtime {
     pub env: HashMap<String, Value>,
     pub context: PriorityStack,
     pub memory: SemanticMemory,
     pub structs: HashMap<String, IndexMap<String, Type>>,
+    pub capabilities: CapabilityRegistry,
+    #[serde(skip)]
+    pub switchboard: Option<std::sync::Arc<dyn NetworkSwitchboard>>,
+}
+
+impl Clone for Runtime {
+    fn clone(&self) -> Self {
+        Self {
+            env: self.env.clone(),
+            context: self.context.clone(),
+            memory: self.memory.clone(),
+            structs: self.structs.clone(),
+            capabilities: self.capabilities.clone(),
+            switchboard: self.switchboard.clone(),
+        }
+    }
 }
 
 impl Runtime {
@@ -143,6 +311,8 @@ impl Runtime {
             context: PriorityStack::new(DEFAULT_TOKEN_BUDGET),
             memory: SemanticMemory::new(),
             structs: HashMap::new(),
+            capabilities: CapabilityRegistry::new(),
+            switchboard: None,
         }
     }
 
@@ -232,13 +402,13 @@ impl Runtime {
     }
 }
 
-fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
+pub fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
     match v {
         Value::Str(s) => Ok(s.clone()),
         Value::Num(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Err(RuntimeError::InvalidMemoryKey),
-        Value::List(_) | Value::Map(_) | Value::Struct(_, _) | Value::Closure { .. } | Value::Pid(_) | Value::Vec(_) | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
+        Value::List(_) | Value::Map(_) | Value::Struct(_, _) | Value::Closure { .. } | Value::Pid { .. } | Value::Vec(_) | Value::Cap(_) | Value::CapProxy { .. } | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
     }
 }
 

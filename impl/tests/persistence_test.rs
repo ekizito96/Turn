@@ -88,3 +88,64 @@ fn test_persistence_crash_recovery() {
         _ => panic!("Expected string, got {:?}", result),
     }
 }
+
+#[test]
+fn test_jvm_snapshot_recovery() {
+    use turn::compiler::Compiler;
+    use turn::lexer::Lexer;
+    use turn::parser::Parser;
+    use turn::vm::{Vm, VmResult};
+    use std::fs;
+
+    let source = r#"
+    let count = 10;
+    suspend;
+    let next = count + 5;
+    return next * 2;
+    "#;
+    
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let mut compiler = Compiler::new();
+    let code = compiler.compile(&program);
+    let mut vm = Vm::new(&code);
+    
+    let heap_path = ".turn_heap.json";
+    let _ = fs::remove_file(heap_path);
+
+    // Initial run up to suspend
+    let result = vm.run();
+    
+    // Expect suspension
+    let state = match result {
+        VmResult::Suspended { continuation, .. } => continuation,
+        _ => panic!("Expected VM to suspend, got {:?}", result),
+    };
+    
+    // Verify file was written by Orthogonal Persistence framework
+    assert!(fs::metadata(heap_path).is_ok(), "Heap file should exist after suspend");
+    
+    // Simulate server crash! Drop the VM
+    drop(vm);
+    
+    // Boot a new VM directly from the orthogonal persistence file
+    let mut recovered_vm = Vm::resume_from_disk(heap_path).expect("Failed to resume from disk");
+    
+    // Force a mock stack push that the suspend syscall would usually return
+    if let Some(process) = recovered_vm.scheduler.front_mut() {
+        process.stack.push(Value::Null); // suspend returns null natively
+    }
+    
+    // Continue execution from exact Instruction Pointer where it died
+    let final_result = recovered_vm.run();
+    
+    match final_result {
+        VmResult::Complete(Value::Num(n)) => assert_eq!(n, 30.0),
+        _ => panic!("Expected execution to resume and return Complete(30.0), but got {:?}", final_result),
+    }
+    
+    // Cleanup
+    let _ = fs::remove_file(heap_path);
+}
