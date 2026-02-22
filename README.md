@@ -30,7 +30,7 @@ cd Turn/impl
 cargo build --release
 
 # Run a Turn script
-cargo run -- run tests/test_actor.turn
+cargo run -- run tests/test_actor.tn
 
 # Run the full test suite
 cargo test

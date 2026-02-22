@@ -1,4 +1,4 @@
-//! Integration test: run hello_turn.turn
+//! Integration test: run hello.tn
 
 use turn::run;
 

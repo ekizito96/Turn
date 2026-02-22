@@ -35,7 +35,7 @@ In production: 500+ line ContextManager, 3400+ line agent kernel.
 
 ```bash
 # Turn
-cd impl && cargo run -- run ../examples/turn-vs-python/turn_example.turn
+cd impl && cargo run -- run ../examples/turn-vs-python/turn_example.tn
 
 # Python
 python examples/turn-vs-python/python_example.py
@@ -70,7 +70,7 @@ export AZURE_OPENAI_API_KEY="your-api-key"
 export AZURE_OPENAI_DEPLOYMENT="gpt-4o"   # or your deployment name
 
 # Turn (uses weather + llm tools)
-cd impl && cargo run -- run --with-llm ../examples/turn-vs-python/weather_agent.turn
+cd impl && cargo run -- run --with-llm ../examples/turn-vs-python/weather_agent.tn
 
 # Python (pip install requests)
 python examples/turn-vs-python/weather_agent.py

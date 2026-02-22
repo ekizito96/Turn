@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Python: Weather agent using Azure OpenAI + weather tool.
-Same logic as Turn weather_agent.turn - manual agent loop.
+Same logic as Turn weather_agent.tn - manual agent loop.
 
 Run: python examples/turn-vs-python/weather_agent.py
 Env: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT

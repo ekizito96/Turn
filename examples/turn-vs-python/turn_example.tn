@@ -1,5 +1,5 @@
 // Turn: Task assistant - same logic as Python example
-// Run: cd impl && cargo run -- run ../examples/turn-vs-python/turn_example.turn
+// Run: cd impl && cargo run -- run ../examples/turn-vs-python/turn_example.tn
 // (uses echo as stub for get_weather; register get_weather for real use)
 
 turn {

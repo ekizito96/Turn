@@ -1,4 +1,4 @@
-// test_actor.turn
+// test_actor.tn
 // Demonstrates Erlang-style process isolation and mailboxes
 
 let worker = turn() -> Str {

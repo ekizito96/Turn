@@ -1,5 +1,5 @@
 // Weather agent: uses LLM (Azure OpenAI) with weather tool
-// Run: cd impl && cargo run -- run --with-llm ../examples/turn-vs-python/weather_agent.turn
+// Run: cd impl && cargo run -- run --with-llm ../examples/turn-vs-python/weather_agent.tn
 // Env: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT
 
 turn {

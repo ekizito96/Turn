@@ -11,7 +11,7 @@ Thank you for your interest in contributing to Turn. This document describes how
    cd impl
    cargo build
    cargo test
-   cargo run -- run tests/test_actor.turn
+   cargo run -- run tests/test_actor.tn
    ```
 
 ## Project Structure

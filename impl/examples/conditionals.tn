@@ -1,5 +1,5 @@
 // Conditionals: if/else with == and recall
-// Run: cargo run -- run examples/conditionals.turn
+// Run: cargo run -- run examples/conditionals.tn
 
 turn {
   let weather = call("echo", "sunny");

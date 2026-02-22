@@ -88,7 +88,7 @@ async fn test_recursive_import() {
     // util.tn
     fs::write(&util_path, r#"return "util";"#).unwrap();
 
-    // main.turn imports util
+    // main.tn imports util
     // We test relative import logic in Runner if we implement it.
     // Currently Runner::load_module handles relative paths if 'current_file' is passed.
     // But 'run' doesn't pass a file path for the source.
