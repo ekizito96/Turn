@@ -23,9 +23,11 @@ jobs:
 
       - name: Check format
         run: cargo fmt --all -- --check
+        working-directory: impl
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+        working-directory: impl
 
       - name: Test
         run: cargo test
