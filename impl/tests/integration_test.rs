@@ -2,8 +2,8 @@
 
 use turn::run;
 
-#[test]
-fn hello_turn_returns_echo_result() {
+#[tokio::test]
+async fn hello_turn_returns_echo_result() {
     let source = r#"
 turn {
   let name = "Turn";

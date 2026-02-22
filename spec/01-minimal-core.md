@@ -11,7 +11,7 @@ The choice of primitives is justified: each primitive is necessary and not deriv
 | Primitive | Operations | Rationale |
 |-----------|------------|-----------|
 | **Turn (closure)** | `turn { ... }` ; `turn(args...) -> Type { ... }` | First-class unit of behavior for spawning and composition. |
-| **Context (managed)** | `context.append(expr)` | Bounded working context managed by the runtime. Mutation is explicit; policies/higher-level strategies are deferred. |
+| **Context (managed)** | `context.append(expr)` | Bounded working context managed by the runtime via a **Priority Stack Architecture**. See Section 3. |
 | **Memory (managed)** | `remember(key, value)` ; `recall(key)` | Persistent process memory as a primitive store. Retrieval is explicit; higher-level structures are libraries. |
 | **Effect boundary** | `call(tool_name, arg)` | External effects suspend execution and resume with a value. Enables deterministic replay given the same effect results. |
 | **Native inference** | `infer Type { prompt_expr; }` | Probabilistic effect returning a typed value. Type validation is part of the runtime contract (cognitive type safety). |
@@ -47,15 +47,12 @@ Turn includes a default tool registry for bootstrap and testing. These are **too
 
 ---
 
-## 3. What is deferred (not in the alpha minimal core)
+## 3. What is deferred (not in the v1.0 core)
 
 | Concept | Deferred to | Note |
 |---------|-------------|------|
-| **Structured Context** | Next | Alpha has flat context. Priority stacks and structured rendering are planned. |
-| **Context rewrite / window** | Next | Only append + runtime bound in core. No `context.rewrite`, `context.window`. |
-| **Memory forget / summarize** | Next | Only remember + recall in core. |
 | **Supervisor trees** | Next | `link`/`monitor` and restart strategies. |
-| **Networking / remote PIDs** | Future | Distributed messaging is outside alpha minimal core. |
+| **Networking / remote PIDs** | Future | Distributed messaging is outside minimal core. |
 
 ---
 

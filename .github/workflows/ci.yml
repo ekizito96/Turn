@@ -23,21 +23,29 @@ jobs:
 
       - name: Check format
         run: cargo fmt --all -- --check
+        working-directory: impl
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+        working-directory: impl
 
       - name: Test
         run: cargo test
         working-directory: impl
 
   build:
-    name: Build
+    name: Build (${{ matrix.os_name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            os_name: Linux
+          - os: macos-latest
+            os_name: macOS
+          - os: windows-latest
+            os_name: Windows
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +57,7 @@ jobs:
         working-directory: impl
 
   hello:
-    name: Run hello_turn
+    name: Run test_actor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +65,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build and run hello_turn
+      - name: Build and run test_actor
         run: |
-          cd impl && cargo run --quiet -- run tests/hello_turn.turn
+          cd impl && cargo run --quiet -- run tests/test_actor.turn
         working-directory: .
