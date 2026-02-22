@@ -89,7 +89,7 @@ pub fn run_with_tools(
     let program = parser::Parser::new(tokens).parse()?;
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
-    Ok(tokio::runtime::Runtime::new().unwrap().block_on(async {
+    let fut = async move {
         let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
         let vm = vm::Vm::new(&code, host_tx);
         vm.start().await;
@@ -113,8 +113,10 @@ pub fn run_with_tools(
                         resume_tx,
                         ..
                     } => {
-                        let result = tools.call(&tool_name, arg).unwrap_or_else(|e| {
-                            value::Value::Str(std::sync::Arc::new(e.to_string()))
+                        let result = tokio::task::block_in_place(|| {
+                            tools.call(&tool_name, arg).unwrap_or_else(|e| {
+                                value::Value::Str(std::sync::Arc::new(e.to_string()))
+                            })
                         });
                         let _ = resume_tx.send(result);
                     }
@@ -123,5 +125,19 @@ pub fn run_with_tools(
                 return Err("VM unexpectedly halted".to_string());
             }
         }
-    })?)
+    };
+
+    let result = std::thread::scope(|s| {
+        s.spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(fut)
+        })
+        .join()
+        .unwrap()
+    });
+
+    result.map_err(|e| e.into())
 }

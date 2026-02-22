@@ -535,22 +535,25 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a string URL".to_string()),
                 };
 
-                match reqwest::blocking::get(url.as_ref()) {
-                    Ok(resp) => {
-                        if resp.status().is_success() {
-                            match resp.text() {
-                                Ok(text) => Ok(Value::Str(std::sync::Arc::new(text))),
-                                Err(e) => Err(format!("Failed to read response text: {}", e)),
+                let res = std::thread::spawn(move || {
+                    match reqwest::blocking::get(url.as_ref()) {
+                        Ok(resp) => {
+                            if resp.status().is_success() {
+                                match resp.text() {
+                                    Ok(text) => Ok(Value::Str(std::sync::Arc::new(text))),
+                                    Err(e) => Err(format!("Failed to read response text: {}", e)),
+                                }
+                            } else {
+                                Err(format!(
+                                    "HTTP request failed with status: {}",
+                                    resp.status()
+                                ))
                             }
-                        } else {
-                            Err(format!(
-                                "HTTP request failed with status: {}",
-                                resp.status()
-                            ))
                         }
+                        Err(e) => Err(format!("HTTP request error: {}", e)),
                     }
-                    Err(e) => Err(format!("HTTP request error: {}", e)),
-                }
+                }).join().unwrap();
+                res
             }) as ToolHandler,
         );
 
@@ -570,25 +573,28 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a map {url, body}".to_string()),
                 };
 
-                let client = reqwest::blocking::Client::new();
-                let json_body = serde_json::to_value(&body_val).unwrap_or(serde_json::Value::Null);
+                let res = std::thread::spawn(move || {
+                    let client = reqwest::blocking::Client::new();
+                    let json_body = serde_json::to_value(&body_val).unwrap_or(serde_json::Value::Null);
 
-                match client.post(url.as_ref()).json(&json_body).send() {
-                    Ok(resp) => {
-                        if resp.status().is_success() {
-                            match resp.text() {
-                                Ok(text) => Ok(Value::Str(std::sync::Arc::new(text))),
-                                Err(e) => Err(format!("Failed to read response text: {}", e)),
+                    match client.post(url.as_ref()).json(&json_body).send() {
+                        Ok(resp) => {
+                            if resp.status().is_success() {
+                                match resp.text() {
+                                    Ok(text) => Ok(Value::Str(std::sync::Arc::new(text))),
+                                    Err(e) => Err(format!("Failed to read response text: {}", e)),
+                                }
+                            } else {
+                                Err(format!(
+                                    "HTTP request failed with status: {}",
+                                    resp.status()
+                                ))
                             }
-                        } else {
-                            Err(format!(
-                                "HTTP request failed with status: {}",
-                                resp.status()
-                            ))
                         }
+                        Err(e) => Err(format!("HTTP request error: {}", e)),
                     }
-                    Err(e) => Err(format!("HTTP request error: {}", e)),
-                }
+                }).join().unwrap();
+                res
             }) as ToolHandler,
         );
 

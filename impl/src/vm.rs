@@ -273,6 +273,7 @@ impl Process {
         });
     }
 
+    #[async_recursion::async_recursion]
     pub async fn run_process(
         &mut self,
         registry: Registry,
@@ -352,7 +353,7 @@ impl Process {
                         registry.register(new_pid, new_tx);
 
                         let reg_clone = registry.clone();
-                        tokio::task::spawn_local(async move {
+                        tokio::task::spawn(async move {
                             new_process.run_process(reg_clone, new_rx).await;
                         });
 
@@ -1399,7 +1400,7 @@ impl Process {
                             } else {
                                 self.stack.push(Value::Null);
                             }
-                            return;
+                            // Process continues natively without halting!
                         }
                         Value::Closure {
                             is_tool: _,

@@ -113,7 +113,10 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                         }
                                     }
                                 } else {
-                                    match self.tools.call(&tool_name, arg) {
+                                    let result = tokio::task::block_in_place(|| {
+                                        self.tools.call(&tool_name, arg)
+                                    });
+                                    match result {
                                         Ok(val) => {
                                             let _ = resume_tx.send(val);
                                         }
@@ -253,7 +256,10 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                     }
                                 }
                             } else {
-                                match self.tools.call(&tool_name, arg) {
+                                let result = tokio::task::block_in_place(|| {
+                                    self.tools.call(&tool_name, arg)
+                                });
+                                match result {
                                     Ok(val) => {
                                         let _ = resume_tx.send(val);
                                     }
