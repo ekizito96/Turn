@@ -1,6 +1,14 @@
 #!/bin/sh
 # Turn Language Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/ekizito96/Turn/main/install.sh | bash
+#
+# Installs:
+#   turn                     — the core VM and compiler
+#   turn-provider-openai     — the default inference provider driver
+#
+# The infer primitive requires a provider driver in PATH.
+# Set TURN_INFER_PROVIDER to switch providers (see https://github.com/ekizito96/Turn/blob/main/PROVIDERS.md)
+
 set -e
 
 REPO="ekizito96/Turn"
@@ -23,7 +31,6 @@ case "$ARCH" in
 esac
 
 TARGET="${PLATFORM}-${ARCH_NAME}"
-ASSET_NAME="turn-${TARGET}.tar.gz"
 
 # ─── Resolve latest release ───────────────────────────────────────────────────
 echo "turn: detecting platform... ${PLATFORM}/${ARCH_NAME}"
@@ -36,10 +43,11 @@ if [ -z "$LATEST_TAG" ]; then
   exit 1
 fi
 
+# ─── Download and install core VM ─────────────────────────────────────────────
+ASSET_NAME="turn-${TARGET}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/${ASSET_NAME}"
 echo "turn: downloading ${LATEST_TAG} from ${DOWNLOAD_URL}"
 
-# ─── Download and install ─────────────────────────────────────────────────────
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -49,6 +57,27 @@ tar xzf "$TMP_DIR/$ASSET_NAME" -C "$TMP_DIR"
 mkdir -p "$INSTALL_DIR"
 mv "$TMP_DIR/turn" "$INSTALL_DIR/turn"
 chmod +x "$INSTALL_DIR/turn"
+
+# ─── Download and install default inference provider ──────────────────────────
+# The `infer` primitive delegates to an external provider binary via JSON-RPC stdio.
+# Without a provider, scripts using `infer` will fail with a clear error message.
+# We ship turn-provider-openai as the default; see PROVIDERS.md for alternatives.
+
+PROVIDER_ASSET="turn-provider-openai-${TARGET}.tar.gz"
+PROVIDER_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/${PROVIDER_ASSET}"
+
+echo "turn: downloading default inference provider (turn-provider-openai)..."
+
+if curl -fsSL --head "$PROVIDER_URL" 2>/dev/null | grep -q "200 OK\|HTTP/2 200"; then
+  curl -fsSL "$PROVIDER_URL" -o "$TMP_DIR/$PROVIDER_ASSET"
+  tar xzf "$TMP_DIR/$PROVIDER_ASSET" -C "$TMP_DIR"
+  mv "$TMP_DIR/turn-provider-openai" "$INSTALL_DIR/turn-provider-openai"
+  chmod +x "$INSTALL_DIR/turn-provider-openai"
+  PROVIDER_INSTALLED=1
+else
+  # Provider binary not yet released — skip silently, Turn still works for non-infer scripts
+  PROVIDER_INSTALLED=0
+fi
 
 # ─── Update PATH ──────────────────────────────────────────────────────────────
 add_to_path() {
@@ -77,6 +106,16 @@ esac
 echo ""
 echo "  ✓ turn installed to ${INSTALL_DIR}/turn"
 echo "  ✓ version: $($INSTALL_DIR/turn --version 2>/dev/null || echo "$LATEST_TAG")"
+if [ "$PROVIDER_INSTALLED" = "1" ]; then
+echo "  ✓ turn-provider-openai installed (default inference driver)"
+echo ""
+echo "  To use the 'infer' primitive, set your LLM credentials:"
+echo "    export OPENAI_API_KEY=sk-..."
+echo ""
+echo "  Or switch to a different provider:"
+echo "    export TURN_INFER_PROVIDER=turn-provider-azure-openai"
+echo "    (see https://github.com/ekizito96/Turn/blob/main/PROVIDERS.md)"
+fi
 echo ""
 echo "  Restart your shell or run:"
 echo "    export PATH=\"\$HOME/.turn/bin:\$PATH\""
