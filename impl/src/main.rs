@@ -145,7 +145,18 @@ fn main() -> Result<()> {
             }
 
             println!("Fetching {} from {}...", name, url);
-            let response = reqwest::blocking::get(&url)?.error_for_status()?.text()?;
+            let output = std::process::Command::new("curl")
+                .arg("-s")
+                .arg("-L")
+                .arg(&url)
+                .output()?;
+
+            if !output.status.success() {
+                anyhow::bail!("Failed to download package '{}'", name);
+            }
+
+            let response = String::from_utf8(output.stdout)
+                .map_err(|e| anyhow::anyhow!("Invalid UTF-8 from {}: {}", url, e))?;
 
             let file_path = modules_dir.join(format!("{}.tn", name));
             fs::write(&file_path, response)?;

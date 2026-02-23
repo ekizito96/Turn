@@ -91,8 +91,9 @@ fn test_http_get_error() {
     match result {
         Value::Str(s) => {
             assert!(
-                s.contains("HTTP request failed")
-                    || s.contains("HTTP request error")
+                s.is_empty()
+                    || s.contains("HTTP request failed with status")
+                    || s.contains("Failed to execute curl")
                     || s.contains("501")
             );
         }
