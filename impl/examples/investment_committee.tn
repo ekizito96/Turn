@@ -78,50 +78,50 @@ let check_mandate = tool turn(ticker: Str, requested_allocation: Num) -> RiskAna
 // ============================================================================
 
 // 3.1 Fundamental Analyst
-let fundamental_analyst = fn(ticker: Str) -> Str {
-    println("\n--- [Fundamental Analyst] Initializing ---");
+let fundamental_analyst = turn(ticker: Str) -> Str {
+    let _s1 = call("print", "\n--- [Fundamental Analyst] Initializing ---");
     // The analyst uses the market data tool to formulate a thesis
     let analysis = infer Str with [fetch_market_data] {
         "You are the Fundamental Analyst. Fetch the market data for " + ticker + ". " +
-        "Write a 2-sentence thesis on its valuation multiples and growth quality."
+        "Write a 2-sentence thesis on its valuation multiples and growth quality.";
     };
-    println("[Fundamental Analyst] Thesis generated.");
+    let _s2 = call("print", "[Fundamental Analyst] Thesis generated.");
     return analysis;
 };
 
 // 3.2 Risk Officer
-let risk_officer = fn(ticker: Str, requested_size: Num) -> RiskAnalysis {
-    println("\n--- [Risk Officer] Initializing ---");
+let risk_officer = turn(ticker: Str, requested_size: Num) -> RiskAnalysis {
+    let _s3 = call("print", "\n--- [Risk Officer] Initializing ---");
     // Ensure the model returns a strictly typed result using the Tool
     let analysis = infer RiskAnalysis with [check_mandate] {
         "You are the Risk Officer. Check the mandate for allocating $" + requested_size + 
-        " to " + ticker + ". Return the strict RiskAnalysis struct."
+        " to " + ticker + ". Return the strict RiskAnalysis struct.";
     };
-    println("[Risk Officer] Risk constraints checked.");
+    let _s4 = call("print", "[Risk Officer] Risk constraints checked.");
     return analysis;
 };
 
 // 3.3 Knowledge Base / RAG Agent (Demonstrating Semantic Memory)
-let knowledge_agent = fn(ticker: Str) -> Str {
-    println("\n--- [Knowledge Library] Searching Past Memos ---");
+let knowledge_agent = turn(ticker: Str) -> Str {
+    let _s5 = call("print", "\n--- [Knowledge Library] Searching Past Memos ---");
     // Implicit recall uses the HNSW index to find similar past notes
     recall("Past memos regarding " + ticker + " sector performance");
     let context = infer Str {
-        "Based on our semantic memory of past memos, summarize our institutional stance on " + ticker
+        "Based on our semantic memory of past memos, summarize our institutional stance on " + ticker;
     };
     return context;
 };
 
 // 3.4 Committee Chair (Orchestrator)
-let committee_chair = fn(ticker: Str, requested_size: Num) -> CommitteeMemo {
-    println("\n===============================================");
-    println(" [Committee Chair] Opening review for " + ticker);
-    println("===============================================");
+let committee_chair = turn(ticker: Str, requested_size: Num) -> CommitteeMemo {
+    let _c1 = call("print", "\n===============================================");
+    let _c2 = call("print", " [Committee Chair] Opening review for " + ticker);
+    let _c3 = call("print", "===============================================");
 
     // 1. Dispatch Analysts concurrently (spawn)
-    let fundamental_pid = spawn(fn() { send supervisor_pid, fundamental_analyst(ticker); });
-    let risk_pid = spawn(fn() { send supervisor_pid, risk_officer(ticker, requested_size); });
-    let knowledge_pid = spawn(fn() { send supervisor_pid, knowledge_agent(ticker); });
+    let fundamental_pid = spawn(turn() { send supervisor_pid, call(fundamental_analyst, ticker); });
+    let risk_pid = spawn(turn() { send supervisor_pid, call(risk_officer, [ticker, requested_size]); });
+    let knowledge_pid = spawn(turn() { send supervisor_pid, call(knowledge_agent, ticker); });
 
     // Wait for all three subordinates to reply
     let fund_thesis = receive;
@@ -138,7 +138,7 @@ let committee_chair = fn(ticker: Str, requested_size: Num) -> CommitteeMemo {
         "\n2. Risk Data: Max Breach=" + risk_report.max_position_breach + ", Rec Size=" + risk_report.recommended_size +
         "\n3. Past Memos: " + past_context +
         "\n\nIf Max Breach is true, you MUST restrict allocation to the Rec Size or REJECT." +
-        "\nReturn the final CommitteeMemo struct."
+        "\nReturn the final CommitteeMemo struct.";
     };
 
     return final_decision;

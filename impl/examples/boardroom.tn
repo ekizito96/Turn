@@ -1,55 +1,79 @@
-// examples/boardroom.tn
-// The Autonomous Committee: 3 Agents debating a topic in parallel.
-// Demonstrates: Concurrency (spawn), Context, and Native Intelligence (infer).
+// ============================================================================
+// Turn v0.5.0-alpha Example: The Autonomous Boardroom
+// 
+// Use Case: 3 Agents debate a topic in parallel using Native Actor Spawning.
+// Demonstrates: Concurrency (spawn), Mailboxes (send/receive), and Structural 
+// Inference mapping natural language debates into typed JSON outputs.
+// ============================================================================
 
-let time = use "std/time";
+use "std/print";
 
-// 1. Define the Topic
+// 1. Define the Topic and Output Structure
 let topic = "Should we rewrite our backend in Rust?";
-call("echo", "📢 BOARDROOM SESSION STARTED: " + topic);
+let _sys = call("echo", "[System] BOARDROOM SESSION STARTED: " + topic);
 
-// 2. Define the Agent Logic
-let run_debater = turn(role: Str, bias: Str) -> Void {
-    call("echo", "👤 " + role + " is thinking...");
-    
-    // Simulate thinking time to show concurrency
-    time.sleep(1.0);
-    
-    // Private context for this agent (Native Intelligence Memory)
-    context.append("You are the " + role + " of a tech company.");
-    context.append("Topic: " + topic);
-    context.append("Your bias: " + bias);
-    context.append("Provide a short, 1-sentence opinion.");
-
-    let opinion = infer Str { "What is your opinion?"; };
-    
-    call("echo", "💬 " + role + " says: " + opinion);
-    
-    return null;
+struct BoardVerdict {
+    consensus_reached: Bool,
+    winning_argument: Str,
+    final_decision: Str
 };
 
-// 3. Spawn the Committee (Parallel Execution)
-// We wrap calls in closures passed to spawn
-spawn turn() { call(run_debater, ["CTO", "Loves performance and safety. Pro-Rust."]); };
-spawn turn() { call(run_debater, ["Product Manager", "Cares about shipping speed. Anti-rewrite."]); };
-spawn turn() { call(run_debater, ["Junior Dev", "Just wants to learn cool stuff. Neutral but excited."]); };
+// 2. Define the Agent Logic (Actors)
+let run_debater = turn(role: Str, bias: Str) -> Str {
+    let _s = call("echo", "[Debater] " + role + " is thinking...");
+    
+    // Each spawned actor gets a clean, isolated context window
+    let opinion = infer Str { "You are a tech employee answering. Provide your opinion."; };
+    
+    let _arg = call("echo", "[Argument] [" + role + "] " + opinion);
+    
+    return opinion;
+};
 
-// 4. Give spawned debaters time to finish
-call("echo", "⏳ Chairperson is waiting for expert takes...");
-time.sleep(6.0);
+// 3. Main Orchestrator Layer
+let execute_boardroom = turn(target_topic: Str) -> BoardVerdict {
+    let _wait = call("echo", "[Chairperson] Waiting for expert takes...");
 
-// 5. Final Decision
-call("echo", "⚖️  ALL VOTES IN. DECIDING...");
+    let cto_pid = spawn(turn() { 
+        return call(run_debater, ["CTO", "Loves performance and safety. Pro-Rust."]); 
+    });
+    let _l1 = link cto_pid;
+    
+    let pm_pid = spawn(turn() { 
+        return call(run_debater, ["Product Manager", "Cares about shipping speed. Anti-rewrite."]); 
+    });
+    let _l2 = link pm_pid;
+    
+    let dev_pid = spawn(turn() { 
+        return call(run_debater, ["Junior Dev", "Just wants to learn cool stuff. Neutral but excited."]); 
+    });
+    let _l3 = link dev_pid;
 
-// Build context for CEO (known role biases)
-context.append("You are the CEO deciding on this topic: " + topic);
-context.append("CTO perspective: strongly pro-Rust for safety and performance.");
-context.append("Product Manager perspective: cautious due to delivery speed and roadmap risk.");
-context.append("Junior Dev perspective: excited by learning and maintainability opportunities.");
+    // 4. Synchronization (Native Mailbox Blocking via Linked EXIT Trapping)
+    let vote_1_msg = receive;
+    let vote_2_msg = receive;
+    let vote_3_msg = receive;
 
-let verdict = infer Str { "Summarize the consensus and make a final decision."; };
+    let vote_1 = vote_1_msg.reason;
+    let vote_2 = vote_2_msg.reason;
+    let vote_3 = vote_3_msg.reason;
 
-call("echo", "---------------------------------------------------");
-call("echo", "🏆 FINAL VERDICT: " + verdict);
-call("echo", "---------------------------------------------------");
-return verdict;
+    let _decide = call("echo", "[Chairperson] ALL VOTES IN. DECIDING...");
+
+    // 5. Final Decision (Cognitive Type Checking)
+    let final_prompt = "You are the CEO deciding on the topic: " + target_topic + "\n1. CTO: " + vote_1 + "\n2. PM: " + vote_2 + "\n3. Dev: " + vote_3 + "\n\nSummarize the debate and make a final executive decision." + "\nReturn the strict BoardVerdict struct.";
+
+    let verdict = infer BoardVerdict { final_prompt; };
+    return verdict;
+};
+
+// 6. Execute the simulation
+let final_verdict = call(execute_boardroom, topic);
+
+// 7. Output the Type-Safe Result
+let _o1 = call("echo", "---------------------------------------------------");
+let _o2 = call("echo", "--- FINAL VERDICT ---");
+let _o3 = call("echo", "---------------------------------------------------");
+let _o4 = call("echo", "Consensus Reached: " + final_verdict.consensus_reached);
+let _o5 = call("echo", "Decision: " + final_verdict.final_decision);
+let _o6 = call("echo", "Rationale: " + final_verdict.winning_argument);

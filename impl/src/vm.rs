@@ -1289,7 +1289,6 @@ impl Process {
                             } else {
                                 self.stack.push(Value::Null);
                             }
-                            return;
                         }
                         Value::Closure {
                             is_tool: _,
