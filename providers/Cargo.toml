@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "turn-provider-openai",
+    "turn-provider-azure-openai",
+    "turn-provider-azure-anthropic",
+    "turn-provider-aws-anthropic",
+]
+resolver = "2"
