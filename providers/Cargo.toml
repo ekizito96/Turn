@@ -3,6 +3,6 @@ members = [
     "turn-provider-openai",
     "turn-provider-azure-openai",
     "turn-provider-azure-anthropic",
-    "turn-provider-aws-anthropic",
+    "turn-provider-aws-anthropic", "turn-provider-gemini", "turn-provider-azure-openai-responses",
 ]
 resolver = "2"

@@ -1,7 +1,7 @@
-use turn::value::Value;
-use turn::tools::ToolRegistry;
-use turn::run_with_tools;
 use std::sync::Arc;
+use turn::run_with_tools;
+use turn::tools::ToolRegistry;
+use turn::value::Value;
 
 fn get_mock_tools() -> ToolRegistry {
     let mut tools = ToolRegistry::new();
@@ -17,9 +17,10 @@ fn get_mock_tools() -> ToolRegistry {
                     Value::Str(s) if s.contains("Bool") => {
                         Ok(Value::Uncertain(Box::new(Value::Bool(true)), 0.9))
                     }
-                    Value::Str(s) if s.contains("Str") => {
-                        Ok(Value::Uncertain(Box::new(Value::Str(Arc::new("Mock Response".to_string()))), 0.7))
-                    }
+                    Value::Str(s) if s.contains("Str") => Ok(Value::Uncertain(
+                        Box::new(Value::Str(Arc::new("Mock Response".to_string()))),
+                        0.7,
+                    )),
                     _ => Ok(Value::Uncertain(Box::new(Value::Null), 0.5)),
                 }
             } else {

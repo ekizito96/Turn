@@ -154,30 +154,36 @@ pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
         }).to_string());
     }
 
-    let choice = &gpt_json["choices"][0];
-    let message = &choice["message"];
-
-    if let Some(tools) = message.get("tool_calls").and_then(|t| t.as_array()) {
-        if !tools.is_empty() {
-            let t = &tools[0];
-            return pack_string(json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tool_call",
-                "params": {
-                    "name": t["function"]["name"].as_str().unwrap_or(""),
-                    "arguments": t["function"]["arguments"].as_str().unwrap_or("{}")
-                }
-            }).to_string());
+    if let Some(choices) = gpt_json.get("choices").and_then(|c| c.as_array()) {
+        if choices.is_empty() {
+             return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "No choices in response"}).to_string());
         }
+        let message = &choices[0]["message"];
+
+        if let Some(tools) = message.get("tool_calls").and_then(|t| t.as_array()) {
+            if !tools.is_empty() {
+                let t = &tools[0];
+                return pack_string(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tool_call",
+                    "params": {
+                        "name": t["function"]["name"].as_str().unwrap_or(""),
+                        "arguments": t["function"]["arguments"].as_str().unwrap_or("{}")
+                    }
+                }).to_string());
+            }
+        }
+
+        let content = message["content"].as_str().unwrap_or("");
+        let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
+
+        pack_string(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": parsed_result
+        }).to_string())
+    } else {
+        pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid structure from OpenAI"}).to_string())
     }
-
-    let content = message["content"].as_str().unwrap_or("");
-    let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
-
-    pack_string(json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": parsed_result
-    }).to_string())
 }

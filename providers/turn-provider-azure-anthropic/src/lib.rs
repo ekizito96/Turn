@@ -84,7 +84,7 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
 
     // Azure AI Foundry Anthropic uses the standard Azure endpoint but without `/openai/deployments/deploy-name/`
     let http_config = json!({
-        "url": "$env:AZURE_ANTHROPIC_ENDPOINT/chat/completions?api-version=2024-02-15-preview",
+        "url": "$env:AZURE_ANTHROPIC_ENDPOINT/chat/completions?api-version=2024-08-01-preview",
         "method": "POST",
         "headers": {
             "Content-Type": "application/json",

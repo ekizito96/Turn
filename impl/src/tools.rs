@@ -151,7 +151,10 @@ impl ToolRegistry {
                         .map_err(|e| format!("Invalid UTF-8: {}", e))?;
                     Ok(Value::Str(std::sync::Arc::new(text)))
                 } else {
-                    Err(format!("HTTP request failed with status: {}", output.status))
+                    Err(format!(
+                        "HTTP request failed with status: {}",
+                        output.status
+                    ))
                 }
             }) as ToolHandler,
         );
@@ -172,14 +175,18 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a map {url, body}".to_string()),
                 };
 
-                let json_body = serde_json::to_string(&body_val).unwrap_or_else(|_| "{}".to_string());
+                let json_body =
+                    serde_json::to_string(&body_val).unwrap_or_else(|_| "{}".to_string());
 
                 let output = Command::new("curl")
                     .arg("-s")
                     .arg("-L")
-                    .arg("-X").arg("POST")
-                    .arg("-H").arg("Content-Type: application/json")
-                    .arg("-d").arg(&json_body)
+                    .arg("-X")
+                    .arg("POST")
+                    .arg("-H")
+                    .arg("Content-Type: application/json")
+                    .arg("-d")
+                    .arg(&json_body)
                     .arg(url.as_ref())
                     .output()
                     .map_err(|e| format!("Failed to execute curl: {}", e))?;
@@ -189,7 +196,10 @@ impl ToolRegistry {
                         .map_err(|e| format!("Invalid UTF-8: {}", e))?;
                     Ok(Value::Str(std::sync::Arc::new(text)))
                 } else {
-                    Err(format!("HTTP request failed with status: {}", output.status))
+                    Err(format!(
+                        "HTTP request failed with status: {}",
+                        output.status
+                    ))
                 }
             }) as ToolHandler,
         );
@@ -288,8 +298,6 @@ impl ToolRegistry {
                 )))
             }) as ToolHandler,
         );
-
-
 
         Self { tools }
     }

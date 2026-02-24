@@ -1,5 +1,5 @@
-// turn-provider-azure-openai/src/lib.rs
-use serde::{Deserialize, Serialize};
+// turn-provider-azure-openai-responses/src/lib.rs
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 #[no_mangle]
@@ -25,10 +25,7 @@ fn pack_string(s: String) -> u64 {
 
 #[derive(Deserialize)]
 struct TurnInferRequest {
-    jsonrpc: String,
-    method: String,
     params: InferParams,
-    id: u32,
 }
 
 #[derive(Deserialize)]
@@ -63,14 +60,15 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     messages.push(json!({"role": "user", "content": req.params.prompt}));
 
     let mut body = json!({
-        "messages": messages,
-        "temperature": 0.0,
+        "input": messages,
+        "model": "$env:AZURE_OPENAI_DEPLOYMENT",
+        "max_output_tokens": 16384,
     });
 
     if req.params.schema != json!({"type": "any"}) {
-        body["response_format"] = json!({
-            "type": "json_schema",
-            "json_schema": {
+        body["text"] = json!({
+            "format": {
+                "type": "json_schema",
                 "name": "turn_schema",
                 "schema": req.params.schema,
                 "strict": true
@@ -82,12 +80,13 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
         body["tools"] = Value::Array(openai_tools);
     }
 
+    // Azure Serverless Endpoint (GPT-5 series)
     let http_config = json!({
-        "url": "$env:AZURE_OPENAI_ENDPOINT/openai/deployments/$env:AZURE_OPENAI_DEPLOYMENT/chat/completions?api-version=2024-08-01-preview",
+        "url": "$env:AZURE_OPENAI_ENDPOINT/openai/responses?api-version=2025-04-01-preview",
         "method": "POST",
         "headers": {
             "Content-Type": "application/json",
-            "api-key": "$env:AZURE_OPENAI_API_KEY",
+            "Authorization": "Bearer $env:AZURE_OPENAI_API_KEY"
         },
         "body": body
     });
@@ -120,47 +119,62 @@ pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
 
     let gpt_json: Value = match serde_json::from_str(&http_res.body) {
         Ok(v) => v,
-        Err(e) => return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": format!("Failed to parse Azure OpenAI response: {}", e)}).to_string()),
+        Err(e) => return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": format!("Failed to parse Azure response: {}", e)}).to_string()),
     };
 
     if let Some(err) = gpt_json.get("error") {
-        return pack_string(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": err.to_string()
-        }).to_string());
+        if !err.is_null() {
+            return pack_string(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": err.to_string()
+            }).to_string());
+        }
     }
 
-    if let Some(choices) = gpt_json.get("choices").and_then(|c| c.as_array()) {
-        if choices.is_empty() {
-             return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "No choices in response"}).to_string());
+    if let Some(outputs) = gpt_json.get("output").and_then(|o| o.as_array()) {
+        if outputs.is_empty() {
+             return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "No outputs in response"}).to_string());
         }
-        let message = &choices[0]["message"];
 
-        if let Some(tools) = message.get("tool_calls").and_then(|t| t.as_array()) {
-            if !tools.is_empty() {
-                let t = &tools[0];
-                return pack_string(json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tool_call",
-                    "params": {
-                        "name": t["function"]["name"].as_str().unwrap_or(""),
-                        "arguments": t["function"]["arguments"].as_str().unwrap_or("{}")
+        for output in outputs {
+            if output.get("type").and_then(|t| t.as_str()) == Some("message") {
+                if let Some(content_arr) = output.get("content").and_then(|c| c.as_array()) {
+                    for item in content_arr {
+                        // Check for tool calls first
+                        if item.get("type").and_then(|t| t.as_str()) == Some("tool_call") {
+                            if let Some(t) = item.get("tool_call") {
+                                return pack_string(json!({
+                                    "jsonrpc": "2.0",
+                                    "id": 1,
+                                    "method": "tool_call",
+                                    "params": {
+                                        "name": t["function"]["name"].as_str().unwrap_or(""),
+                                        "arguments": t["function"]["arguments"].as_str().unwrap_or("{}")
+                                    }
+                                }).to_string());
+                            }
+                        }
+
+                        // Check for actual text completion
+                        if item.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                            let content = item["text"].as_str().unwrap_or("");
+                            let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
+
+                            return pack_string(json!({
+                                "jsonrpc": "2.0",
+                                "id": 1,
+                                "result": parsed_result
+                            }).to_string());
+                        }
                     }
-                }).to_string());
+                }
             }
         }
-
-        let content = message["content"].as_str().unwrap_or("");
-        let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
-
-        pack_string(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": parsed_result
-        }).to_string())
+        
+        // If we reach here, we didn't find any message output text
+        pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "No valid text or tool calls found in the Azure GPT-5 output payload"}).to_string())
     } else {
-        pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid structure from Azure"}).to_string())
+        pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid structure from Azure GPT-5 Responses API: missing 'output' array"}).to_string())
     }
 }
