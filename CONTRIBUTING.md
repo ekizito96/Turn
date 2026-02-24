@@ -1,72 +1,124 @@
 # Contributing to Turn
 
-Thank you for your interest in contributing to Turn. This document describes how to get started.
+Thank you for your interest in contributing to Turn! This document explains how to get started, how the codebase is structured, and what kinds of contributions are most needed.
 
-## Quick Start
+---
 
-1. **Fork and clone** the repository
-2. **Install Rust**: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-3. **Build and test**:
-   ```bash
-   cd impl
-   cargo build
-   cargo test
-   cargo run -- run tests/test_actor.tn
-   ```
+## Getting Started
 
-## Project Structure
+### Prerequisites
 
-| Directory | Contents |
+- [Rust](https://rustup.rs/) (1.75 or later)
+- `wasm32-unknown-unknown` target (for building providers):
+  ```bash
+  rustup target add wasm32-unknown-unknown
+  ```
+
+### Build the VM
+
+```bash
+git clone https://github.com/ekizito96/Turn.git
+cd Turn/impl
+cargo build --release
+
+# Verify
+./target/release/turn --version
+```
+
+### Build a Wasm Provider
+
+```bash
+cd Turn/providers/turn-provider-openai
+cargo build --target wasm32-unknown-unknown --release
+# Output: target/wasm32-unknown-unknown/release/turn_provider_openai.wasm
+```
+
+### Run Tests
+
+```bash
+cd Turn/impl
+cargo test
+```
+
+### Run a Script
+
+```bash
+export TURN_INFER_PROVIDER=../providers/turn-provider-openai/target/wasm32-unknown-unknown/release/turn_provider_openai.wasm
+export OPENAI_API_KEY=sk-...
+cd impl
+./target/release/turn run examples/hello.tn
+```
+
+---
+
+## Areas for Contribution
+
+### High Priority
+
+| Area | Description |
 |---|---|
-| `impl/src/` | Core compiler and VM (lexer, parser, AST, compiler, vm, runtime, runner) |
-| `impl/tests/` | Integration and unit tests |
-| `spec/` | Formal language specification (locked; changes require consensus) |
-| `editors/vscode/` | VS Code extension (TypeScript) |
+| **HNSW embeddings** | Implement the real embedding pipeline in `impl/src/runtime.rs` (currently a stub) |
+| **AWS Bedrock provider** | Complete `providers/turn-provider-aws-anthropic` — needs SigV4 timestamp host-call |
+| **Streaming inference** | Design a `transform_chunk` FFI for streaming tokens from provider to VM |
+| **Tool call loop** | Implement the `tool_call` round-trip in `impl/src/llm_tools.rs` |
+| **Standard library** | Expand `std/fs`, `std/http`, `std/time`, `std/json` in `impl/src/tools.rs` |
+| **Test coverage** | Integration tests for the VM, actor model, and Wasm provider pipeline |
 
-## Development Workflow
+### Good First Issues
 
-1. Create a branch from `main`
-2. Make your changes
-3. Run the full CI check locally before opening a PR:
-   ```bash
-   cd impl
-   cargo fmt --all -- --check
-   cargo clippy --all-targets -- -D warnings
-   cargo test
-   ```
-4. Open a pull request targeting `main`
+- Add new math operations to the `std/math` standard library
+- Write example `.tn` files in `impl/examples/`
+- Improve LSP diagnostics with source location and suggestions
+- Fix typos or improve clarity in documentation
+- Improve VS Code syntax highlighting for new keywords
 
-## Code Style
+---
 
-- Follow Rust standard style (`cargo fmt`)
-- Address **all** Clippy warnings — CI runs with `-D warnings`
-- Use `thiserror` for error types, `anyhow` for application error handling
-- Prefer `Result` over `panic!` in library code
-- Prefer `Arc<T>` over `clone()` for large values
+## Code Structure
 
-## Writing Tests
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full internal guide. Summary:
 
-- Integration tests live in `impl/tests/*.rs`
-- Tests must use `#[tokio::test]` (not `#[test]`) since the VM is async
-- Turn snippets under test should use `turn::run(source)` or `turn::run_with_tools`
-- Avoid `assert!(true)` — write meaningful assertions
+```
+impl/src/
+├── lexer.rs       ← Tokenizer
+├── parser.rs      ← Recursive descent parser
+├── compiler.rs    ← AST → Bytecode
+├── vm.rs          ← Async bytecode executor (Tokio actors)
+├── wasm_host.rs   ← Wasmtime sandbox + HTTP delegation
+├── llm_tools.rs   ← infer instruction handler
+├── runtime.rs     ← HNSW semantic memory + WAL
+├── runner.rs      ← Host: tool dispatch, agent lifecycle
+└── tools.rs       ← Standard tool registry
+```
 
-## Areas of Contribution
+---
 
-- **Spec**: Changes to `spec/` require justification and community consensus
-- **VM / Compiler**: Bug fixes, performance improvements, new bytecode instructions
-- **Standard Library**: New built-in tools in `impl/src/tools.rs`
-- **LSP**: Improvements to hover, completion, and diagnostics in `impl/src/lsp.rs`
-- **Documentation**: Examples, tutorials, spec clarifications
-- **Tests**: Coverage for edge cases, error paths, and new language features
+## Submitting Changes
 
-## Pull Request Process
+1. **Fork** and create a branch: `git checkout -b feat/my-feature`
+2. **Write tests** for any new behaviour
+3. **Run**: `cargo test && cargo clippy --all-targets`
+4. **Open a Pull Request** against `main`
 
-1. Ensure CI passes (`fmt`, `clippy`, `test`)
-2. Update `CHANGELOG.md` if your change is user-facing
-3. Keep PRs focused — split large changes into smaller ones
-4. Request review from a maintainer
+### Commit Style
 
-## Questions?
+```
+feat(vm): add confidence() trap for uncertain values
+fix(parser): handle trailing comma in struct fields
+docs(providers): document transform_chunk streaming API
+test(vm): add actor mailbox overflow test
+```
 
-Open a GitHub issue for discussion. We welcome contributions of all kinds.
+---
+
+## Writing a New Wasm Provider
+
+See [PROVIDERS.md](PROVIDERS.md) for the full protocol specification. The canonical reference is `providers/turn-provider-openai/src/lib.rs`.
+
+Required exports: `alloc`, `transform_request`, `transform_response`.
+
+---
+
+## Code of Conduct
+
+Be kind, constructive, and assume good faith. Contributions of all sizes are welcome.
