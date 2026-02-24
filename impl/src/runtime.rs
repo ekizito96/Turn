@@ -181,6 +181,7 @@ impl SemanticMemory {
             self.items[new_idx].neighbors.push(curr);
 
             // Reassign entry point if this is structurally central (mock optimization)
+            #[allow(clippy::manual_is_multiple_of)]
             if new_idx % 10 == 0 {
                 self.entry_point = Some(new_idx);
             }
