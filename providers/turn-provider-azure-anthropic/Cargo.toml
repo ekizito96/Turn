@@ -2,9 +2,11 @@
 name = "turn-provider-azure-anthropic"
 version = "0.5.0-alpha"
 edition = "2021"
-description = "Official Azure AI Foundry + Anthropic Inference Driver for Turn"
+description = "Official Azure AI Foundry Anthropic Inference Driver for Turn"
+
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
-reqwest = { version = "0.11", features = ["blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

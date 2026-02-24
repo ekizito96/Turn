@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod wasm_host;
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;

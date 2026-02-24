@@ -3,8 +3,7 @@ use crate::tools::{ToolHandler, ToolRegistry};
 use crate::value::Value;
 use serde_json::{json, Value as JsonValue};
 use std::env;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::Arc;
 
 pub fn turn_type_to_json_schema(ty: &Type) -> JsonValue {
@@ -242,22 +241,14 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 }
             }
 
-            // Determine Inference Provider Provider Executable
-            let provider_cmd = env::var("TURN_INFER_PROVIDER")
-                .unwrap_or_else(|_| "turn-provider-openai".to_string());
+            // Determine Inference Provider Executable
+            let provider_file = env::var("TURN_INFER_PROVIDER")
+                .unwrap_or_else(|_| "turn-provider-openai.wasm".to_string());
 
-            let mut child = match Command::new(&provider_cmd)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-            {
-                Ok(c) => c,
-                Err(e) => return Ok(Value::Str(Arc::new(format!("Failed to spawn inference provider '{}': {}", provider_cmd, e)))),
+            let provider = match crate::wasm_host::WasmProvider::new(&provider_file) {
+                Ok(p) => p,
+                Err(e) => return Ok(Value::Str(Arc::new(format!("Failed to load Wasm provider '{}': {}", provider_file, e)))),
             };
-
-            let mut stdin = child.stdin.take().expect("Failed to open child stdin");
-            let stdout = child.stdout.take().expect("Failed to open child stdout");
-            let mut reader = BufReader::new(stdout);
 
             let rpc_request = json!({
                 "jsonrpc": "2.0",
@@ -271,60 +262,25 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 "id": 1
             });
 
-            if let Err(e) = writeln!(stdin, "{}", rpc_request.to_string()) {
-                return Ok(Value::Str(Arc::new(format!("RPC Write Error: {}", e))));
-            }
+            let response_str = match provider.execute_inference(&rpc_request.to_string()) {
+                Ok(res) => res,
+                Err(e) => return Ok(Value::Str(Arc::new(format!("Wasm Execution Error: {}", e)))),
+            };
 
-            // Wait for responses
-            let mut line = String::new();
-            while let Ok(bytes_read) = reader.read_line(&mut line) {
-                if bytes_read == 0 { break; } // EOF
-
-                if let Ok(msg) = serde_json::from_str::<JsonValue>(&line) {
-                    if msg.get("method").and_then(|m| m.as_str()) == Some("tool_call") {
-                        // Provider wants us to execute a tool
-                        let params = msg.get("params").unwrap();
-                        let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                        let tool_args_str = params.get("arguments").and_then(|n| n.as_str()).unwrap_or("{}");
-                        let req_id = msg.get("id").unwrap();
-
-                        // Parse the tool index
-                        if tool_name.starts_with("tool_") {
-                            if let Ok(idx) = tool_name[5..].parse::<usize>() {
-                                if let Some(Value::Closure { .. }) = tool_list.get(idx) {
-                                    // Normally we would invoke the closure here via the VM runner.
-                                    // But llm_tools is just a standalone host function, it does not have back-ref to Runner.
-                                    // For phase 1 refactor, we mock tool execution or pass it out to be executed by VM.
-                                    // Wait, the original `llm_infer` couldn't execute generic closures either!
-                                    // The original bypassed VM completely and just called `fetch_weather` internally!
-                                    // Since we're separating, we will return an error instructing the VM to handle tool calls later.
-                                    let result_str = "Turn AST execution from within llm_infer is currently unsupported.".to_string();
-                                    let rpc_res = json!({
-                                        "jsonrpc": "2.0",
-                                        "result": result_str,
-                                        "id": req_id
-                                    });
-                                    writeln!(stdin, "{}", rpc_res.to_string()).unwrap();
-                                }
-                            }
-                        }
-                    } else if let Some(result) = msg.get("result") {
-                        // Success! Return value
-                        match json_value_to_turn_value(&turn_type, result) {
-                            Ok(val) => return Ok(val),
-                            Err(e) => return Ok(Value::Str(Arc::new(format!("Provider type map error: {}", e)))),
-                        }
-                    } else if let Some(error) = msg.get("error") {
-                        // Provider error
-                        return Ok(Value::Str(Arc::new(format!("Provider Error: {}", error))));
+            if let Ok(msg) = serde_json::from_str::<JsonValue>(&response_str) {
+                if msg.get("method").and_then(|m| m.as_str()) == Some("tool_call") {
+                    return Ok(Value::Str(Arc::new("Turn AST execution from within llm_infer is currently unsupported (tool_call requested).".to_string())));
+                } else if let Some(result) = msg.get("result") {
+                    match json_value_to_turn_value(&turn_type, result) {
+                        Ok(val) => return Ok(val),
+                        Err(e) => return Ok(Value::Str(Arc::new(format!("Provider type map error: {}", e)))),
                     }
+                } else if let Some(error) = msg.get("error") {
+                    return Ok(Value::Str(Arc::new(format!("Provider Error: {}", error))));
                 }
-                
-                line.clear();
             }
 
-            let _ = child.wait();
-            Ok(Value::Str(Arc::new("Inference provider disconnected without returning a result".to_string())))
+            Ok(Value::Str(Arc::new(format!("Invalid provider response: {}", response_str))))
         }) as ToolHandler,
     );
 }

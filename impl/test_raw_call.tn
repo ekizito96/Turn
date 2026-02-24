@@ -1,0 +1,1 @@
+call("echo", "Running!"); return call("llm_infer", {"prompt": "Hello", "schema": "{\"type\":\"string\"}", "context": [], "tools": []});
