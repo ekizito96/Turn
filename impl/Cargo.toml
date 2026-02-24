@@ -12,7 +12,6 @@ categories = ["development-tools"]
 
 [dev-dependencies]
 mockito = "1.2.0"
-reqwest = { version = "0.11", features = ["json"] }
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

@@ -55,7 +55,10 @@ pub fn json_value_to_turn_value(ty: &Type, j: &JsonValue) -> Result<Value, Strin
                 if let Some(field_val) = obj.get(k) {
                     map.insert(k.clone(), json_value_to_turn_value(expected_ty, field_val)?);
                 } else {
-                    return Err(format!("Missing required field '{}' in struct '{}'", k, name));
+                    return Err(format!(
+                        "Missing required field '{}' in struct '{}'",
+                        k, name
+                    ));
                 }
             }
             Ok(Value::Struct(
@@ -81,18 +84,21 @@ fn fetch_weather_curl(lat: f64, lon: f64) -> String {
         "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current_weather=true",
         lat, lon
     );
-    let output = Command::new("curl")
-        .arg("-s")
-        .arg(&url)
-        .output();
-    
+    let output = Command::new("curl").arg("-s").arg(&url).output();
+
     match output {
         Ok(out) if out.status.success() => {
             if let Ok(j) = serde_json::from_slice::<JsonValue>(&out.stdout) {
                 let cw = j.get("current_weather").and_then(|c| c.as_object());
-                let temp = cw.and_then(|c| c.get("temperature")).and_then(|t| t.as_f64()).unwrap_or(0.0);
-                let code = cw.and_then(|c| c.get("weathercode")).and_then(|c| c.as_u64()).unwrap_or(0);
-                
+                let temp = cw
+                    .and_then(|c| c.get("temperature"))
+                    .and_then(|t| t.as_f64())
+                    .unwrap_or(0.0);
+                let code = cw
+                    .and_then(|c| c.get("weathercode"))
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0);
+
                 let desc = match code {
                     0 => "clear",
                     1..=3 => "partly cloudy",
@@ -136,10 +142,14 @@ pub fn get_embedding(text: &str) -> Option<Vec<f64>> {
 
     let output = Command::new("curl")
         .arg("-s")
-        .arg("-X").arg("POST")
-        .arg("-H").arg(format!("api-key: {}", api_key))
-        .arg("-H").arg("Content-Type: application/json")
-        .arg("-d").arg(body.to_string())
+        .arg("-X")
+        .arg("POST")
+        .arg("-H")
+        .arg(format!("api-key: {}", api_key))
+        .arg("-H")
+        .arg("Content-Type: application/json")
+        .arg("-d")
+        .arg(body.to_string())
         .arg(&url)
         .output()
         .ok()?;
@@ -147,11 +157,11 @@ pub fn get_embedding(text: &str) -> Option<Vec<f64>> {
     if output.status.success() {
         let j: JsonValue = serde_json::from_slice(&output.stdout).ok()?;
         j.get("data")
-         .and_then(|d| d.as_array())
-         .and_then(|a| a.first())
-         .and_then(|e| e.get("embedding"))
-         .and_then(|v| v.as_array())
-         .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
+            .and_then(|d| d.as_array())
+            .and_then(|a| a.first())
+            .and_then(|e| e.get("embedding"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
     } else {
         None
     }
@@ -164,11 +174,18 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
             let s = match &arg {
                 Value::Str(s) => s.to_string(),
                 Value::Num(n) => n.to_string(),
-                _ => return Ok(Value::Str(Arc::new("{\"error\":\"expected lat,lon string\"}".to_string()))),
+                _ => {
+                    return Ok(Value::Str(Arc::new(
+                        "{\"error\":\"expected lat,lon string\"}".to_string(),
+                    )))
+                }
             };
             let parts: Vec<&str> = s.split(',').map(|x| x.trim()).collect();
             let (lat, lon) = match (parts.first(), parts.get(1)) {
-                (Some(a), Some(b)) => (a.parse::<f64>().unwrap_or(0.0), b.parse::<f64>().unwrap_or(0.0)),
+                (Some(a), Some(b)) => (
+                    a.parse::<f64>().unwrap_or(0.0),
+                    b.parse::<f64>().unwrap_or(0.0),
+                ),
                 _ => (37.77, -122.42),
             };
             Ok(Value::Str(Arc::new(fetch_weather_curl(lat, lon))))

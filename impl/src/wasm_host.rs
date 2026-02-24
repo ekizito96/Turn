@@ -58,7 +58,7 @@ impl WasmProvider {
 
         // 2. Host HTTP Execution
         let http_res_json = Self::execute_http(http_req);
-        
+
         // If HTTP failed locally (e.g. timeout), formulate a 500 error JSON for the Wasm to parse.
         let http_res_json = match http_res_json {
             Ok(json_str) => json_str,
@@ -109,13 +109,14 @@ impl WasmProvider {
     }
 
     fn execute_http(req: serde_json::Value) -> Result<String> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
 
-        let mut url = req["url"].as_str().context("Missing 'url' in HTTP config")?.to_string();
+        let mut url = req["url"]
+            .as_str()
+            .context("Missing 'url' in HTTP config")?
+            .to_string();
         url = Self::resolve_env_vars(&url);
-        
+
         let method_str = req["method"].as_str().unwrap_or("POST");
 
         let method = match method_str.to_uppercase().as_str() {
@@ -152,12 +153,15 @@ impl WasmProvider {
         out.insert("status".to_string(), serde_json::json!(status));
 
         let mut headers_map = serde_json::Map::new();
-        for (k, v) in response.headers() {
+        for (k, v) in response.headers().iter() {
             if let Ok(s) = v.to_str() {
-                headers_map.insert(k.to_string(), serde_json::json!(s));
+                headers_map.insert(k.as_str().to_string(), serde_json::json!(s));
             }
         }
-        out.insert("headers".to_string(), serde_json::Value::Object(headers_map));
+        out.insert(
+            "headers".to_string(),
+            serde_json::Value::Object(headers_map),
+        );
 
         let body_text = response.text()?;
         out.insert("body".to_string(), serde_json::json!(body_text));
@@ -171,7 +175,7 @@ impl WasmProvider {
         while let Some(start) = result.find("$env:") {
             let rest_idx = start + 5;
             let rest = &result[rest_idx..];
-            
+
             // Find the end of the variable pattern. It ends at the first non-alphanumeric/underscore/colon character.
             let mut end_offset = 0;
             for c in rest.chars() {
@@ -180,19 +184,19 @@ impl WasmProvider {
                 }
                 end_offset += c.len_utf8();
             }
-            
+
             if end_offset == 0 {
                 // Malformed, skip replacing this instance by breaking to prevent infinite loop
                 break;
             }
-            
+
             let var_pattern = &rest[..end_offset];
             let parts: Vec<&str> = var_pattern.splitn(2, ':').collect();
             let var_name = parts[0];
             let default_val = if parts.len() > 1 { parts[1] } else { "" };
-            
+
             let val = std::env::var(var_name).unwrap_or_else(|_| default_val.to_string());
-            
+
             result.replace_range(start..rest_idx + end_offset, &val);
         }
         result

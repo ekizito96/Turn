@@ -1,5 +1,4 @@
 pub mod analysis;
-pub mod wasm_host;
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;
@@ -15,6 +14,7 @@ pub mod store;
 pub mod tools;
 pub mod value;
 pub mod vm;
+pub mod wasm_host;
 
 pub use analysis::*;
 pub use ast::*;
