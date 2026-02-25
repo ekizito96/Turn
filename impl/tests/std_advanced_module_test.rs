@@ -48,8 +48,8 @@ async fn test_std_json_module_parse_and_stringify() {
 async fn test_std_time_module_now() {
     let mut runner = make_runner("std_time");
     let source = r#"
-    let time = use "std/time";
-    return time.now();
+    let time_mod = use "std/time";
+    return time_mod.now();
     "#;
 
     let result = runner

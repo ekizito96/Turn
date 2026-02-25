@@ -4,6 +4,51 @@ All notable changes to Turn are documented here. Turn uses [Semantic Versioning]
 
 ---
 
+## [0.5.1] - 2026-02-25 (Agentic Physics — Phase 2)
+
+This release embeds the 5 pillars of **Agentic Physics** directly into the Turn language runtime, making LLM resilience, tooling, token safety, context hygiene, and state persistence first-class language primitives.
+
+### Language
+
+- **`with budget(tokens: X, time: Y) { ... }` (Pillar 3 — Thermodynamic Vector)**  
+  Enforces hard token and wall-clock time limits on any `infer` block. If the LLM burns more than `X` tokens or exceeds `Y` seconds, the VM raises a `Thermodynamic Constraint Exceeded` trap immediately. Keywords `budget`, `tokens`, and `time` are now reserved.
+
+- **`compress(text, ratio)` (Pillar 4 — Context Entropy Pruning)**  
+  Squeezes a context string to the target float ratio deterministically (V2 will invoke a cheap LLM pass). Keeps context window lean without manual substring logic.
+
+- **`forget(label)` (Pillar 4 — Context Entropy Pruning)**  
+  Physically deletes matching entries from the Semantic RAM (`.turn_store`). Rebalances the HNSW entry point automatically.
+
+- **`persist let x = y;` (Pillar 5 — Persistence Vector)**  
+  Variables declared with `persist` are automatically serialized to `.turn_store/persist_<name>.json` at the VM level via `Instr::StorePersist`. The next VM boot pre-loads them, achieving native state continuity across process restarts.
+
+### Runtime
+
+- **Pillar 1 — JSON Sanity Coercion & Recovery Loop**: `llm_tools.rs` now strips markdown artifacts (` ```json `, triple-backtick), trailing commas, and runs an automatic retry loop before crashing the VM on malformed LLM JSON.
+
+- **Pillar 2 — Native Recursive AST Tool Execution**: When an `infer with [tools]` block receives a `ToolCallRequest`, the VM pauses inference, dispatches the native Turn closure (`Instr::InferResume`), executes it within the lexical scope, and resumes the LLM stream with the tool result.
+
+- **`BudgetFrame` Tracking Stack**: `runtime::BudgetFrame` tracks `max_tokens`, `used_tokens`, `max_time_secs`, and `started_at_secs` per budget scope. Nested budget blocks are fully supported with independent exhaustion checks.
+
+### Bytecode (New Instructions)
+
+| Instruction | Pillar | Purpose |
+|---|---|---|
+| `InferResume(Type, usize, Name, Args)` | 2 | Resume LLM after native tool execution |
+| `PushBudget` | 3 | Start a thermodynamic budget scope |
+| `PopBudget` | 3 | End a thermodynamic budget scope |
+| `Compress` | 4 | Squeeze context strings to a target ratio |
+| `Forget` | 4 | Delete from Semantic RAM |
+| `StorePersist(name)` | 5 | Write variable to disk persistence |
+
+### Tests & Examples
+
+- Fixed `server_test.rs`: Replaced broken `reqwest` HTTP test with a direct `Runner` integration test.
+- Fixed `std_advanced_module_test.rs`: Renamed `time` variable to `time_mod` (now a reserved keyword).
+- Added 3 new examples: `budget_guardrail.tn`, `context_pruning.tn`, `persistent_agent.tn`.
+
+---
+
 ## [0.5.0-alpha] - 2026-02-23 (Distributed Sovereign Runtime)
 
 This release elevates Turn from an experimental alpha interpreter into a production-grade, distributed, multi-threaded Sovereign Runtime. Every major architectural subsystem has been hardened for real agentic workloads.

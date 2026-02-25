@@ -349,6 +349,15 @@ impl Process {
                         };
                         new_process.runtime.env = env;
 
+                        // Phase 1: Inject 'self' into the new process's environment natively
+                        new_process.runtime.env.insert(
+                            "self".to_string(),
+                            Value::Pid {
+                                node_id: "local".to_string(),
+                                local_pid: new_pid,
+                            },
+                        );
+
                         let (new_tx, new_rx) = tokio::sync::mpsc::unbounded_channel();
                         registry.register(new_pid, new_tx);
 
@@ -422,6 +431,17 @@ impl Process {
                         self.stack.push(Value::Null);
                     }
                 }
+                Instr::Harvest => {
+                    while let Ok(msg) = receiver.try_recv() {
+                        self.mailbox.push_back(msg);
+                    }
+                    if let Some(msg) = self.mailbox.pop_front() {
+                        self.stack.push(msg);
+                    } else {
+                        // Return Null immediately if nothing is queued (non-blocking)
+                        self.stack.push(Value::Null);
+                    }
+                }
                 Instr::Link => {
                     let pid_val = self.stack.pop().unwrap_or(Value::Null);
                     if let Value::Pid { node_id, local_pid } = pid_val {
@@ -492,15 +512,15 @@ impl Process {
                     let prompt_val = self.stack.pop().unwrap_or(Value::Null);
                     // Resolve named struct placeholders (Struct("Name", {}))
                     // against runtime-registered struct definitions before prompting LLM.
-                    let resolved_ty = match ty {
+                    let resolved_ty = match &ty {
                         Type::Struct(name, fields) if fields.is_empty() => {
-                            if let Some(known_fields) = self.runtime.structs.get(&name) {
-                                Type::Struct(name, known_fields.clone())
+                            if let Some(known_fields) = self.runtime.structs.get(name) {
+                                Type::Struct(name.clone(), known_fields.clone())
                             } else {
-                                Type::Struct(name, fields)
+                                Type::Struct(name.clone(), fields.clone())
                             }
                         }
-                        other => other,
+                        other => other.clone(),
                     };
                     let ty_str =
                         serde_json::to_string(&resolved_ty).unwrap_or_else(|_| "{}".to_string());
@@ -528,7 +548,7 @@ impl Process {
                     combined_context.extend(self.runtime.context.to_values());
 
                     let mut map = IndexMap::new();
-                    map.insert("prompt".to_string(), prompt_val);
+                    map.insert("prompt".to_string(), prompt_val.clone());
                     map.insert(
                         "schema".to_string(),
                         Value::Str(std::sync::Arc::new(ty_str)),
@@ -538,7 +558,7 @@ impl Process {
                         Value::List(std::sync::Arc::new(combined_context)),
                     );
                     if tool_count > 0 {
-                        map.insert("tools".to_string(), Value::List(std::sync::Arc::new(tools)));
+                        map.insert("tools".to_string(), Value::List(std::sync::Arc::new(tools.clone())));
                     }
 
                     self.frames[frame_idx].env = self.runtime.env.clone();
@@ -561,13 +581,147 @@ impl Process {
                     });
 
                     if let Ok(res) = rx.await {
-                        self.stack.push(res);
+                        if let Value::ToolCallRequest(func_name, args_str) = res {
+                            // Pillar 2: Native Recursive Tool AST Execution
+                            // Recover tools and prompt to stack so Infer can re-run
+                            self.stack.push(prompt_val.clone());
+                            for t in &tools {
+                                self.stack.push(t.clone());
+                            }
+
+                            // Identify the tool closure mapped in the Lexical Scope
+                            let tool_idx = func_name.replace("tool_", "").parse::<usize>().unwrap_or(0);
+                            let tool_closure = tools.get(tool_idx).cloned().unwrap_or(Value::Null);
+
+                            let args_val = serde_json::from_str::<serde_json::Value>(&args_str)
+                                .map(|v| crate::llm_tools::json_value_to_turn_value(&Type::Any, &v).unwrap_or(Value::Null))
+                                .unwrap_or(Value::Null);
+
+                            // Push the InferResume synthetic frame
+                            // When the tool finishes, it will pop directly into this frame
+                            self.frames.push(Frame {
+                                code: std::sync::Arc::new(vec![Instr::InferResume(
+                                    ty.clone(),
+                                    tool_count as usize,
+                                    func_name.clone(),
+                                    args_str.clone(),
+                                )]),
+                                ip: 0,
+                                env: self.runtime.env.clone(),
+                                handlers: Vec::new(),
+                            });
+
+                            // Execute the Tool Closure in an isolated native VM frame
+                            match tool_closure {
+                                Value::Closure {
+                                    is_tool: _,
+                                    code: tool_code,
+                                    ip: tool_ip,
+                                    env: tool_env,
+                                    params: tool_params,
+                                } => {
+                                    let mut new_env = tool_env.clone();
+                                    if tool_params.len() == 1 {
+                                        let p_name = &tool_params[0].0;
+                                        match &args_val {
+                                            Value::Map(m) | Value::Struct(_, m) => {
+                                                if m.contains_key(p_name) {
+                                                    for (k, v) in m.iter() {
+                                                        new_env.insert(k.clone(), v.clone());
+                                                    }
+                                                } else {
+                                                    new_env.insert(p_name.clone(), args_val.clone());
+                                                }
+                                            }
+                                            _ => {
+                                                new_env.insert(p_name.clone(), args_val.clone());
+                                            }
+                                        }
+                                    }
+
+                                    self.frames.push(Frame {
+                                        code: tool_code,
+                                        ip: tool_ip,
+                                        env: new_env,
+                                        handlers: Vec::new(),
+                                    });
+                                }
+                                _ => {
+                                    // Non-closures gracefully fail with Null
+                                    self.stack.push(Value::Null);
+                                }
+                            }
+
+                            // Decrement IP of the ORIGINAL frame (-3) so it hits `Instr::Infer` again perfectly
+                            let orig_idx = self.frames.len() - 3;
+                            self.frames[orig_idx].ip -= 1;
+                        } else {
+                            // Pillar 3: Tally token usage against active budget frames
+                            let res_str = format!("{:?}", &res);
+                            let used = (res_str.len() / 4) + 1;
+                            for frame in self.runtime.budget_stack.iter_mut() {
+                                frame.used_tokens += used;
+                            }
+
+                            // Pillar 3: Check if any active budget is exhausted AFTER this infer
+                            if let Some(reason) = self.runtime.budget_stack.iter()
+                                .find_map(|f| f.check_exhausted())
+                            {
+                                let _ = registry.host_tx.send(VmEvent::Error {
+                                    pid: self.pid,
+                                    error: reason,
+                                });
+                                break;
+                            }
+
+                            self.stack.push(res);
+                        }
                     } else {
                         self.stack.push(Value::Null);
                     }
                 }
+                Instr::InferResume(_ty, _tool_count, func_name, args_str) => {
+                    // The executed tool's AST return value is now safely on top of the stack
+                    let tool_result = self.stack.pop().unwrap_or(Value::Null);
+                    
+                    self.runtime.context.push(crate::runtime::ContextItem {
+                        priority: 1,
+                        token_cost: 0,
+                        value: Value::Str(std::sync::Arc::new(
+                            format!("Assistant requested tool: {} with {}", func_name, args_str)
+                        ))
+                    });
+                    self.runtime.context.push(crate::runtime::ContextItem {
+                        priority: 1,
+                        token_cost: 0,
+                        value: Value::Str(std::sync::Arc::new(
+                            format!("System tool response: {:?}", tool_result)
+                        ))
+                    });
+                    
+                    // The instruction completes, this synthetic frame pops, 
+                    // and the Virtual Machine elegantly loops `Instr::Infer` again!
+                }
                 Instr::DefineStruct(name, fields) => {
                     self.runtime.register_struct(name, fields);
+                }
+                Instr::PushBudget => {
+                    // Stack layout (TOS → bottom): tokens, time
+                    let max_tokens = match self.stack.pop().unwrap_or(Value::Null) {
+                        Value::Num(n) => Some(n as usize),
+                        _ => None,
+                    };
+                    let max_time = match self.stack.pop().unwrap_or(Value::Null) {
+                        Value::Num(n) => Some(n),
+                        _ => None,
+                    };
+                    self.runtime.budget_stack.push(
+                        crate::runtime::BudgetFrame::new(max_tokens, max_time)
+                    );
+                }
+                Instr::PopBudget => {
+                    // Just discard the innermost budget scope — its return value is already on the stack
+                    self.runtime.budget_stack.pop();
                 }
                 Instr::PushNull => self.stack.push(Value::Null),
                 Instr::PushTrue => self.stack.push(Value::Bool(true)),
@@ -624,6 +778,40 @@ impl Process {
                     self.runtime
                         .memory
                         .insert(id, emb.map(|e| (*e).clone()), val);
+                }
+                Instr::Compress => {
+                    // Pillar 4: Squeeze a text string to a target ratio (0.0–1.0)
+                    let ratio_val = self.stack.pop().unwrap_or(Value::Num(0.5));
+                    let text_val = self.stack.pop().unwrap_or(Value::Null);
+
+                    let ratio = match ratio_val {
+                        Value::Num(n) => n.clamp(0.0, 1.0),
+                        _ => 0.5,
+                    };
+                    let text = text_val.to_string();
+                    // Deterministic char-level truncation for alpha.
+                    // V2 will invoke a cheap LLM pass for semantic compression.
+                    let target_len = ((text.len() as f64) * ratio).max(1.0) as usize;
+                    let compressed: String = text.chars().take(target_len).collect();
+                    self.stack.push(Value::Str(std::sync::Arc::new(compressed)));
+                }
+                Instr::Forget => {
+                    // Pillar 4: Delete matching entries from Semantic RAM (.turn_store)
+                    let label_val = self.stack.pop().unwrap_or(Value::Null);
+                    let label = crate::runtime::value_to_key(&label_val).unwrap_or_default();
+                    self.runtime.memory.forget(&label);
+                    self.stack.push(Value::Bool(true));
+                }
+                Instr::StorePersist(name) => {
+                    // Pillar 5: Write the value at TOS to disk for persistence
+                    let val = self.stack.pop().unwrap_or(Value::Null);
+                    let persist_dir = std::path::Path::new(".turn_store");
+                    let _ = std::fs::create_dir_all(persist_dir);
+                    let path = persist_dir.join(format!("persist_{}.json", name));
+                    if let Ok(json) = serde_json::to_string_pretty(&val) {
+                        let _ = std::fs::write(&path, json);
+                    }
+                    // Value was consumed from stack; it's already in env via Store
                 }
                 Instr::Add => {
                     let b = self.stack.pop().unwrap_or(Value::Null);

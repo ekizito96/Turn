@@ -49,17 +49,24 @@ pub enum Instr {
     ContextAppend,
     Remember,
     Recall,
+    Compress, // Pillar 4: squeeze context strings
+    Forget,   // Pillar 4: delete from Semantic RAM
+    StorePersist(String), // Pillar 5: persist a variable to disk
     CallTool,
     CallMethod(String), // NEW
     LoadModule,
     Index,
     MakeTurn(u32, bool, Vec<(String, Option<Type>, bool)>),
-
+    InferResume(Type, usize, String, String), // Expected type, Tool count, Func Name, Args Str
+    PushBudget, // Pops max tokens and max time from stack, pushes new budget frame
+    PopBudget,  // Pops current budget frame, merging usage to parent
+    
     // Concurrency
     Spawn,
     SpawnRemote,
     Send,
     Receive,
+    Harvest,
     Link,             // NEW: Bidirectional lifecycle binding
     Monitor,          // NEW: Unidirectional death notification
     Confidence,       // NEW

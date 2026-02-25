@@ -66,6 +66,50 @@ fn estimate_tokens(val: &Value) -> usize {
     (s.len() / 4) + 1
 }
 
+/// Tracks 'with budget(tokens: X, time: Y) { ... }' scope limits.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BudgetFrame {
+    pub max_tokens: Option<usize>,
+    pub used_tokens: usize,
+    pub max_time_secs: Option<f64>,
+    pub started_at_secs: f64,
+}
+
+impl BudgetFrame {
+    pub fn new(max_tokens: Option<usize>, max_time_secs: Option<f64>) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+        Self { max_tokens, used_tokens: 0, max_time_secs, started_at_secs: now }
+    }
+
+    /// Returns `Some(reason)` if the budget is exhausted.
+    pub fn check_exhausted(&self) -> Option<String> {
+        if let Some(max) = self.max_tokens {
+            if self.used_tokens >= max {
+                return Some(format!(
+                    "Thermodynamic Constraint Exceeded: token budget exhausted ({}/{} tokens used).",
+                    self.used_tokens, max
+                ));
+            }
+        }
+        if let Some(max_t) = self.max_time_secs {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64();
+            if now - self.started_at_secs >= max_t {
+                return Some(format!(
+                    "Thermodynamic Constraint Exceeded: time budget exhausted ({:.1}/{:.1}s elapsed).",
+                    now - self.started_at_secs, max_t
+                ));
+            }
+        }
+        None
+    }
+}
+
 pub fn cosine_similarity(v1: &[f64], v2: &[f64]) -> f64 {
     if v1.len() != v2.len() || v1.is_empty() {
         return 0.0;
@@ -203,6 +247,19 @@ impl SemanticMemory {
             }
         }
         None
+    }
+
+    /// Pillar 4: Physically deletes entries matching the given label from Semantic RAM.
+    pub fn forget(&mut self, label: &str) {
+        self.items.retain(|item| item.key != label);
+        // Reset HNSW entry point if it may be stale
+        if self.items.is_empty() {
+            self.entry_point = None;
+        } else if let Some(ep) = self.entry_point {
+            if ep >= self.items.len() {
+                self.entry_point = Some(0);
+            }
+        }
     }
 
     // O(log N) Greedy Search across HNSW Layer 0
@@ -362,6 +419,7 @@ pub struct Runtime {
     pub memory: SemanticMemory,
     pub structs: HashMap<String, IndexMap<String, Type>>,
     pub capabilities: CapabilityRegistry,
+    pub budget_stack: Vec<BudgetFrame>, // Thermodynamic guardrails
     #[serde(skip)]
     pub switchboard: Option<std::sync::Arc<dyn NetworkSwitchboard>>,
 }
@@ -374,6 +432,7 @@ impl Clone for Runtime {
             memory: self.memory.clone(),
             structs: self.structs.clone(),
             capabilities: self.capabilities.clone(),
+            budget_stack: self.budget_stack.clone(),
             switchboard: self.switchboard.clone(),
         }
     }
@@ -387,6 +446,7 @@ impl Runtime {
             memory: SemanticMemory::new(),
             structs: HashMap::new(),
             capabilities: CapabilityRegistry::new(),
+            budget_stack: Vec::new(),
             switchboard: None,
         }
     }
@@ -540,6 +600,7 @@ pub fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         | Value::Vec(_)
         | Value::Cap(_)
         | Value::CapProxy { .. }
+        | Value::ToolCallRequest(_, _)
         | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
     }
 }

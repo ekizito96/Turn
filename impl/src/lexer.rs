@@ -10,6 +10,7 @@ pub enum Token {
     SpawnRemote,
     Send,
     Receive,
+    Harvest,
     Link,
     Monitor,
     Vec,
@@ -31,6 +32,12 @@ pub enum Token {
     Return,
     Infer,  // NEW
     With,   // NEW
+    Budget, // NEW
+    Tokens, // NEW
+    Time,   // NEW
+    Compress, // NEW Pillar 4
+    Forget,   // NEW Pillar 4
+    Persist,  // NEW Pillar 5
     Secret, // NEW
     Tool,   // NEW
     Struct,
@@ -114,6 +121,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("spawn", Token::Spawn),
     ("send", Token::Send),
     ("receive", Token::Receive),
+    ("harvest", Token::Harvest),
     ("link", Token::Link),
     ("monitor", Token::Monitor),
     ("vec", Token::Vec),
@@ -132,13 +140,20 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("call", Token::Call),
     ("return", Token::Return),
     ("infer", Token::Infer),   // NEW
-    ("with", Token::With),     // NEW
-    ("secret", Token::Secret), // NEW
-    ("tool", Token::Tool),     // NEW
+    ("with", Token::With),         // NEW
+    ("budget", Token::Budget),     // NEW
+    ("tokens", Token::Tokens),     // NEW
+    ("time", Token::Time),         // NEW
+    ("compress", Token::Compress), // NEW Pillar 4
+    ("forget", Token::Forget),     // NEW Pillar 4
+    ("persist", Token::Persist),   // NEW Pillar 5
+    ("secret", Token::Secret),     // NEW
+    ("tool", Token::Tool),         // NEW
     ("spawn", Token::Spawn),
     ("spawn_remote", Token::SpawnRemote),
     ("send", Token::Send),
     ("receive", Token::Receive),
+    ("harvest", Token::Harvest),
     ("link", Token::Link),
     ("monitor", Token::Monitor),
     ("struct", Token::Struct),

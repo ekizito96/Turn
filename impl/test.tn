@@ -1,1 +1,4 @@
-let _x = call("echo", "hello"); return 1;
+call("echo", "Hello Turn!");
+let msg = "Echo test";
+call("echo", msg);
+return 42;

@@ -1,0 +1,30 @@
+// ============================================================================
+// Turn v0.5.1 Example: Context Entropy Pruning (Pillar 4)
+//
+// Demonstrates 'compress(text, ratio)' to shrink context strings and
+// 'forget(label)' to physically delete stale Semantic RAM entries.
+// This keeps context windows lean and LLM costs low.
+//
+// Run: TURN_INFER_PROVIDER=<wasm> cargo run -- run examples/context_pruning.tn --id context_demo
+// ============================================================================
+
+use "std/print";
+
+println("[Memory Agent] Seeding knowledge base...");
+
+remember("requirements", "Build a multi-modal AI pipeline with real-time transcription, object detection, sentiment analysis, and context-aware summarization across 12 GPUs.");
+remember("retrospective", "Sprint 14: velocity dropped 23%. Fix: rotate on-call, break down tickets, improve docs, resolve Redis sentinel failover bug.");
+remember("competitors", "Competitor X: 128k context at $0.003/1k tokens. Competitor Y: on-device model. Competitor Z: enterprise RBAC. Our edge: native agentic memory + budget control.");
+
+let raw_req = recall("requirements");
+let compact_req = compress(raw_req, 0.3);
+remember("requirements", compact_req);
+println("[Memory Agent] Requirements compressed to 30%.");
+
+let removed = forget("retrospective");
+println("[Memory Agent] Retrospective evicted: " + removed);
+
+let context_str = "Requirements: " + recall("requirements") + " | Competitors: " + recall("competitors");
+let strategy = infer Str { context_str;};
+
+println("[Memory Agent] Q3 Strategy: " + strategy);

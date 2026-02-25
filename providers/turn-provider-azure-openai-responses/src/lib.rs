@@ -48,7 +48,16 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     let sys_msg = "You are a cognitive runtime inference engine mapped to the Turn language. You must return pure JSON matching the user's schema.";
     
     let mut openai_tools = Vec::new();
-    for t in req.params.tools {
+    for mut t in req.params.tools {
+        // The /responses preview API expects a flattened tool object structure
+        if let Some(mut func_obj) = t.get_mut("function").and_then(|f| f.as_object_mut()).map(|o| std::mem::take(o)) {
+            if let Some(t_obj) = t.as_object_mut() {
+                t_obj.remove("function");
+                for (k, v) in func_obj {
+                    t_obj.insert(k, v);
+                }
+            }
+        }
         openai_tools.push(t);
     }
 
@@ -65,7 +74,7 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
         "max_output_tokens": 16384,
     });
 
-    if req.params.schema != json!({"type": "any"}) {
+    if req.params.schema != json!({"type": "any"}) && req.params.schema != json!({"type": "string"}) {
         body["text"] = json!({
             "format": {
                 "type": "json_schema",
@@ -138,10 +147,23 @@ pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
         }
 
         for output in outputs {
+            // Azure Responses API streams tool calls ("function_call") directly onto the root output list
+            if output.get("type").and_then(|t| t.as_str()) == Some("function_call") {
+                return pack_string(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tool_call",
+                    "params": {
+                        "name": output["name"].as_str().unwrap_or(""),
+                        "arguments": output["arguments"].as_str().unwrap_or("{}")
+                    }
+                }).to_string());
+            }
+
             if output.get("type").and_then(|t| t.as_str()) == Some("message") {
                 if let Some(content_arr) = output.get("content").and_then(|c| c.as_array()) {
                     for item in content_arr {
-                        // Check for tool calls first
+                        // Check for older nested tool calls just in case
                         if item.get("type").and_then(|t| t.as_str()) == Some("tool_call") {
                             if let Some(t) = item.get("tool_call") {
                                 return pack_string(json!({
@@ -158,7 +180,19 @@ pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
 
                         // Check for actual text completion
                         if item.get("type").and_then(|t| t.as_str()) == Some("output_text") {
-                            let content = item["text"].as_str().unwrap_or("");
+                            let mut content = item["text"].as_str().unwrap_or("");
+                            
+                            // Strip markdown json formatting blocks if present
+                            if content.starts_with("```json") {
+                                content = &content[7..];
+                            } else if content.starts_with("```") {
+                                content = &content[3..];
+                            }
+                            if content.ends_with("```") {
+                                content = &content[..content.len() - 3];
+                            }
+                            let content = content.trim();
+
                             let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
 
                             return pack_string(json!({

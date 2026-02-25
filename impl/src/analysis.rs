@@ -539,6 +539,7 @@ impl Analysis {
                         ty,
                         init,
                         span,
+                        ..
                     } = stmt
                     {
                         let method_ty = ty.clone().or_else(|| self.infer_expr_type(init));
@@ -563,6 +564,7 @@ impl Analysis {
                 ty,
                 init,
                 span,
+                ..
             } => {
                 self.visit_expr(init);
 
@@ -573,6 +575,12 @@ impl Analysis {
                 let stored_ty = ty.clone().or_else(|| self.infer_expr_type(init));
 
                 self.add_definition(name, *span, stored_ty);
+            }
+            Stmt::Assign { target, value, span } => {
+                self.visit_expr(target);
+                self.visit_expr(value);
+                let target_ty = self.infer_expr_type(target);
+                self.check_assignment(&target_ty, value, *span);
             }
             Stmt::Turn { body, .. } => {
                 // Turn is an expression usually, but here it's a statement (expression statement?)
@@ -739,6 +747,7 @@ impl Analysis {
                 self.check_assignment(&Some(Type::Pid), pid, *span);
             }
             Expr::Receive { .. } => {}
+            Expr::Harvest { .. } => {}
             Expr::Confidence { expr, .. } => {
                 self.visit_expr(expr);
             }
@@ -833,6 +842,18 @@ impl Analysis {
                 self.check_assignment(&Some(Type::Pid), pid, *span);
             }
             Expr::Literal { .. } => {}
+            Expr::Budget { tokens, time, body, .. } => {
+                if let Some(t) = tokens { self.visit_expr(t); }
+                if let Some(t) = time { self.visit_expr(t); }
+                for stmt in &body.stmts { self.visit_stmt(stmt); }
+            }
+            Expr::Compress { text, ratio, .. } => {
+                self.visit_expr(text);
+                self.visit_expr(ratio);
+            }
+            Expr::Forget { label, .. } => {
+                self.visit_expr(label);
+            }
         }
     }
 

@@ -60,12 +60,24 @@ impl Compiler {
                 let after_turn = self.code.len() as u32;
                 self.patch_jump(enter_turn_addr, after_turn);
             }
-            Stmt::Let { name, ty, init, .. } => {
+            Stmt::Let { name, ty, init, is_persistent, .. } => {
                 self.compile_expr(init);
                 if let Some(t) = ty {
                     self.emit(Instr::CheckType(t.clone()));
                 }
                 self.emit(Instr::Store(name.clone()));
+                if *is_persistent {
+                    self.emit(Instr::Load(name.clone()));
+                    self.emit(Instr::StorePersist(name.clone()));
+                }
+            }
+            Stmt::Assign { target, value, .. } => {
+                self.compile_expr(value);
+                if let Expr::Id { name, .. } = target {
+                    self.emit(Instr::Store(name.clone()));
+                } else {
+                    panic!("Compiler error: Reassignment currently only supports simple identifiers");
+                }
             }
             Stmt::ContextAppend { expr, .. } => {
                 self.compile_expr(expr);
@@ -207,6 +219,15 @@ impl Compiler {
                 self.compile_expr(key);
                 self.emit(Instr::Recall);
             }
+            Expr::Compress { text, ratio, .. } => {
+                self.compile_expr(text);
+                self.compile_expr(ratio);
+                self.emit(Instr::Compress);
+            }
+            Expr::Forget { label, .. } => {
+                self.compile_expr(label);
+                self.emit(Instr::Forget);
+            }
             Expr::Call { name, arg, .. } => {
                 self.compile_expr(name);
                 self.compile_expr(arg);
@@ -294,6 +315,47 @@ impl Compiler {
                 }
 
                 self.emit(Instr::Infer(target_ty.clone(), tool_count as u32));
+            }
+            Expr::Budget {
+                tokens,
+                time,
+                body,
+                ..
+            } => {
+                if let Some(t) = time {
+                    self.compile_expr(t);
+                } else {
+                    self.emit(Instr::PushNull);
+                }
+                if let Some(toks) = tokens {
+                    self.compile_expr(toks);
+                } else {
+                    self.emit(Instr::PushNull);
+                }
+                self.emit(Instr::PushBudget);
+
+                let len = body.stmts.len();
+                if len == 0 {
+                    self.emit(Instr::PushNull);
+                } else {
+                    for (i, stmt) in body.stmts.iter().enumerate() {
+                        if i == len - 1 {
+                            match stmt {
+                                Stmt::ExprStmt { expr, .. } => {
+                                    self.compile_expr(expr);
+                                }
+                                _ => {
+                                    self.compile_stmt(stmt);
+                                    self.emit(Instr::PushNull);
+                                }
+                            }
+                        } else {
+                            self.compile_stmt(stmt);
+                        }
+                    }
+                }
+
+                self.emit(Instr::PopBudget);
             }
             Expr::Index { target, index, .. } => {
                 self.compile_expr(target);
@@ -401,6 +463,9 @@ impl Compiler {
             }
             Expr::Receive { .. } => {
                 self.emit(Instr::Receive);
+            }
+            Expr::Harvest { .. } => {
+                self.emit(Instr::Harvest);
             }
             Expr::Link { pid, .. } => {
                 self.compile_expr(pid);

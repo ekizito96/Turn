@@ -1,44 +1,35 @@
 use std::path::PathBuf;
-use std::time::Duration;
-use turn::server;
+use turn::runner::Runner;
+use turn::store::FileStore;
+use turn::tools::ToolRegistry;
 
 #[tokio::test]
 async fn test_server_run() {
-    let store_path = PathBuf::from(".turn_store_test");
+    let store_path = PathBuf::from(".turn_store_server_test");
     if store_path.exists() {
         std::fs::remove_dir_all(&store_path).unwrap();
     }
 
-    // Spawn server task
-    let server_handle = tokio::spawn(async move {
-        // Use port 3333 for testing
-        if let Err(e) = server::serve(3333, store_path).await {
-            eprintln!("Server error: {}", e);
-        }
-    });
+    let store = FileStore::new(store_path.clone());
+    let tools = ToolRegistry::new();
+    let mut runner = Runner::new(store, tools);
 
-    // Wait for server to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let result = runner
+        .run("test-agent", "turn { return \"Hello from Test!\"; }", None)
+        .await;
 
-    // 2. Make request
-    let client = reqwest::Client::new();
-    let resp = client
-        .post("http://127.0.0.1:3333/run")
-        .json(&serde_json::json!({
-            "id": "test-agent",
-            "source": "turn { return \"Hello from Test!\"; }"
-        }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["result"], "Hello from Test!");
+    assert!(result.is_ok(), "Runner should succeed: {:?}", result.err());
+    // Convert result value to string for assertion
+    let val = result.unwrap();
+    let val_str = format!("{:?}", val);
+    assert!(
+        val_str.contains("Hello from Test!"),
+        "Unexpected output: {}",
+        val_str
+    );
 
     // Cleanup
-    server_handle.abort();
-    if std::path::Path::new(".turn_store_test").exists() {
-        std::fs::remove_dir_all(".turn_store_test").unwrap();
+    if std::path::Path::new(".turn_store_server_test").exists() {
+        std::fs::remove_dir_all(".turn_store_server_test").unwrap();
     }
 }

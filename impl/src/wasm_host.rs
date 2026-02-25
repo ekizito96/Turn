@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
-use reqwest::blocking::Client;
 use std::path::Path;
-use std::time::Duration;
+use std::process::Command;
 use wasmtime::*;
 
 /// A loaded Wasm inference driver.
@@ -109,30 +108,24 @@ impl WasmProvider {
     }
 
     fn execute_http(req: serde_json::Value) -> Result<String> {
-        let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
-
         let mut url = req["url"]
             .as_str()
             .context("Missing 'url' in HTTP config")?
             .to_string();
         url = Self::resolve_env_vars(&url);
-
         let method_str = req["method"].as_str().unwrap_or("POST");
 
-        let method = match method_str.to_uppercase().as_str() {
-            "GET" => reqwest::Method::GET,
-            "POST" => reqwest::Method::POST,
-            "PUT" => reqwest::Method::PUT,
-            "DELETE" => reqwest::Method::DELETE,
-            _ => reqwest::Method::POST,
-        };
+        let mut cmd = Command::new("curl");
+        let headers_file = tempfile::NamedTempFile::new()?;
+        let headers_path = headers_file.path().to_str().unwrap();
 
-        let mut request = client.request(method, url);
+        cmd.args(["-s", "-D", headers_path, "-X", method_str]);
 
         if let Some(headers) = req["headers"].as_object() {
             for (k, v) in headers {
                 if let Some(s) = v.as_str() {
-                    request = request.header(k, Self::resolve_env_vars(s));
+                    cmd.arg("-H");
+                    cmd.arg(format!("{}: {}", k, Self::resolve_env_vars(s)));
                 }
             }
         }
@@ -143,28 +136,42 @@ impl WasmProvider {
             } else {
                 body.to_string()
             };
-            request = request.body(Self::resolve_env_vars(&body_str));
+            cmd.arg("-d");
+            cmd.arg(Self::resolve_env_vars(&body_str));
         }
 
-        let response = request.send()?;
-        let status = response.status().as_u16();
+        cmd.arg(&url);
+
+        let output = cmd.output()?;
+        let body_part = String::from_utf8_lossy(&output.stdout).to_string();
+
+        let header_part = std::fs::read_to_string(headers_path).unwrap_or_default();
+
+        // Extract HTTP status code from the last block of headers (in case of 100 Continue)
+        let mut status = 200;
+        let mut headers_map = serde_json::Map::new();
+        
+        // Split by \r\n\r\n to handle multiple header blocks (e.g., 100 Continue)
+        let blocks: Vec<&str> = header_part.split("\r\n\r\n").collect();
+        let last_header_block = blocks.iter().rev().find(|b| !b.trim().is_empty()).unwrap_or(&"");
+        
+        let mut lines = last_header_block.lines();
+        if let Some(status_line) = lines.next() {
+            status = status_line.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(200);
+        }
 
         let mut out = serde_json::Map::new();
         out.insert("status".to_string(), serde_json::json!(status));
 
-        let mut headers_map = serde_json::Map::new();
-        for (k, v) in response.headers().iter() {
-            if let Ok(s) = v.to_str() {
-                headers_map.insert(k.as_str().to_string(), serde_json::json!(s));
+        for line in lines {
+            if let Some((k, v)) = line.split_once(':') {
+                headers_map.insert(k.trim().to_lowercase(), serde_json::json!(v.trim()));
             }
         }
-        out.insert(
-            "headers".to_string(),
-            serde_json::Value::Object(headers_map),
-        );
-
-        let body_text = response.text()?;
-        out.insert("body".to_string(), serde_json::json!(body_text));
+        out.insert("headers".to_string(), serde_json::Value::Object(headers_map));
+        out.insert("body".to_string(), serde_json::json!(body_part.clone()));
+        
+        println!("[WASM_HOST DEBUG] Raw Azure body:\n{}", body_part);
 
         Ok(serde_json::Value::Object(out).to_string())
     }

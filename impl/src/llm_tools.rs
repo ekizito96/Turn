@@ -258,46 +258,102 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 }
             }
 
-            // Determine Inference Provider Executable
             let provider_file = env::var("TURN_INFER_PROVIDER")
                 .unwrap_or_else(|_| "turn-provider-openai.wasm".to_string());
-
+            
+            // We load the provider once to avoid recompiling Wasm overhead per retry
             let provider = match crate::wasm_host::WasmProvider::new(&provider_file) {
                 Ok(p) => p,
                 Err(e) => return Ok(Value::Str(Arc::new(format!("Failed to load Wasm provider '{}': {}", provider_file, e)))),
             };
 
-            let rpc_request = json!({
-                "jsonrpc": "2.0",
-                "method": "infer",
-                "params": {
-                    "prompt": user_msg,
-                    "schema": schema_json,
-                    "context": context_list.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
-                    "tools": serialized_tools
-                },
-                "id": 1
-            });
+            let mut retries = 0;
+            const MAX_RETRIES: usize = 3;
+            let mut current_prompt = user_msg.clone();
+            let mut context_history = context_list.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>();
 
-            let response_str = match provider.execute_inference(&rpc_request.to_string()) {
-                Ok(res) => res,
-                Err(e) => return Ok(Value::Str(Arc::new(format!("Wasm Execution Error: {}", e)))),
-            };
+            loop {
+                let rpc_request = json!({
+                    "jsonrpc": "2.0",
+                    "method": "infer",
+                    "params": {
+                        "prompt": current_prompt,
+                        "schema": schema_json,
+                        "context": context_history,
+                        "tools": serialized_tools
+                    },
+                    "id": 1
+                });
 
-            if let Ok(msg) = serde_json::from_str::<JsonValue>(&response_str) {
-                if msg.get("method").and_then(|m| m.as_str()) == Some("tool_call") {
-                    return Ok(Value::Str(Arc::new("Turn AST execution from within llm_infer is currently unsupported (tool_call requested).".to_string())));
-                } else if let Some(result) = msg.get("result") {
-                    match json_value_to_turn_value(&turn_type, result) {
-                        Ok(val) => return Ok(val),
-                        Err(e) => return Ok(Value::Str(Arc::new(format!("Provider type map error: {}", e)))),
+                let response_str = match provider.execute_inference(&rpc_request.to_string()) {
+                    Ok(res) => res,
+                    Err(e) => return Ok(Value::Str(Arc::new(format!("Wasm Execution Error: {}", e)))),
+                };
+
+                if let Ok(msg) = serde_json::from_str::<JsonValue>(&response_str) {
+                    if msg.get("method").and_then(|m| m.as_str()) == Some("tool_call") {
+                        // Extract tool parameters from Turn JSON-RPC layer
+                        let func_name = msg.get("params").and_then(|p| p.get("name")).and_then(|n| n.as_str()).unwrap_or("unknown_tool").to_string();
+                        let func_args = msg.get("params").and_then(|p| p.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+                        return Ok(Value::ToolCallRequest(func_name, func_args));
+                    } else if let Some(result) = msg.get("result") {
+                        
+                        // Pillar 1: Native Boundary Markdown Sanity Coercion
+                        let mut sanitized_result = result.clone();
+                        if let Some(s) = result.as_str() {
+                            let mut content = s;
+                            if content.starts_with("```json") {
+                                content = &content[7..];
+                            } else if content.starts_with("```") {
+                                content = &content[3..];
+                            }
+                            if content.ends_with("```") {
+                                content = &content[..content.len() - 3];
+                            }
+                            let content = content.trim();
+
+                            if let Ok(parsed) = serde_json::from_str::<JsonValue>(content) {
+                                sanitized_result = parsed;
+                            } else {
+                                sanitized_result = JsonValue::String(content.to_string());
+                            }
+                        }
+
+                        // Pillar 1: Native Boundary Hidden Recovery Loop
+                        match json_value_to_turn_value(&turn_type, &sanitized_result) {
+                            Ok(val) => return Ok(val),
+                            Err(e) => {
+                                if retries < MAX_RETRIES {
+                                    retries += 1;
+                                    context_history.push(format!("Assistant Draft: {:?}", result));
+                                    current_prompt = format!("Your previous response was structurally invalid and failed coercion. DO NOT format with markdown syntax if it causes errors. Fix this specific schema error and return ONLY raw JSON:\n{}", e);
+                                    continue;
+                                } else {
+                                    return Ok(Value::Str(Arc::new(format!("Provider type map error (after {} retries): {}", MAX_RETRIES, e))));
+                                }
+                            }
+                        }
+                    } else if let Some(error) = msg.get("error") {
+                        if retries < MAX_RETRIES {
+                            retries += 1;
+                            let err_str = error.as_str().unwrap_or("Unknown provider error");
+                            context_history.push(format!("Provider API Error: {}", err_str));
+                            current_prompt = format!("The API rejected your previous payload request string. Ensure you perfectly map tools and JSON schema. Fix this error:\n{}", err_str);
+                            continue;
+                        } else {
+                            return Ok(Value::Str(Arc::new(format!("Provider Error (after {} retries): {}", MAX_RETRIES, error))));
+                        }
                     }
-                } else if let Some(error) = msg.get("error") {
-                    return Ok(Value::Str(Arc::new(format!("Provider Error: {}", error))));
                 }
-            }
 
-            Ok(Value::Str(Arc::new(format!("Invalid provider response: {}", response_str))))
+                if retries < MAX_RETRIES {
+                    retries += 1;
+                    context_history.push("Host Error: Invalid provider response format. Returning to user loop.".to_string());
+                    current_prompt = "Your output was unparseable. Return valid output.".to_string();
+                    continue;
+                }
+                return Ok(Value::Str(Arc::new(format!("Invalid provider response (after {} retries): {}", MAX_RETRIES, response_str))));
+            }
         }) as ToolHandler,
     );
 }

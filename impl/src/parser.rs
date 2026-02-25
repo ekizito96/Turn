@@ -208,6 +208,30 @@ impl Parser {
                 self.expect(Token::Semicolon)?; // struct Foo { ... };
                 Ok(Stmt::StructDef { name, fields, span })
             }
+            Some(Token::Persist) => {
+                self.next();
+                // persist let x = y;
+                self.expect(Token::Let)?;
+                let Token::Id(name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
+                    return Err(ParseError::UnexpectedToken(self.span()));
+                };
+                let ty = if matches!(self.peek(), Some(Token::Colon)) {
+                    self.next();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                self.expect(Token::Eq)?;
+                let init = self.parse_expr()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::Let {
+                    name,
+                    ty,
+                    init,
+                    is_persistent: true,
+                    span,
+                })
+            }
             Some(Token::Let) => {
                 self.next();
                 let Token::Id(name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
@@ -228,6 +252,7 @@ impl Parser {
                     name,
                     ty,
                     init,
+                    is_persistent: false,
                     span,
                 })
             }
@@ -351,8 +376,23 @@ impl Parser {
             }
             _ => {
                 let expr = self.parse_expr()?;
-                self.expect(Token::Semicolon)?;
-                Ok(Stmt::ExprStmt { expr, span })
+                if matches!(self.peek(), Some(Token::Eq)) {
+                    self.next(); // consume '='
+                    let value = self.parse_expr()?;
+                    self.expect(Token::Semicolon)?;
+                    let assign_span = Span {
+                        start: span.start,
+                        end: self.last_span.end,
+                    };
+                    Ok(Stmt::Assign {
+                        target: expr,
+                        value,
+                        span: assign_span,
+                    })
+                } else {
+                    self.expect(Token::Semicolon)?;
+                    Ok(Stmt::ExprStmt { expr, span })
+                }
             }
         }
     }
@@ -515,6 +555,47 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::With) => {
+                self.next(); // Consume 'with'
+                self.expect(Token::Budget)?;
+                self.expect(Token::LParen)?;
+                
+                let mut tokens_expr = None;
+                let mut time_expr = None;
+
+                while !matches!(self.peek(), Some(Token::RParen) | Some(Token::Eof)) {
+                    match self.peek() {
+                        Some(Token::Tokens) => {
+                            self.next();
+                            self.expect(Token::Colon)?;
+                            tokens_expr = Some(Box::new(self.parse_expr()?));
+                        }
+                        Some(Token::Time) => {
+                            self.next();
+                            self.expect(Token::Colon)?;
+                            time_expr = Some(Box::new(self.parse_expr()?));
+                        }
+                        _ => {
+                            return Err(ParseError::UnexpectedToken(self.span()));
+                        }
+                    }
+
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(Token::RParen)?;
+                let body = self.parse_block()?;
+
+                Ok(Expr::Budget {
+                    tokens: tokens_expr,
+                    time: time_expr,
+                    body,
+                    span,
+                })
+            }
             Some(Token::Infer) => {
                 self.next();
                 let target_ty = self.parse_type()?;
@@ -671,7 +752,6 @@ impl Parser {
                             span,
                         };
                     } else {
-                        // Property access sugar: obj.prop -> obj["prop"]
                         let span = Span {
                             start: expr.span().start,
                             end: self.last_span.end,
@@ -685,6 +765,43 @@ impl Parser {
                             span,
                         };
                     }
+                }
+                Some(Token::LParen) => {
+                    self.next(); // consume (
+                    let mut args = Vec::new();
+                    while !matches!(self.peek(), Some(Token::RParen) | Some(Token::Eof)) {
+                        args.push(self.parse_expr()?);
+                        if matches!(self.peek(), Some(Token::Comma)) {
+                            self.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    
+                    let arg = if args.is_empty() {
+                        Expr::Literal {
+                            value: Literal::Null,
+                            span: self.last_span,
+                        }
+                    } else if args.len() == 1 {
+                        args.into_iter().next().unwrap()
+                    } else {
+                        Expr::List {
+                            items: args,
+                            span: self.last_span,
+                        }
+                    };
+
+                    let span = Span {
+                        start: expr.span().start,
+                        end: self.last_span.end,
+                    };
+                    expr = Expr::Call {
+                        name: Box::new(expr),
+                        arg: Box::new(arg),
+                        span,
+                    };
                 }
                 _ => break,
             }
@@ -777,6 +894,27 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(Expr::Recall {
                     key: Box::new(key),
+                    span,
+                })
+            }
+            Token::Compress => {
+                self.expect(Token::LParen)?;
+                let text = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let ratio = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::Compress {
+                    text: Box::new(text),
+                    ratio: Box::new(ratio),
+                    span,
+                })
+            }
+            Token::Forget => {
+                self.expect(Token::LParen)?;
+                let label = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::Forget {
+                    label: Box::new(label),
                     span,
                 })
             }

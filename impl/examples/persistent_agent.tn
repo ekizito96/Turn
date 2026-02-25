@@ -1,0 +1,27 @@
+// ============================================================================
+// Turn v0.5.1 Example: Persistent State Memory (Pillar 5)
+//
+// 'persist let x = y;' serializes the variable to
+// .turn_store/persist_<name>.json after every assignment.
+// On the next boot, the VM pre-loads these values automatically.
+//
+// Run first time:   cargo run -- run examples/persistent_agent.tn --id my_agent
+// Run second time:  cargo run -- run examples/persistent_agent.tn --id my_agent
+// Observe: run_count increments across restarts.
+// ============================================================================
+
+use "std/print";
+
+println("[Persistent Agent] Booting...");
+
+persist let run_count = 0;
+persist let company = "NVDA";
+persist let run_count = run_count + 1;
+
+println("[Persistent Agent] Run #" + run_count + " - Analyzing: " + company);
+
+let prompt = "In one sentence, assess the investment risk for " + company + ". Run #" + run_count + ".";
+let analysis = infer Str { prompt;};
+
+println("[Persistent Agent] Risk: " + analysis);
+println("[Persistent Agent] State persisted. Next run: run_count = " + run_count + ".");

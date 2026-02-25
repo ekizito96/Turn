@@ -35,6 +35,7 @@ pub enum Value {
         id: usize,
     }, // Remote OCap
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
+    ToolCallRequest(String, String), // (Tool Name, JSON Arguments)
 }
 
 impl Value {
@@ -53,6 +54,7 @@ impl Value {
             Value::CapProxy { .. } => false,
             Value::Uncertain(v, _) => v.is_falsy(),
             Value::Closure { .. } => false,
+            Value::ToolCallRequest(_, _) => false,
         }
     }
 
@@ -115,6 +117,7 @@ impl std::fmt::Display for Value {
                 write!(f, "<capability_proxy {}@{}>", id, origin_node)
             }
             Value::Uncertain(v, p) => write!(f, "{} ({}%)", v, p * 100.0),
+            Value::ToolCallRequest(name, args) => write!(f, "<tool_call {} {}>", name, args),
         }
     }
 }

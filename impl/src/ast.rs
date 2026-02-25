@@ -36,6 +36,12 @@ pub enum Stmt {
         name: String,
         ty: Option<Type>,
         init: Expr,
+        is_persistent: bool, // Pillar 5
+        span: Span,
+    },
+    Assign {
+        target: Expr,
+        value: Expr,
         span: Span,
     },
     ContextAppend {
@@ -125,6 +131,15 @@ pub enum Expr {
         key: Box<Expr>,
         span: Span,
     },
+    Compress {
+        text: Box<Expr>,
+        ratio: Box<Expr>,
+        span: Span,
+    },
+    Forget {
+        label: Box<Expr>,
+        span: Span,
+    },
     Call {
         name: Box<Expr>,
         arg: Box<Expr>,
@@ -153,6 +168,9 @@ pub enum Expr {
     Receive {
         span: Span,
     },
+    Harvest {
+        span: Span,
+    },
     Link {
         pid: Box<Expr>,
         span: Span,
@@ -167,6 +185,12 @@ pub enum Expr {
     },
     Confidence {
         expr: Box<Expr>,
+        span: Span,
+    },
+    Budget {
+        tokens: Option<Box<Expr>>,
+        time: Option<Box<Expr>>, // currently an Expr mapping to seconds
+        body: Block,
         span: Span,
     },
     StructInit {
@@ -221,6 +245,8 @@ impl Expr {
             Expr::Id { span, .. } => *span,
             Expr::MethodCall { span, .. } => *span,
             Expr::Recall { span, .. } => *span,
+            Expr::Compress { span, .. } => *span,
+            Expr::Forget { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
@@ -229,6 +255,7 @@ impl Expr {
             Expr::SpawnRemote { span, .. } => *span,
             Expr::Send { span, .. } => *span,
             Expr::Receive { span } => *span,
+            Expr::Harvest { span } => *span,
             Expr::Link { span, .. } => *span,
             Expr::Monitor { span, .. } => *span,
             Expr::Vec { span, .. } => *span,
@@ -241,6 +268,7 @@ impl Expr {
             Expr::Binary { span, .. } => *span,
             Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
+            Expr::Budget { span, .. } => *span,
             Expr::StructInit { span, .. } => *span,
         }
     }
