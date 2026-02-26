@@ -66,6 +66,38 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
+        // fs_read_blob
+        tools.insert(
+            "fs_read_blob".to_string(),
+            Box::new(|arg| {
+                let path = match arg {
+                    Value::Str(s) => s,
+                    _ => return Err("Argument must be a string path".to_string()),
+                };
+                match fs::read(path.as_ref()) {
+                    Ok(bytes) => {
+                        let mime_type = match std::path::Path::new(path.as_ref()).extension().and_then(|ext| ext.to_str()) {
+                            Some("png") => "image/png",
+                            Some("jpg") | Some("jpeg") => "image/jpeg",
+                            Some("gif") => "image/gif",
+                            Some("webp") => "image/webp",
+                            Some("pdf") => "application/pdf",
+                            Some("txt") | Some("md") | Some("csv") => "text/plain",
+                            Some("mp3") => "audio/mpeg",
+                            Some("wav") => "audio/wav",
+                            Some("json") => "application/json",
+                            _ => "application/octet-stream",
+                        }.to_string();
+                        Ok(Value::Blob {
+                            mime_type,
+                            data: std::sync::Arc::new(bytes),
+                        })
+                    }
+                    Err(e) => Err(format!("Failed to read file {}: {}", path, e)),
+                }
+            }) as ToolHandler,
+        );
+
         // fs_write
         tools.insert(
             "fs_write".to_string(),
@@ -91,19 +123,36 @@ impl ToolRegistry {
                 }
             }) as ToolHandler,
         );
-
-        // env_get
+        // load_driver
         tools.insert(
-            "env_get".to_string(),
+            "load_driver".to_string(),
             Box::new(|arg| {
-                let key = match arg {
-                    Value::Str(s) => s,
-                    _ => return Err("Argument must be a string key".to_string()),
+                let (path, config) = match arg {
+                    Value::Map(m) => {
+                        let path = match m.get("path") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'path' string in driver spec".to_string()),
+                        };
+                        let config = match m.get("config") {
+                            Some(Value::Map(c)) => c.clone(),
+                            _ => std::sync::Arc::new(indexmap::IndexMap::new()),
+                        };
+                        (path, config)
+                    }
+                    Value::Str(s) => (s, std::sync::Arc::new(indexmap::IndexMap::new())),
+                    _ => return Err("Argument must be a path string or {path, config} map".to_string()),
                 };
-                match env::var(key.as_ref()) {
-                    Ok(val) => Ok(Value::Str(std::sync::Arc::new(val))),
-                    Err(_) => Ok(Value::Null),
+
+                // Inject config values securely into the current environment process context
+                for (k, v) in config.iter() {
+                    if let Value::Str(val) = v {
+                        env::set_var(k, val.as_ref());
+                    } else {
+                        env::set_var(k, v.to_string());
+                    }
                 }
+
+                Ok(Value::Str(path))
             }) as ToolHandler,
         );
 

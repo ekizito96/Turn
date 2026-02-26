@@ -18,6 +18,7 @@ pub enum Type {
     Pid,
     Vec,
     Cap,
+    Blob,
     Result(Box<Type>, Box<Type>),
 }
 
@@ -92,9 +93,7 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
-    Suspend {
-        span: Span,
-    },
+
     Match {
         expr: Expr,
         ok_binding: String,
@@ -131,15 +130,6 @@ pub enum Expr {
         key: Box<Expr>,
         span: Span,
     },
-    Compress {
-        text: Box<Expr>,
-        ratio: Box<Expr>,
-        span: Span,
-    },
-    Forget {
-        label: Box<Expr>,
-        span: Span,
-    },
     Call {
         name: Box<Expr>,
         arg: Box<Expr>,
@@ -149,8 +139,15 @@ pub enum Expr {
         module: Box<Expr>,
         span: Span,
     },
+    Suspend {
+        expected_type: Type,
+        msg: Box<Expr>,
+        span: Span,
+    },
     Spawn {
         expr: Box<Expr>,
+        linked: bool,
+        monitored: bool,
         span: Span,
     },
     SpawnRemote {
@@ -166,19 +163,13 @@ pub enum Expr {
         span: Span,
     },
     Receive {
+        is_blocking: bool,
         span: Span,
     },
     Harvest {
         span: Span,
     },
-    Link {
-        pid: Box<Expr>,
-        span: Span,
-    },
-    Monitor {
-        pid: Box<Expr>,
-        span: Span,
-    },
+
     Vec {
         items: Vec<Expr>,
         span: Span,
@@ -214,6 +205,9 @@ pub enum Expr {
         target_ty: Type,
         tools: Option<Vec<Expr>>, // `with [tool1, tool2]`
         body: Block,
+        driver: Option<Box<Expr>>, // `via driver_expr`
+        threshold: Option<Box<Expr>>, // `~ 0.9`
+        fallback: Option<Block>,      // `else { ... }`
         span: Span,
     },
     List {
@@ -245,19 +239,16 @@ impl Expr {
             Expr::Id { span, .. } => *span,
             Expr::MethodCall { span, .. } => *span,
             Expr::Recall { span, .. } => *span,
-            Expr::Compress { span, .. } => *span,
-            Expr::Forget { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
+            Expr::Suspend { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
             Expr::Ok(_, span) => *span,
             Expr::Err(_, span) => *span,
             Expr::SpawnRemote { span, .. } => *span,
             Expr::Send { span, .. } => *span,
-            Expr::Receive { span } => *span,
+            Expr::Receive { span, .. } => *span,
             Expr::Harvest { span } => *span,
-            Expr::Link { span, .. } => *span,
-            Expr::Monitor { span, .. } => *span,
             Expr::Vec { span, .. } => *span,
             Expr::Confidence { span, .. } => *span,
             Expr::Index { span, .. } => *span,

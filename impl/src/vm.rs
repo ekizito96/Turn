@@ -31,6 +31,7 @@ pub enum VmEvent {
         arg: Value,
         resume_tx: tokio::sync::oneshot::Sender<Value>,
         continuation: Box<Option<VmState>>,
+        expected_type: crate::ast::Type,
     },
 }
 
@@ -115,6 +116,7 @@ pub struct VmState {
     pub mailbox: VecDeque<Value>,
     pub token_budget: usize,
     pub strictness_threshold: f64,
+    pub pending_suspend_type: Option<crate::ast::Type>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -178,6 +180,7 @@ impl Vm {
             mailbox: process.mailbox.clone(),
             token_budget: process.token_budget,
             strictness_threshold: process.strictness_threshold,
+            pending_suspend_type: None,
         };
         let data = serde_json::to_string_pretty(&state)?;
         std::fs::write(path, data)?;
@@ -326,7 +329,7 @@ impl Process {
             frame.ip += 1;
 
             match instr {
-                Instr::Spawn => {
+                Instr::Spawn(linked, monitored) => {
                     let target = self.stack.pop().unwrap_or(Value::Null);
                     if let Value::Closure { code, ip, env, .. } = target {
                         let new_pid = registry.get_next_pid();
@@ -348,6 +351,19 @@ impl Process {
                             monitors: Vec::new(),
                         };
                         new_process.runtime.env = env;
+
+                        // Tie the VM topological graph bindings
+                        if linked {
+                            self.links.push(new_pid);
+                            new_process.links.push(self.pid);
+                            registry.links.write().unwrap().entry(self.pid).or_default().push(new_pid);
+                            registry.links.write().unwrap().entry(new_pid).or_default().push(self.pid);
+                        }
+
+                        if monitored {
+                            new_process.monitors.push(self.pid);
+                            registry.monitors.write().unwrap().entry(new_pid).or_default().push(self.pid);
+                        }
 
                         // Phase 1: Inject 'self' into the new process's environment natively
                         new_process.runtime.env.insert(
@@ -419,14 +435,18 @@ impl Process {
                         self.stack.push(Value::Bool(false));
                     }
                 }
-                Instr::Receive => {
+                Instr::Receive(is_blocking) => {
                     while let Ok(msg) = receiver.try_recv() {
                         self.mailbox.push_back(msg);
                     }
                     if let Some(msg) = self.mailbox.pop_front() {
                         self.stack.push(msg);
-                    } else if let Some(msg) = receiver.recv().await {
-                        self.stack.push(msg);
+                    } else if is_blocking {
+                        if let Some(msg) = receiver.recv().await {
+                            self.stack.push(msg);
+                        } else {
+                            self.stack.push(Value::Null);
+                        }
                     } else {
                         self.stack.push(Value::Null);
                     }
@@ -442,30 +462,7 @@ impl Process {
                         self.stack.push(Value::Null);
                     }
                 }
-                Instr::Link => {
-                    let pid_val = self.stack.pop().unwrap_or(Value::Null);
-                    if let Value::Pid { node_id, local_pid } = pid_val {
-                        if node_id == "local" && !self.links.contains(&local_pid) {
-                            self.links.push(local_pid);
-                            registry.add_link(local_pid, self.pid);
-                            registry.add_link(self.pid, local_pid);
-                        }
-                        self.stack.push(Value::Bool(true));
-                    } else {
-                        self.stack.push(Value::Bool(false));
-                    }
-                }
-                Instr::Monitor => {
-                    let pid_val = self.stack.pop().unwrap_or(Value::Null);
-                    if let Value::Pid { node_id, local_pid } = pid_val {
-                        if node_id == "local" {
-                            registry.add_monitor(local_pid, self.pid);
-                        }
-                        self.stack.push(Value::Bool(true));
-                    } else {
-                        self.stack.push(Value::Bool(false));
-                    }
-                }
+
                 Instr::Confidence => {
                     let v = self.stack.pop().unwrap_or(Value::Null);
                     match v {
@@ -473,7 +470,8 @@ impl Process {
                         _ => self.stack.push(Value::Num(1.0)), // Certainty
                     }
                 }
-                Instr::Suspend => {
+                Instr::Suspend(expected_type) => {
+                    let msg = self.stack.pop().unwrap_or(Value::Null);
                     self.frames[frame_idx].env = self.runtime.env.clone();
                     let state = VmState {
                         pid: self.pid,
@@ -483,6 +481,7 @@ impl Process {
                         mailbox: self.mailbox.clone(),
                         token_budget: self.token_budget,
                         strictness_threshold: self.strictness_threshold,
+                        pending_suspend_type: Some(expected_type.clone()),
                     };
 
                     // Orthogonal Persistence: Flush active memory to local WAL
@@ -492,9 +491,10 @@ impl Process {
                     let _ = registry.host_tx.send(VmEvent::Suspend {
                         pid: self.pid,
                         tool_name: "sys_suspend".to_string(),
-                        arg: Value::Null,
+                        arg: msg,
                         resume_tx: tx,
                         continuation: Box::new(Some(state)),
+                        expected_type,
                     });
                     if let Ok(res) = rx.await {
                         self.stack.push(res);
@@ -502,7 +502,19 @@ impl Process {
                         self.stack.push(Value::Null);
                     }
                 }
-                Instr::Infer(ty, tool_count) => {
+                Instr::Infer(ty, tool_count, has_driver, has_threshold, fallback_offset) => {
+                    let threshold_val = if has_threshold {
+                        Some(self.stack.pop().unwrap_or(Value::Null))
+                    } else {
+                        None
+                    };
+
+                    let driver_val = if has_driver {
+                        Some(self.stack.pop().unwrap_or(Value::Null))
+                    } else {
+                        None
+                    };
+
                     let mut tools = Vec::new();
                     for _ in 0..tool_count {
                         tools.push(self.stack.pop().unwrap_or(Value::Null));
@@ -514,7 +526,7 @@ impl Process {
                     // against runtime-registered struct definitions before prompting LLM.
                     let resolved_ty = match &ty {
                         Type::Struct(name, fields) if fields.is_empty() => {
-                            if let Some(known_fields) = self.runtime.structs.get(name) {
+                            if let Some(known_fields) = self.runtime.structs.get(name.as_str()) {
                                 Type::Struct(name.clone(), known_fields.clone())
                             } else {
                                 Type::Struct(name.clone(), fields.clone())
@@ -560,6 +572,9 @@ impl Process {
                     if tool_count > 0 {
                         map.insert("tools".to_string(), Value::List(std::sync::Arc::new(tools.clone())));
                     }
+                    if let Some(drv) = &driver_val {
+                        map.insert("driver".to_string(), drv.clone());
+                    }
 
                     self.frames[frame_idx].env = self.runtime.env.clone();
                     let state = VmState {
@@ -570,6 +585,7 @@ impl Process {
                         mailbox: self.mailbox.clone(),
                         token_budget: self.token_budget,
                         strictness_threshold: self.strictness_threshold,
+                        pending_suspend_type: None,
                     };
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     let _ = registry.host_tx.send(VmEvent::Suspend {
@@ -578,6 +594,7 @@ impl Process {
                         arg: Value::Map(std::sync::Arc::new(map)),
                         resume_tx: tx,
                         continuation: Box::new(Some(state)),
+                        expected_type: crate::ast::Type::Any,
                     });
 
                     if let Ok(res) = rx.await {
@@ -587,6 +604,12 @@ impl Process {
                             self.stack.push(prompt_val.clone());
                             for t in &tools {
                                 self.stack.push(t.clone());
+                            }
+                            if has_driver {
+                                self.stack.push(driver_val.clone().unwrap_or(Value::Null));
+                            }
+                            if has_threshold {
+                                self.stack.push(threshold_val.clone().unwrap_or(Value::Null));
                             }
 
                             // Identify the tool closure mapped in the Lexical Scope
@@ -663,18 +686,53 @@ impl Process {
                                 frame.used_tokens += used;
                             }
 
-                            // Pillar 3: Check if any active budget is exhausted AFTER this infer
-                            if let Some(reason) = self.runtime.budget_stack.iter()
-                                .find_map(|f| f.check_exhausted())
-                            {
-                                let _ = registry.host_tx.send(VmEvent::Error {
-                                    pid: self.pid,
-                                    error: reason,
-                                });
-                                break;
+                            let mut passed_threshold = true;
+                            if let Some(t_val) = &threshold_val {
+                                if let Value::Uncertain(_, confidence) = &res {
+                                    let req_prob = match t_val {
+                                        Value::Num(n) => *n,
+                                        _ => 0.0,
+                                    };
+                                    if *confidence < req_prob {
+                                        passed_threshold = false;
+                                    }
+                                }
                             }
 
-                            self.stack.push(res);
+                            if !passed_threshold || matches!(res, Value::Null) {
+                                if fallback_offset > 0 {
+                                    self.frames[frame_idx].ip = fallback_offset as usize;
+                                } else {
+                                    let error_msg = if !passed_threshold {
+                                        Value::Str(std::sync::Arc::new("ExecutionTrap: Inference Confidence Threshold Failed".to_string()))
+                                    } else {
+                                        res // Value::Err
+                                    };
+                                    self.exit_process(
+                                        &registry,
+                                        error_msg,
+                                    );
+                                    return;
+                                }
+                            } else {
+                                // Pillar 3: Check if any active budget is exhausted AFTER this infer
+                                if let Some(reason) = self.runtime.budget_stack.iter()
+                                    .find_map(|f| f.check_exhausted())
+                                {
+                                    let _ = registry.host_tx.send(VmEvent::Error {
+                                        pid: self.pid,
+                                        error: reason,
+                                    });
+                                    break;
+                                }
+
+                                // Strip Uncertain wrapper if it passed
+                                let unwrapped = match res {
+                                    Value::Uncertain(val, _) => *val,
+                                    other => other,
+                                };
+                                self.stack.push(unwrapped);
+                            }
                         }
                     } else {
                         self.stack.push(Value::Null);
@@ -778,29 +836,6 @@ impl Process {
                     self.runtime
                         .memory
                         .insert(id, emb.map(|e| (*e).clone()), val);
-                }
-                Instr::Compress => {
-                    // Pillar 4: Squeeze a text string to a target ratio (0.0–1.0)
-                    let ratio_val = self.stack.pop().unwrap_or(Value::Num(0.5));
-                    let text_val = self.stack.pop().unwrap_or(Value::Null);
-
-                    let ratio = match ratio_val {
-                        Value::Num(n) => n.clamp(0.0, 1.0),
-                        _ => 0.5,
-                    };
-                    let text = text_val.to_string();
-                    // Deterministic char-level truncation for alpha.
-                    // V2 will invoke a cheap LLM pass for semantic compression.
-                    let target_len = ((text.len() as f64) * ratio).max(1.0) as usize;
-                    let compressed: String = text.chars().take(target_len).collect();
-                    self.stack.push(Value::Str(std::sync::Arc::new(compressed)));
-                }
-                Instr::Forget => {
-                    // Pillar 4: Delete matching entries from Semantic RAM (.turn_store)
-                    let label_val = self.stack.pop().unwrap_or(Value::Null);
-                    let label = crate::runtime::value_to_key(&label_val).unwrap_or_default();
-                    self.runtime.memory.forget(&label);
-                    self.stack.push(Value::Bool(true));
                 }
                 Instr::StorePersist(name) => {
                     // Pillar 5: Write the value at TOS to disk for persistence
@@ -1463,6 +1498,7 @@ impl Process {
                                 mailbox: self.mailbox.clone(),
                                 token_budget: self.token_budget,
                                 strictness_threshold: self.strictness_threshold,
+                                pending_suspend_type: None,
                             };
                             let (tx, rx) = tokio::sync::oneshot::channel();
                             let _ = registry.host_tx.send(VmEvent::Suspend {
@@ -1471,6 +1507,7 @@ impl Process {
                                 arg: final_arg,
                                 resume_tx: tx,
                                 continuation: Box::new(Some(state)),
+                                expected_type: crate::ast::Type::Any,
                             });
                             if let Ok(res) = rx.await {
                                 self.stack.push(res);
@@ -1573,6 +1610,7 @@ impl Process {
                                 mailbox: self.mailbox.clone(),
                                 token_budget: self.token_budget,
                                 strictness_threshold: self.strictness_threshold,
+                                pending_suspend_type: None,
                             };
                             let (tx, rx) = tokio::sync::oneshot::channel();
                             let _ = registry.host_tx.send(VmEvent::Suspend {
@@ -1581,6 +1619,7 @@ impl Process {
                                 arg,
                                 resume_tx: tx,
                                 continuation: Box::new(Some(state)),
+                                expected_type: crate::ast::Type::Any,
                             });
                             if let Ok(res) = rx.await {
                                 self.stack.push(res);
@@ -1805,6 +1844,7 @@ impl Process {
                         mailbox: self.mailbox.clone(),
                         token_budget: self.token_budget,
                         strictness_threshold: self.strictness_threshold,
+                        pending_suspend_type: None,
                     };
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     let _ = registry.host_tx.send(VmEvent::Suspend {
@@ -1813,6 +1853,7 @@ impl Process {
                         arg: Value::Str(path),
                         resume_tx: tx,
                         continuation: Box::new(Some(state)),
+                        expected_type: crate::ast::Type::Any,
                     });
                     if let Ok(res) = rx.await {
                         self.stack.push(res);
@@ -1860,6 +1901,7 @@ impl Process {
             (Type::Num, Value::Num(_)) => true,
             (Type::Str, Value::Str(_)) => true,
             (Type::Bool, Value::Bool(_)) => true,
+            (Type::Blob, Value::Blob { .. }) => true,
             (Type::Bool, Value::Null) => false,
             (Type::List(inner), Value::List(items)) => {
                 if **inner == Type::Any {

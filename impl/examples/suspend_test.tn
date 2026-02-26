@@ -1,4 +1,4 @@
 call("echo", "Phase 1: Start");
-suspend;
+let input = suspend for Any "Please press enter";
 call("echo", "Phase 2: Resumed");
 return "Done";

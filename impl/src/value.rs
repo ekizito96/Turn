@@ -34,6 +34,10 @@ pub enum Value {
         origin_node: String,
         id: usize,
     }, // Remote OCap
+    Blob {
+        mime_type: String,
+        data: Arc<Vec<u8>>,
+    }, // Physical Media Tensor
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
     ToolCallRequest(String, String), // (Tool Name, JSON Arguments)
 }
@@ -52,6 +56,7 @@ impl Value {
             Value::Vec(v) => v.is_empty(),
             Value::Cap(_) => false,
             Value::CapProxy { .. } => false,
+            Value::Blob { data, .. } => data.is_empty(),
             Value::Uncertain(v, _) => v.is_falsy(),
             Value::Closure { .. } => false,
             Value::ToolCallRequest(_, _) => false,
@@ -116,6 +121,7 @@ impl std::fmt::Display for Value {
             Value::CapProxy { origin_node, id } => {
                 write!(f, "<capability_proxy {}@{}>", id, origin_node)
             }
+            Value::Blob { mime_type, data } => write!(f, "<blob {} {} bytes>", mime_type, data.len()),
             Value::Uncertain(v, p) => write!(f, "{} ({}%)", v, p * 100.0),
             Value::ToolCallRequest(name, args) => write!(f, "<tool_call {} {}>", name, args),
         }

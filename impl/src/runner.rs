@@ -96,6 +96,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                 arg,
                                 resume_tx,
                                 continuation: _,
+                                expected_type: _,
                             } => {
                                 if tool_name == "sys_import" {
                                     let inner_path = match arg {
@@ -231,6 +232,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                             arg,
                             resume_tx,
                             continuation: _,
+                            expected_type: _,
                         } => {
                             if tool_name == "sys_import" {
                                 let inner_path = match arg {
@@ -276,30 +278,23 @@ impl<S: Store + std::marker::Send> Runner<S> {
     ) -> anyhow::Result<Value> {
         let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let vm = if let Ok(Some(state)) = self.store.load(id) {
-            // Write to disk temporarily and use resume_from_disk
-            let temp_path = format!(".turn_tmp_{}.json", id);
-            let data = serde_json::to_string(&state)?;
-            std::fs::write(&temp_path, data)?;
-            let vm = Vm::resume_from_disk(&temp_path, host_tx)?;
-            let _ = std::fs::remove_file(&temp_path);
-            vm
-        } else {
-            let lexer = Lexer::new(source);
-            let tokens = lexer
-                .tokenize()
-                .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
+        // Turn enforces strict boundaries: `run` starts new jobs; `resume` wakes suspended ones.
+        // We let the previous state be overwritten implicitly on next suspend.
+        
+        let lexer = Lexer::new(source);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
 
-            let mut parser = Parser::new(tokens);
-            let program = parser
-                .parse()
-                .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+        let mut parser = Parser::new(tokens);
+        let program = parser
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
 
-            let mut compiler = Compiler::new();
-            let code = compiler.compile(&program);
+        let mut compiler = Compiler::new();
+        let code = compiler.compile(&program);
 
-            Vm::new(&code, host_tx)
-        };
+        let vm = Vm::new(&code, host_tx);
 
         vm.start().await;
 
@@ -322,6 +317,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                         arg,
                         resume_tx,
                         continuation,
+                        expected_type: _,
                     } => {
                         if tool_name == "sys_suspend" {
                             if let Some(c) = *continuation {
@@ -363,6 +359,116 @@ impl<S: Store + std::marker::Send> Runner<S> {
                             }
                             Err(e) => {
                                 let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e)));
+                            }
+                        }
+                    }
+                }
+            } else {
+                return Err(anyhow::anyhow!("VM unexpectedly halted"));
+            }
+        }
+    }
+
+    pub async fn resume(
+        &mut self,
+        id: &str,
+        input: serde_json::Value,
+    ) -> anyhow::Result<Value> {
+        let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let vm = if let Ok(Some(mut state)) = self.store.load(id) {
+            // Cognitive Type Check: The Host violently rejects structurally mismatched data
+            if let Some(expected_type) = &state.pending_suspend_type {
+                match crate::llm_tools::json_value_to_turn_value(expected_type, &input) {
+                    Ok(validated_value) => {
+                        state.stack.push(validated_value);
+                    }
+                    Err(_) => {
+                        return Err(anyhow::anyhow!(
+                            "Cognitive Schema mismatch: injected data {:?} failed to coerce to {:?}",
+                            input, expected_type
+                        ));
+                    }
+                }
+            } else {
+                state.stack.push(
+                    crate::llm_tools::json_value_to_turn_value(&crate::ast::Type::Any, &input)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            state.pending_suspend_type = None;
+
+            let temp_path = format!(".turn_tmp_{}.json", id);
+            let data = serde_json::to_string(&state)?;
+            std::fs::write(&temp_path, data)?;
+            let vm = Vm::resume_from_disk(&temp_path, host_tx)?;
+            let _ = std::fs::remove_file(&temp_path);
+            vm
+        } else {
+            return Err(anyhow::anyhow!("No suspended state found on disk for {}", id));
+        };
+
+        vm.start().await;
+
+        loop {
+            if let Some(event) = host_rx.recv().await {
+                match event {
+                    VmEvent::Complete { pid, result } => {
+                        if pid == 1 {
+                            return Ok(result);
+                        }
+                    }
+                    VmEvent::Error { pid, error } => {
+                        if pid == 1 {
+                            return Err(anyhow::anyhow!("VM Error: {}", error));
+                        }
+                    }
+                    VmEvent::Suspend {
+                        pid: _,
+                        tool_name,
+                        arg,
+                        resume_tx,
+                        continuation,
+                        expected_type: _,
+                    } => {
+                        if tool_name == "sys_suspend" {
+                            if let Some(c) = *continuation {
+                                self.store.save(id, &c)?;
+                            }
+                            return Ok(Value::Null); // Halts completely
+                        }
+
+                        if tool_name == "sys_import" {
+                            if let Some(c) = &*continuation {
+                                self.store.save(id, c)?;
+                            }
+
+                            let import_path = match arg {
+                                Value::Str(s) => s.to_string(),
+                                _ => "".to_string(),
+                            };
+                            match self.load_module(&import_path, None).await {
+                                Ok(val) => {
+                                    let _ = resume_tx.send(val);
+                                }
+                                Err(e) => {
+                                    let _ = resume_tx.send(Value::Str(std::sync::Arc::new(
+                                        e.to_string(),
+                                    )));
+                                }
+                            }
+
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                self.tools.call(&tool_name, arg)
+                            });
+                            match result {
+                                Ok(val) => {
+                                    let _ = resume_tx.send(val);
+                                }
+                                Err(e) => {
+                                    let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e)));
+                                }
                             }
                         }
                     }

@@ -601,6 +601,7 @@ pub fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         | Value::Cap(_)
         | Value::CapProxy { .. }
         | Value::ToolCallRequest(_, _)
+        | Value::Blob { .. }
         | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
     }
 }

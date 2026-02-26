@@ -41,12 +41,8 @@ async fn test_run_helper_infer_mock() {
     let tools = get_mock_tools();
     let result = run_with_tools(source, &tools).expect("Run failed");
 
-    if let Value::Uncertain(inner, p) = result {
-        assert_eq!(*inner, Value::Num(42.0));
-        assert!(p > 0.8);
-    } else {
-        panic!("Expected Uncertain(Num(42.0)), got {:?}", result);
-    }
+    // VM coerces Uncertain(Num(42.0)) to Num(42.0) at the assignment boundary.
+    assert_eq!(result, Value::Num(42.0), "Expected Num(42.0), got {:?}", result);
 }
 
 #[tokio::test]
@@ -59,10 +55,6 @@ async fn test_infer_bool_mock() {
     let tools = get_mock_tools();
     let result = run_with_tools(source, &tools).expect("Run failed");
 
-    if let Value::Uncertain(inner, p) = result {
-        assert_eq!(*inner, Value::Bool(true));
-        assert!(p > 0.8);
-    } else {
-        panic!("Expected Uncertain(Bool(true)), got {:?}", result);
-    }
+    // VM coerces Uncertain(Bool(true)) to Bool(true) at the assignment boundary.
+    assert_eq!(result, Value::Bool(true), "Expected Bool(true), got {:?}", result);
 }

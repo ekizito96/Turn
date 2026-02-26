@@ -49,9 +49,7 @@ pub enum Instr {
     ContextAppend,
     Remember,
     Recall,
-    Compress, // Pillar 4: squeeze context strings
-    Forget,   // Pillar 4: delete from Semantic RAM
-    StorePersist(String), // Pillar 5: persist a variable to disk
+    StorePersist(String),
     CallTool,
     CallMethod(String), // NEW
     LoadModule,
@@ -62,16 +60,15 @@ pub enum Instr {
     PopBudget,  // Pops current budget frame, merging usage to parent
     
     // Concurrency
-    Spawn,
+    // Concurrency
+    Spawn(bool, bool), // (linked, monitored)
     SpawnRemote,
     Send,
-    Receive,
+    Receive(bool), // NEW Pillar 3.5: bool is_blocking
     Harvest,
-    Link,             // NEW: Bidirectional lifecycle binding
-    Monitor,          // NEW: Unidirectional death notification
     Confidence,       // NEW
-    Infer(Type, u32), // NEW
-    Suspend,          // NEW
+    Infer(Type, u32, bool, bool, u32), // Expected Type, Tool Count, Has Driver, Has Threshold, Fallback Offset
+    Suspend(Type),    // NEW
 
     // Control flow
     Jump(u32),

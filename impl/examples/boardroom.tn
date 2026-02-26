@@ -34,25 +34,22 @@ let run_debater = turn(role: Str, bias: Str) -> Str {
 let execute_boardroom = turn(target_topic: Str) -> BoardVerdict {
     let _wait = call("echo", "[Chairperson] Waiting for expert takes...");
 
-    let cto_pid = spawn(turn() { 
+    let cto_pid = spawn linked turn() { 
         return call(run_debater, ["CTO", "Loves performance and safety. Pro-Rust."]); 
-    });
-    let _l1 = link cto_pid;
+    };
     
-    let pm_pid = spawn(turn() { 
+    let pm_pid = spawn linked turn() { 
         return call(run_debater, ["Product Manager", "Cares about shipping speed. Anti-rewrite."]); 
-    });
-    let _l2 = link pm_pid;
+    };
     
-    let dev_pid = spawn(turn() { 
+    let dev_pid = spawn linked turn() { 
         return call(run_debater, ["Junior Dev", "Just wants to learn cool stuff. Neutral but excited."]); 
-    });
-    let _l3 = link dev_pid;
+    };
 
     // 4. Synchronization (Native Mailbox Blocking via Linked EXIT Trapping)
-    let vote_1_msg = receive;
-    let vote_2_msg = receive;
-    let vote_3_msg = receive;
+    let vote_1_msg = await receive;
+    let vote_2_msg = await receive;
+    let vote_3_msg = await receive;
 
     let vote_1 = vote_1_msg.reason;
     let vote_2 = vote_2_msg.reason;

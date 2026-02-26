@@ -33,7 +33,7 @@ let stripe_charge = tool turn(
 // In reality, this capability would be injected by the Rust Host Runtime 
 // (e.g., from ENV variables before the VM starts) directly into the global scope. 
 // For this example script we mock its creation:
-let my_app_secret_api_key = Cap; // Dummy syntax representing an injected opaque value
+let my_app_secret_api_key = null; // Dummy syntax representing an injected opaque value
 
 // 3. Execution
 println("Booting Secure E-Commerce Agent...");

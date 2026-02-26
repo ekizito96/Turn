@@ -90,6 +90,7 @@ impl Parser {
             Token::TypeNum => Ok(Type::Num),
             Token::TypeStr => Ok(Type::Str),
             Token::TypeBool => Ok(Type::Bool),
+            Token::TypeBlob => Ok(Type::Blob),
             Token::TypeList => {
                 if matches!(self.peek(), Some(Token::Less)) {
                     self.next(); // consume <
@@ -315,11 +316,7 @@ impl Parser {
                 let body = self.parse_block()?;
                 Ok(Stmt::While { cond, body, span })
             }
-            Some(Token::Suspend) => {
-                self.next();
-                self.expect(Token::Semicolon)?;
-                Ok(Stmt::Suspend { span })
-            }
+
             Some(Token::Match) => {
                 self.next();
                 let expr = self.parse_expr()?;
@@ -549,9 +546,33 @@ impl Parser {
             }
             Some(Token::Spawn) => {
                 self.next();
+                
+                let mut linked = false;
+                let mut monitored = false;
+                if matches!(self.peek(), Some(Token::Linked)) {
+                    self.next();
+                    linked = true;
+                } else if matches!(self.peek(), Some(Token::Monitored)) {
+                    self.next();
+                    monitored = true;
+                }
+
                 let expr = self.parse_unary()?; // High precedence prefix
                 Ok(Expr::Spawn {
                     expr: Box::new(expr),
+                    linked,
+                    monitored,
+                    span,
+                })
+            }
+            Some(Token::Suspend) => {
+                self.next(); // consume `suspend`
+                self.expect(Token::For)?;
+                let expected_type = self.parse_type()?;
+                let msg = self.parse_expr()?;
+                Ok(Expr::Suspend {
+                    expected_type,
+                    msg: Box::new(msg),
                     span,
                 })
             }
@@ -617,10 +638,34 @@ impl Parser {
                     None
                 };
                 let body = self.parse_block()?;
+                let driver = if matches!(self.peek(), Some(Token::Via)) {
+                    self.next();
+                    Some(Box::new(self.parse_expr()?))
+                } else {
+                    None
+                };
+                
+                let threshold = if matches!(self.peek(), Some(Token::Tilde)) {
+                    self.next();
+                    Some(Box::new(self.parse_expr()?))
+                } else {
+                    None
+                };
+
+                let fallback = if matches!(self.peek(), Some(Token::Else)) {
+                    self.next();
+                    Some(self.parse_block()?)
+                } else {
+                    None
+                };
+                
                 Ok(Expr::Infer {
                     target_ty,
                     tools,
                     body,
+                    driver,
+                    threshold,
+                    fallback,
                     span,
                 })
             }
@@ -652,22 +697,7 @@ impl Parser {
                     span,
                 })
             }
-            Some(Token::Link) => {
-                self.next();
-                let pid = self.parse_unary()?;
-                Ok(Expr::Link {
-                    pid: Box::new(pid),
-                    span,
-                })
-            }
-            Some(Token::Monitor) => {
-                self.next();
-                let pid = self.parse_unary()?;
-                Ok(Expr::Monitor {
-                    pid: Box::new(pid),
-                    span,
-                })
-            }
+
             Some(Token::Confidence) => {
                 self.next();
                 let expr = self.parse_unary()?;
@@ -897,27 +927,6 @@ impl Parser {
                     span,
                 })
             }
-            Token::Compress => {
-                self.expect(Token::LParen)?;
-                let text = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let ratio = self.parse_expr()?;
-                self.expect(Token::RParen)?;
-                Ok(Expr::Compress {
-                    text: Box::new(text),
-                    ratio: Box::new(ratio),
-                    span,
-                })
-            }
-            Token::Forget => {
-                self.expect(Token::LParen)?;
-                let label = self.parse_expr()?;
-                self.expect(Token::RParen)?;
-                Ok(Expr::Forget {
-                    label: Box::new(label),
-                    span,
-                })
-            }
             Token::Call => {
                 self.expect(Token::LParen)?;
                 let name = self.parse_expr()?;
@@ -937,7 +946,11 @@ impl Parser {
                     span,
                 })
             }
-            Token::Receive => Ok(Expr::Receive { span }),
+            Token::Receive => Ok(Expr::Receive { is_blocking: false, span }),
+            Token::Await => {
+                self.expect(Token::Receive)?;
+                Ok(Expr::Receive { is_blocking: true, span })
+            }
             Token::Vec => {
                 self.expect(Token::LBracket)?;
                 let mut items = Vec::new();

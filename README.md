@@ -143,8 +143,8 @@ let style = recall("preferred_style");
 
 ```turn
 // Spawn a child agent process (returns a PID)
-let analyst = spawn {
-    let task = receive();
+let analyst = spawn turn() {
+    let task = await receive;
     let result = infer Analysis { task; };
     return result;
 };

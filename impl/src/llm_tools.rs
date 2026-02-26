@@ -6,6 +6,36 @@ use std::env;
 use std::process::Command;
 use std::sync::Arc;
 
+pub fn turn_value_to_json_rpc(v: &Value) -> JsonValue {
+    match v {
+        Value::Blob { mime_type, data } => {
+            use base64::{engine::general_purpose, Engine as _};
+            json!({
+                "_turn_blob": true,
+                "mime_type": mime_type,
+                "data": general_purpose::STANDARD.encode(&**data)
+            })
+        }
+        Value::List(l) => {
+            let arr = l.iter().map(turn_value_to_json_rpc).collect::<Vec<_>>();
+            JsonValue::Array(arr)
+        }
+        Value::Map(m) | Value::Struct(_, m) => {
+            let mut map = serde_json::Map::new();
+            for (k, val) in m.iter() {
+                map.insert(k.clone(), turn_value_to_json_rpc(val));
+            }
+            JsonValue::Object(map)
+        }
+        Value::Str(s) => json!(&**s),
+        Value::Num(n) => json!(n),
+        Value::Bool(b) => json!(b),
+        Value::Null => json!(null),
+        Value::Uncertain(inner, _) => turn_value_to_json_rpc(inner),
+        _ => json!(v.to_string()),
+    }
+}
+
 pub fn turn_type_to_json_schema(ty: &Type) -> JsonValue {
     match ty {
         Type::Num => json!({ "type": "number" }),
@@ -195,14 +225,18 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
     tools.register(
         "llm_infer",
         Box::new(|arg: Value| {
-            let mut user_msg = String::new();
+            let mut user_msg_json = JsonValue::Null;
             let mut schema_str = String::new();
             let mut context_list = Vec::new();
             let mut tool_list = Vec::new();
+            let mut driver_opt = None;
 
             if let Value::Map(m) = arg.clone() {
-                if let Some(Value::Str(s)) = m.get("prompt") {
-                    user_msg = s.to_string();
+                if let Some(prompt_val) = m.get("prompt") {
+                    user_msg_json = turn_value_to_json_rpc(prompt_val);
+                }
+                if let Some(Value::Str(s)) = m.get("driver") {
+                    driver_opt = Some(s.to_string());
                 }
                 if let Some(Value::Str(s)) = m.get("schema") {
                     schema_str = s.to_string();
@@ -258,28 +292,32 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                 }
             }
 
-            let provider_file = env::var("TURN_INFER_PROVIDER")
-                .unwrap_or_else(|_| "turn-provider-openai.wasm".to_string());
+            let provider_file = if let Some(drv) = driver_opt {
+                drv
+            } else {
+                env::var("TURN_INFER_PROVIDER")
+                    .unwrap_or_else(|_| "turn-provider-openai.wasm".to_string())
+            };
             
             // We load the provider once to avoid recompiling Wasm overhead per retry
             let provider = match crate::wasm_host::WasmProvider::new(&provider_file) {
                 Ok(p) => p,
-                Err(e) => return Ok(Value::Str(Arc::new(format!("Failed to load Wasm provider '{}': {}", provider_file, e)))),
+                Err(_e) => return Ok(Value::Null),
             };
 
             let mut retries = 0;
             const MAX_RETRIES: usize = 3;
-            let mut current_prompt = user_msg.clone();
-            let mut context_history = context_list.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>();
+            let mut current_prompt_json = user_msg_json.clone();
+            let mut context_history_json = context_list.iter().map(turn_value_to_json_rpc).collect::<Vec<_>>();
 
             loop {
                 let rpc_request = json!({
                     "jsonrpc": "2.0",
                     "method": "infer",
                     "params": {
-                        "prompt": current_prompt,
+                        "prompt": current_prompt_json,
                         "schema": schema_json,
-                        "context": context_history,
+                        "context": context_history_json,
                         "tools": serialized_tools
                     },
                     "id": 1
@@ -287,7 +325,7 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
 
                 let response_str = match provider.execute_inference(&rpc_request.to_string()) {
                     Ok(res) => res,
-                    Err(e) => return Ok(Value::Str(Arc::new(format!("Wasm Execution Error: {}", e)))),
+                    Err(_e) => return Ok(Value::Null),
                 };
 
                 if let Ok(msg) = serde_json::from_str::<JsonValue>(&response_str) {
@@ -325,11 +363,10 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                             Err(e) => {
                                 if retries < MAX_RETRIES {
                                     retries += 1;
-                                    context_history.push(format!("Assistant Draft: {:?}", result));
-                                    current_prompt = format!("Your previous response was structurally invalid and failed coercion. DO NOT format with markdown syntax if it causes errors. Fix this specific schema error and return ONLY raw JSON:\n{}", e);
-                                    continue;
+                                    context_history_json.push(json!(format!("Assistant Draft: {:?}", result)));
+                                    current_prompt_json = json!(format!("Your previous response was structurally invalid and failed coercion. DO NOT format with markdown syntax if it causes errors. Fix this specific schema error and return ONLY raw JSON:\n{}", e));
                                 } else {
-                                    return Ok(Value::Str(Arc::new(format!("Provider type map error (after {} retries): {}", MAX_RETRIES, e))));
+                                    return Ok(Value::Null);
                                 }
                             }
                         }
@@ -337,22 +374,22 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
                         if retries < MAX_RETRIES {
                             retries += 1;
                             let err_str = error.as_str().unwrap_or("Unknown provider error");
-                            context_history.push(format!("Provider API Error: {}", err_str));
-                            current_prompt = format!("The API rejected your previous payload request string. Ensure you perfectly map tools and JSON schema. Fix this error:\n{}", err_str);
+                            context_history_json.push(json!(format!("Provider API Error: {}", err_str)));
+                            current_prompt_json = json!(format!("The API rejected your previous payload request string. Ensure you perfectly map tools and JSON schema. Fix this error:\n{}", err_str));
                             continue;
                         } else {
-                            return Ok(Value::Str(Arc::new(format!("Provider Error (after {} retries): {}", MAX_RETRIES, error))));
+                            return Ok(Value::Null);
                         }
                     }
                 }
 
                 if retries < MAX_RETRIES {
                     retries += 1;
-                    context_history.push("Host Error: Invalid provider response format. Returning to user loop.".to_string());
-                    current_prompt = "Your output was unparseable. Return valid output.".to_string();
+                    context_history_json.push(json!("Host Error: Invalid provider response format. Returning to user loop."));
+                    current_prompt_json = json!("Your output was unparseable. Return valid output.");
                     continue;
                 }
-                return Ok(Value::Str(Arc::new(format!("Invalid provider response (after {} retries): {}", MAX_RETRIES, response_str))));
+                return Ok(Value::Null);
             }
         }) as ToolHandler,
     );

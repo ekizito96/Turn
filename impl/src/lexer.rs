@@ -11,13 +11,14 @@ pub enum Token {
     Send,
     Receive,
     Harvest,
-    Link,
-    Monitor,
+    Linked,
+    Monitored,
     Vec,
     Turn,
     Let,
     Suspend,    // NEW
     Confidence, // NEW
+    For,        // NEW
     Use,
     Context,
     Try,
@@ -40,6 +41,8 @@ pub enum Token {
     Persist,  // NEW Pillar 5
     Secret, // NEW
     Tool,   // NEW
+    Via,    // NEW Pillar 4
+    Await,  // NEW Pillar 3.5
     Struct,
     Match,
     Ok,
@@ -63,6 +66,7 @@ pub enum Token {
     TypeVoid,
     TypePid,
     TypeVec,
+    TypeBlob,
     TypeCap,
     TypeResult,
 
@@ -72,6 +76,7 @@ pub enum Token {
     Star,
     Slash,
     Similarity, // ~>
+    Tilde,      // ~
     Eq,         // = (assignment)
     EqEq,
     Ne,
@@ -122,8 +127,8 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("send", Token::Send),
     ("receive", Token::Receive),
     ("harvest", Token::Harvest),
-    ("link", Token::Link),
-    ("monitor", Token::Monitor),
+    ("linked", Token::Linked),
+    ("monitored", Token::Monitored),
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
@@ -144,8 +149,6 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("budget", Token::Budget),     // NEW
     ("tokens", Token::Tokens),     // NEW
     ("time", Token::Time),         // NEW
-    ("compress", Token::Compress), // NEW Pillar 4
-    ("forget", Token::Forget),     // NEW Pillar 4
     ("persist", Token::Persist),   // NEW Pillar 5
     ("secret", Token::Secret),     // NEW
     ("tool", Token::Tool),         // NEW
@@ -154,11 +157,14 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("send", Token::Send),
     ("receive", Token::Receive),
     ("harvest", Token::Harvest),
-    ("link", Token::Link),
-    ("monitor", Token::Monitor),
+    ("linked", Token::Linked),
+    ("monitored", Token::Monitored),
     ("struct", Token::Struct),
+    ("for", Token::For),
     ("impl", Token::Impl),
     ("type", Token::Type),
+    ("via", Token::Via),
+    ("await", Token::Await),
     ("if", Token::If),
     ("else", Token::Else),
     ("while", Token::While),
@@ -176,6 +182,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("Void", Token::TypeVoid),
     ("Pid", Token::TypePid),
     ("Vec", Token::TypeVec),
+    ("Blob", Token::TypeBlob),
 ];
 
 pub struct Lexer<'a> {
@@ -312,7 +319,7 @@ impl<'a> Lexer<'a> {
                     self.next();
                     Token::Similarity
                 } else {
-                    return Err(LexError::UnexpectedChar('~', start));
+                    Token::Tilde
                 }
             }
             Some('/') => {

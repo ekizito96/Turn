@@ -161,9 +161,6 @@ impl Compiler {
                 self.compile_expr(expr);
                 self.emit(Instr::Pop);
             }
-            Stmt::Suspend { .. } => {
-                self.emit(Instr::Suspend);
-            }
             Stmt::StructDef { name, fields, .. } => {
                 self.emit(Instr::DefineStruct(name.clone(), fields.clone()));
             }
@@ -219,15 +216,6 @@ impl Compiler {
                 self.compile_expr(key);
                 self.emit(Instr::Recall);
             }
-            Expr::Compress { text, ratio, .. } => {
-                self.compile_expr(text);
-                self.compile_expr(ratio);
-                self.emit(Instr::Compress);
-            }
-            Expr::Forget { label, .. } => {
-                self.compile_expr(label);
-                self.emit(Instr::Forget);
-            }
             Expr::Call { name, arg, .. } => {
                 self.compile_expr(name);
                 self.compile_expr(arg);
@@ -279,6 +267,9 @@ impl Compiler {
                 target_ty,
                 tools,
                 body,
+                driver,
+                threshold,
+                fallback,
                 ..
             } => {
                 let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
@@ -314,7 +305,37 @@ impl Compiler {
                     }
                 }
 
-                self.emit(Instr::Infer(target_ty.clone(), tool_count as u32));
+                let has_driver = if let Some(drv) = driver {
+                    self.compile_expr(drv);
+                    true
+                } else {
+                    false
+                };
+
+                let has_threshold = if let Some(thresh) = threshold {
+                    self.compile_expr(thresh);
+                    true
+                } else {
+                    false
+                };
+
+                let infer_idx = self.emit(Instr::Infer(
+                    target_ty.clone(),
+                    tool_count as u32,
+                    has_driver,
+                    has_threshold,
+                    0, // fallback offset placeholder
+                ));
+
+                if let Some(fb) = fallback {
+                    let jump_end_idx = self.emit(Instr::Jump(0)); // jump over fallback block on success
+                    let jump_target = self.code.len() as u32;
+                    if let Instr::Infer(_, _, _, _, ref mut offset) = self.code[infer_idx as usize] {
+                        *offset = jump_target; // Jump here if inferior/confident fails
+                    }
+                    self.compile_block(fb);
+                    self.code[jump_end_idx as usize] = Instr::Jump(self.code.len() as u32);
+                }
             }
             Expr::Budget {
                 tokens,
@@ -445,9 +466,9 @@ impl Compiler {
                     }
                 }
             }
-            Expr::Spawn { expr, .. } => {
+            Expr::Spawn { expr, linked, monitored, .. } => {
                 self.compile_expr(expr);
-                self.emit(Instr::Spawn);
+                self.emit(Instr::Spawn(*linked, *monitored));
             }
             Expr::SpawnRemote {
                 node_id, closure, ..
@@ -461,20 +482,17 @@ impl Compiler {
                 self.compile_expr(msg);
                 self.emit(Instr::Send);
             }
-            Expr::Receive { .. } => {
-                self.emit(Instr::Receive);
+            Expr::Receive { is_blocking, .. } => {
+                self.emit(Instr::Receive(*is_blocking));
             }
             Expr::Harvest { .. } => {
                 self.emit(Instr::Harvest);
             }
-            Expr::Link { pid, .. } => {
-                self.compile_expr(pid);
-                self.emit(Instr::Link);
+            Expr::Suspend { expected_type, msg, .. } => {
+                self.compile_expr(msg);
+                self.emit(Instr::Suspend(expected_type.clone()));
             }
-            Expr::Monitor { pid, .. } => {
-                self.compile_expr(pid);
-                self.emit(Instr::Monitor);
-            }
+
             Expr::Confidence { expr, .. } => {
                 self.compile_expr(expr);
                 self.emit(Instr::Confidence);

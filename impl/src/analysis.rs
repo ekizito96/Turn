@@ -284,6 +284,7 @@ impl Analysis {
             Expr::Spawn { .. } => Some(Type::Pid),
             Expr::Send { .. } => Some(Type::Bool),
             Expr::Receive { .. } => Some(Type::Any),
+            Expr::Suspend { expected_type, .. } => Some(expected_type.clone()),
             Expr::Confidence { .. } => Some(Type::Num),
             Expr::Infer { target_ty, .. } => Some(target_ty.clone()),
             Expr::Vec { items, .. } => {
@@ -510,6 +511,7 @@ impl Analysis {
             return true;
         }
         match (target, source) {
+            (Type::Blob, Type::Blob) => true,
             (Type::Vec, Type::Vec) => true,
             (Type::List(t), Type::List(s)) => self.is_compatible(t, s),
             (Type::Map(kt, vt), Type::Map(ks, vs)) => {
@@ -681,7 +683,6 @@ impl Analysis {
                 self.visit_expr(tool);
                 self.visit_expr(arg);
             }
-            Stmt::Suspend { .. } => {}
         }
     }
 
@@ -720,7 +721,7 @@ impl Analysis {
                         .push((*span, format!("Unknown struct '{}'", name)));
                 }
             }
-            Expr::Spawn { expr, span: _ } => {
+            Expr::Spawn { expr, linked: _, monitored: _, span: _ } => {
                 self.visit_expr(expr);
                 // Expected: Function
                 // But could be Any.
@@ -833,26 +834,14 @@ impl Analysis {
                     self.visit_expr(val);
                 }
             }
-            Expr::Link { pid, span } => {
-                self.visit_expr(pid);
-                self.check_assignment(&Some(Type::Pid), pid, *span);
-            }
-            Expr::Monitor { pid, span } => {
-                self.visit_expr(pid);
-                self.check_assignment(&Some(Type::Pid), pid, *span);
+            Expr::Suspend { expected_type: _, msg, span: _ } => {
+                self.visit_expr(msg);
             }
             Expr::Literal { .. } => {}
             Expr::Budget { tokens, time, body, .. } => {
                 if let Some(t) = tokens { self.visit_expr(t); }
                 if let Some(t) = time { self.visit_expr(t); }
                 for stmt in &body.stmts { self.visit_stmt(stmt); }
-            }
-            Expr::Compress { text, ratio, .. } => {
-                self.visit_expr(text);
-                self.visit_expr(ratio);
-            }
-            Expr::Forget { label, .. } => {
-                self.visit_expr(label);
             }
         }
     }

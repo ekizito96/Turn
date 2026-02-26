@@ -30,9 +30,55 @@ struct TurnInferRequest {
 
 #[derive(Deserialize)]
 struct InferParams {
-    prompt: String,
+    prompt: Value,
     schema: Value,
-    context: Vec<String>,
+    context: Vec<Value>,
+}
+
+fn turn_to_gemini_content(v: &Value) -> Value {
+    if let Value::Object(m) = v {
+        if m.get("_turn_blob").is_some() {
+            let mime = m.get("mime_type").and_then(|m| m.as_str()).unwrap_or("image/jpeg");
+            let data = m.get("data").and_then(|m| m.as_str()).unwrap_or("");
+            return json!([{
+                "inlineData": {
+                    "mimeType": mime,
+                    "data": data
+                }
+            }]);
+        }
+    } else if let Value::Array(arr) = v {
+        let mut parts = Vec::new();
+        for item in arr {
+            if let Value::Object(m) = item {
+                if m.get("_turn_blob").is_some() {
+                    let mime = m.get("mime_type").and_then(|m| m.as_str()).unwrap_or("image/jpeg");
+                    let data = m.get("data").and_then(|m| m.as_str()).unwrap_or("");
+                    parts.push(json!({
+                        "inlineData": {
+                            "mimeType": mime,
+                            "data": data
+                        }
+                    }));
+                    continue;
+                }
+            }
+            let text = if let Value::String(s) = item {
+                s.clone()
+            } else {
+                item.to_string()
+            };
+            parts.push(json!({ "text": text }));
+        }
+        return json!(parts);
+    }
+    
+    let text = if let Value::String(s) = v {
+        s.clone()
+    } else {
+        v.to_string()
+    };
+    json!([{ "text": text }])
 }
 
 #[no_mangle]
@@ -52,17 +98,27 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
 
     let sys_msg_text = format!("You are a cognitive runtime inference engine mapped to the Turn language. You must return pure JSON strictly matching the following schema:\n{}", schema_str);
     
-    let mut context_text = String::new();
+    let mut parts = Vec::new();
+    
     for ctx in req.params.context {
-        context_text.push_str(&format!("Context: {}\n", ctx));
+        let ctx_parts = turn_to_gemini_content(&ctx);
+        if let Some(arr) = ctx_parts.as_array() {
+            parts.push(json!({"text": "Context: "}));
+            parts.extend(arr.iter().cloned());
+            parts.push(json!({"text": "\n"}));
+        }
     }
     
-    let complete_prompt = format!("{}\nUser Prompt: {}", context_text, req.params.prompt);
+    parts.push(json!({"text": "User Prompt: "}));
+    let prompt_parts = turn_to_gemini_content(&req.params.prompt);
+    if let Some(arr) = prompt_parts.as_array() {
+        parts.extend(arr.iter().cloned());
+    }
 
     let body = json!({
         "contents": [{
             "role": "user",
-            "parts": [{ "text": complete_prompt }]
+            "parts": parts
         }],
         "systemInstruction": {
             "parts": [{ "text": sys_msg_text }]
