@@ -18,7 +18,7 @@ Turn's execution model is built from first principles for intelligent agents: bo
 
 ## In 60 Seconds
 
-Install Turn and get a real LLM inference running locally — no framework, no prompt templates, no boilerplate.
+Install Turn and get a real LLM inference running locally without relying on external frameworks, prompt templates, or boilerplate code.
 
 ```bash
 # Install
@@ -57,7 +57,7 @@ turn run sentiment.tn
 }
 ```
 
-That's `infer` — LLM inference with compile-time schema guarantees, backed by a sandboxed WebAssembly driver. No HTTP calls in your code. No JSON parsing. A structured type, straight from the model.
+That's `infer`: LLM inference with compile-time schema guarantees backed by a sandboxed WebAssembly driver. No HTTP calls in your code and no JSON parsing. A structured type, straight from the model.
 
 ---
 
@@ -81,13 +81,13 @@ The problems are structural:
 - **State is smeared everywhere.** Between the loop, the DB, the cache, the API response.
 - **There is no language-level concept of a "turn."** The mental model doesn't match the implementation.
 
-Turn solves these at the language level. Not with a better library — with a different execution model.
+Turn solves these at the language level not with a better library, but with a completely different execution model.
 
 ---
 
 ## The Turn Model
 
-Turn programs execute as **stateful processes**, not loops. Every execution unit is a *turn* — an atomic, durable unit of agentic work with three built-in resources:
+Turn programs execute as **stateful processes**, not loops. Every execution unit is a *turn*, which serves as an atomic, durable unit of agentic work with three built-in resources:
 
 | Resource | What it is | Turn primitive |
 |---|---|---|
@@ -95,7 +95,7 @@ Turn programs execute as **stateful processes**, not loops. Every execution unit
 | **Context** | Token-budgeted window of working knowledge | `context.append()` |
 | **Memory** | Persistent semantic key-value store with HNSW vectors | `remember()` / `recall()` |
 
-When the agent needs to call a tool or run inference, the VM **suspends** — serializing its entire state to durable storage — and **resumes** with the result. No threads blocked. No state lost.
+When the agent needs to call a tool or run inference, the VM **suspends**, serializing its entire state to durable storage. It then **resumes** with the result ensuring no threads are blocked and no state is lost.
 
 ```
 Turn Agent
@@ -110,7 +110,7 @@ Turn Agent
 
 ## Key Primitives
 
-### `infer` — Cognitive Type Safety
+### `infer` : Cognitive Type Safety
 
 ```turn
 struct Sentiment {
@@ -129,17 +129,17 @@ if result.score > 0.8 {
 }
 ```
 
-### `remember` / `recall` — Semantic RAM
+### `remember` / `recall` : Semantic RAM
 
 ```turn
 // Persist any value to the agent's semantic memory
 remember("preferred_style", "concise bullet points");
 
-// Later — even across process restarts — retrieve by semantic similarity
+// Later, even across process restarts, retrieve by semantic similarity
 let style = recall("preferred_style");
 ```
 
-### `spawn` / `send` / `receive` — Actor Model
+### `spawn` / `send` / `receive` : Actor Model
 
 ```turn
 // Spawn a child agent process (returns a PID)
@@ -155,7 +155,7 @@ send analyst, "Analyze Q4 revenue trends";
 // Each agent: isolated memory, isolated context, isolated mailbox
 ```
 
-### `suspend` — Durable Checkpoints
+### `suspend` : Durable Checkpoints
 
 ```turn
 // Serialize the full VM state to disk. Safely resume after restart.
@@ -188,7 +188,7 @@ Turn VM (Host)
 ```
 
 **Why this matters:**
-- The `.wasm` driver is a 2MB file that runs on any OS — zero native binary distribution
+- The `.wasm` driver is a 2MB file that runs on any OS without a native binary distribution
 - The driver **literally cannot** access your filesystem, network, or environment directly. It can only transform JSON strings
 - API keys are injected by the host, never seen by the plugin code
 
@@ -282,7 +282,7 @@ cargo build --target wasm32-unknown-unknown --release
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
 
 ---
 
