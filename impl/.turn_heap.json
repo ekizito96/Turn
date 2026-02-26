@@ -1,0 +1,83 @@
+{
+  "pid": 1,
+  "frames": [
+    {
+      "code": [
+        {
+          "PushStr": "echo"
+        },
+        {
+          "PushStr": "Waiting for payment confirmation..."
+        },
+        "CallTool",
+        "Pop",
+        {
+          "PushStr": "Awaiting callback data"
+        },
+        {
+          "Suspend": "Any"
+        },
+        {
+          "Store": "payment"
+        },
+        {
+          "PushStr": "echo"
+        },
+        {
+          "PushStr": "Payment received, continuing execution."
+        },
+        "CallTool",
+        "Pop",
+        {
+          "PushStr": "Generate receipt for payment: "
+        },
+        {
+          "Load": "payment"
+        },
+        "Add",
+        {
+          "Infer": [
+            {
+              "Struct": [
+                "Receipt",
+                {}
+              ]
+            },
+            0,
+            false,
+            false,
+            0
+          ]
+        },
+        {
+          "Store": "receipt"
+        }
+      ],
+      "ip": 6,
+      "env": {},
+      "handlers": []
+    }
+  ],
+  "stack": [],
+  "runtime": {
+    "env": {},
+    "context": {
+      "items": [],
+      "token_budget": 8000,
+      "current_tokens": 0
+    },
+    "memory": {
+      "items": [],
+      "entry_point": null
+    },
+    "structs": {},
+    "capabilities": {
+      "next_id": 1
+    },
+    "budget_stack": []
+  },
+  "mailbox": [],
+  "token_budget": 999994,
+  "strictness_threshold": 0.8,
+  "pending_suspend_type": null
+}

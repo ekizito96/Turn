@@ -150,7 +150,7 @@ let analyst = spawn turn() {
 };
 
 // Send work to it
-send(analyst, "Analyze Q4 revenue trends");
+send analyst, "Analyze Q4 revenue trends";
 
 // Each agent: isolated memory, isolated context, isolated mailbox
 ```
@@ -160,7 +160,7 @@ send(analyst, "Analyze Q4 revenue trends");
 ```turn
 // Serialize the full VM state to disk. Safely resume after restart.
 call("echo", "Waiting for human approval...");
-suspend;
+let input = suspend for Any "Please approve this action";
 // Execution picks up here after the operator resumes the agent
 call("echo", "Approved. Continuing...");
 ```
