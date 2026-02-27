@@ -246,11 +246,7 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
-    UseSchema {
-        protocol: String,
-        url: Box<Expr>,
-        span: Span,
-    },
+
     UseWasm {
         url: Box<Expr>,
         span: Span,
@@ -266,7 +262,7 @@ impl Expr {
             Expr::Recall { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
-            Expr::UseSchema { span, .. } => *span,
+
             Expr::UseWasm { span, .. } => *span,
             Expr::Suspend { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,

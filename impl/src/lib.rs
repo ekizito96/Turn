@@ -15,7 +15,6 @@ pub mod tools;
 pub mod value;
 pub mod vm;
 pub mod wasm_host;
-pub mod schema_compiler;
 
 pub use analysis::*;
 pub use ast::*;

@@ -223,11 +223,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                         Ok(val) => { let _ = resume_tx.send(val); }
                                         Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
                                     }
-                                } else if tool_name == "sys_schema_adapter" {
-                                    match crate::schema_compiler::expand_schema_macro(arg).await {
-                                        Ok(module_val) => { let _ = resume_tx.send(module_val); }
-                                        Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
-                                    }
+
                                 } else {
                                     let result = tokio::task::block_in_place(|| self.tools.call(&tool_name, arg));
                                     match result {
@@ -360,11 +356,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                             .send(Value::Str(std::sync::Arc::new(e.to_string())));
                                     }
                                 }
-                            } else if tool_name == "sys_schema_adapter" {
-                                match crate::schema_compiler::expand_schema_macro(arg).await {
-                                    Ok(module_val) => { let _ = resume_tx.send(module_val); }
-                                    Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
-                                }
+
                             } else {
                                 let result = tokio::task::block_in_place(|| {
                                     self.tools.call(&tool_name, arg)
@@ -467,13 +459,6 @@ impl<S: Store + std::marker::Send> Runner<S> {
                             continue;
                         }
 
-                        if tool_name == "sys_schema_adapter" {
-                            match crate::schema_compiler::expand_schema_macro(arg).await {
-                                Ok(module_val) => { let _ = resume_tx.send(module_val); }
-                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
-                            }
-                            continue;
-                        }
 
                         if tool_name == "sys_wasm_adapter" {
                             match self.install_wasm_component(arg) {
@@ -602,11 +587,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                 }
                             }
 
-                        } else if tool_name == "sys_schema_adapter" {
-                            match crate::schema_compiler::expand_schema_macro(arg).await {
-                                Ok(module_val) => { let _ = resume_tx.send(module_val); }
-                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
-                            }
+
                         } else if tool_name == "sys_wasm_adapter" {
                             match self.install_wasm_component(arg) {
                                 Ok(val) => { let _ = resume_tx.send(val); }
