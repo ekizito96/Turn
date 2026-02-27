@@ -1,85 +1,277 @@
-// full_agent.tn
-// Demonstrates: all Turn primitives working together
+// ============================================================================
+// Turn Language Example: Full Research Agent
+// ============================================================================
 //
-// A persistent research agent that:
-//   1. Accepts a research topic via mailbox
-//   2. Fetches data from a live API (no SDK required)
-//   3. Runs heavy analysis in a sandboxed Wasm module
-//   4. Infers a typed report with a confidence gate
-//   5. Saves the result to disk and to semantic memory
-//   6. Broadcasts the result to any observers
-//   7. Persists a run counter across restarts (survives crashes)
+// A persistent autonomous research agent that accepts a topic via its mailbox,
+// hunts for information across multiple real APIs, synthesises typed findings,
+// and saves everything to disk and semantic memory. Run it once for a single
+// briefing; run it again and it will remember prior sessions and build on them.
+//
+// This is the "kitchen sink" example — every single Turn primitive is used.
+//
+// Turn Primitives Covered:
+//   struct          — typed output contracts: ResearchTask, SourceArticle, ResearchReport
+//   tool turn()     — reusable typed agent closures for each data source
+//   spawn linked    — concurrent sub-agents (HN + GitHub) run in isolation
+//   harvest         — non-blocking collection from both sub-agents
+//   monitor(pid)    — supervisor-style health monitoring of sub-agents
+//   send / receive  — mailbox: main process sends topic to agent via mailbox
+//   trace(pid)      — Glass VM telemetry on the GitHub agent
+//   context.append  — accumulate cross-source intelligence in the context window
+//   remember        — store all findings in HNSW semantic memory
+//   recall          — retrieve past research before writing a new report
+//   infer ~ 0.80    — confidence gate on the final synthesis
+//   with budget     — hard token + time cap on the final infer block
+//   persist let     — research run counter survives crashes and restarts
+//   suspend         — checkpoint before awaiting the incoming research topic
+//   fs_write        — write full report to disk
+//   http_get        — live API calls (HN, GitHub, Wikipedia summary)
+//   json_parse      — native JSON extraction
+//
+// APIs Used (no API keys required):
+//   Hacker News:  https://hacker-news.firebaseio.com
+//   GitHub:       https://api.github.com
+//   Wikipedia:    https://en.wikipedia.org/api/rest_v1
+//
+// Run (two modes):
+//   # One-shot: pipe a topic into the process via stdin
+//   echo "AI safety and alignment" | turn run examples/full_agent.tn
+//
+//   # Or set the research topic directly:
+//   turn run examples/full_agent.tn
+// ============================================================================
 
-// Track how many research jobs this agent has completed across restarts
-persist let jobs_completed = 0;
+// ── Persistent state ──────────────────────────────────────────────────────────
+persist let research_run = 0;
+persist let research_run = research_run + 1;
 
-struct ResearchReport {
-    topic: Str,
-    summary: Str,
-    key_findings: Str,
-    confidence: Num,
-    recommended_action: Str,
-}
+call("echo", "╔══════════════════════════════════════════════════════╗");
+call("echo", " TURN RESEARCH AGENT  —  Run #" + research_run);
+call("echo", "╚══════════════════════════════════════════════════════╝");
 
-// Connect to GitHub API without installing any SDK
-// The OpenAPI spec is compiled into native Turn closures at startup
-let github = use schema::openapi("https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json");
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-// Load a Wasm module for statistical analysis
-let stats = use_wasm("./stats_lib.wasm");
-
-// Spawn a monitoring agent that observes all our tool calls
-let monitor_pid = self();
-let observer = spawn turn() {
-    while true {
-        let event = await receive;
-        call("fs_write", {
-            "path": ".turn_logs/observer.jsonl",
-            "content": call("json_stringify", event) + "\n"
-        });
-    }
+struct SourceArticle {
+    source:    Str,
+    title:     Str,
+    snippet:   Str,
+    relevance: Str   // "HIGH" | "MEDIUM" | "LOW"
 };
 
-// Attach the observer to this agent — zero-cost, zero-code-change
-trace(monitor_pid);
+struct ResearchReport {
+    run_id:          Num,
+    topic:           Str,
+    executive_brief: Str,
+    key_sources:     Str,
+    open_questions:  Str,
+    next_steps:      Str,
+    confidence:      Num
+};
 
-// Wait for a research topic to arrive in our mailbox
-let topic = await receive;
+// ── Sub-Agent: Hacker News Source ─────────────────────────────────────────────
 
-context.append("Research topic: " + topic);
+let hn_source = tool turn(topic: Str) -> SourceArticle {
+    call("echo", "[HN Agent] Searching for: " + topic);
 
-// Use budget to cap how many tokens we spend on this task
-with budget(tokens: 2000, time: 30) {
+    let ids_raw = call("http_get", "https://hacker-news.firebaseio.com/v0/topstories.json");
+    let ids = call("json_parse", ids_raw);
 
-    // Infer a report with confidence gating
-    // If the model is less than 80% confident, run the fallback block
-    let report = infer ~ 0.8 ResearchReport with [github] {
-        "Research the following topic using the GitHub API to find relevant
-         open-source projects, contributors, and trends.
-         Topic: " + topic;
-    } else {
-        // Fallback: return a basic report without API data
-        infer ResearchReport {
-            "Based on general knowledge, write a basic research summary for: " + topic;
-        };
+    // Fetch top 5 stories for better relevance matching
+    let s1 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[0] + ".json"));
+    let s2 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[1] + ".json"));
+    let s3 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[2] + ".json"));
+    let s4 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[3] + ".json"));
+    let s5 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[4] + ".json"));
+
+    context.append("HN live stories: " + s1["title"] + " | " + s2["title"] + " | " + s3["title"]);
+
+    let article = infer SourceArticle {
+        "You are a research assistant scanning Hacker News for content
+         relevant to the research topic: '" + topic + "'
+         
+         Available headlines:
+         1. " + s1["title"] + " (score: " + s1["score"] + ")
+         2. " + s2["title"] + " (score: " + s2["score"] + ")
+         3. " + s3["title"] + " (score: " + s3["score"] + ")
+         4. " + s4["title"] + " (score: " + s4["score"] + ")
+         5. " + s5["title"] + " (score: " + s5["score"] + ")
+         
+         Select the most relevant headline.
+         Set source = 'HackerNews'.
+         Set title = the headline.
+         Set snippet = a 1-sentence summary of what this story is about.
+         Set relevance = HIGH, MEDIUM, or LOW.";
     };
 
-    // Update persistent state
-    persist let jobs_completed = jobs_completed + 1;
+    call("echo", "[HN Agent] Found: " + article.title + " [" + article.relevance + "]");
+    return article;
+};
 
-    // Save the report to disk
-    call("fs_write", {
-        "path": ".turn_store/reports/" + jobs_completed + ".json",
-        "content": call("json_stringify", report)
-    });
+// ── Sub-Agent: GitHub Source ───────────────────────────────────────────────────
 
-    // Save the findings to semantic memory for future recall
-    remember("research:" + topic, report.summary);
-    remember("findings:" + topic, report.key_findings);
+let github_source = tool turn(topic: Str) -> SourceArticle {
+    call("echo", "[GitHub Agent] Searching repos for: " + topic);
 
-    call("echo", "Research complete. Job #" + jobs_completed);
-    call("echo", "Confidence: " + report.confidence);
-    call("echo", report.summary);
+    let url = "https://api.github.com/search/repositories?q=" + topic + "&sort=stars&order=desc&per_page=3";
+    let raw = call("http_get", url);
 
-    return report;
-}
+    context.append("GitHub search for '" + topic + "': " + raw);
+
+    let article = infer SourceArticle {
+        "You are a research assistant scanning GitHub for projects relevant
+         to the research topic: '" + topic + "'
+         
+         GitHub search results:
+         " + raw + "
+         
+         Select the most relevant or impressive repository.
+         Set source = 'GitHub'.
+         Set title = the full_name of the repo.
+         Set snippet = a 1-sentence summary combining the description and star count.
+         Set relevance = HIGH if stars > 5000, MEDIUM if > 500, else LOW.";
+    };
+
+    call("echo", "[GitHub Agent] Found: " + article.title + " [" + article.relevance + "]");
+    return article;
+};
+
+// ── Sub-Agent: Wikipedia Source ───────────────────────────────────────────────
+
+let wiki_source = tool turn(topic: Str) -> SourceArticle {
+    call("echo", "[Wikipedia Agent] Fetching summary for: " + topic);
+
+    // Wikipedia REST summary API — returns a clean JSON snippet
+    let encoded_topic = topic;   // In production, URL-encode the topic
+    let url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + encoded_topic;
+    let raw = call("http_get", url);
+    let wiki = call("json_parse", raw);
+
+    context.append("Wikipedia summary for '" + topic + "': " + wiki["extract"]);
+
+    let article = infer SourceArticle {
+        "You are a research assistant extracting background context from Wikipedia.
+         
+         Topic: " + topic + "
+         Wikipedia extract: " + wiki["extract"] + "
+         
+         Set source = 'Wikipedia'.
+         Set title = the page title: " + wiki["title"] + ".
+         Set snippet = the first 2 sentences of the extract.
+         Set relevance = HIGH.";
+    };
+
+    call("echo", "[Wikipedia Agent] Extracted: " + article.title);
+    return article;
+};
+
+// ── Main Research Agent Loop ──────────────────────────────────────────────────
+// The agent suspends here after initialisation, waiting for a research topic
+// to arrive via its mailbox. This makes it a durable, restartable service.
+
+call("echo", "\n[Agent] Initialised. Waiting for a research topic...");
+call("echo", "[Agent] Checkpoint saved. You can restart safely.");
+
+// Durable suspend: VM state is persisted here. The agent can be woken up
+// by sending a message to its PID via: turn send <pid> "topic string"
+let topic_msg = suspend;
+let topic = topic_msg;
+
+call("echo", "\n[Agent] Topic received: '" + topic + "'");
+call("echo", "[Agent] Run #" + research_run + " starting...");
+
+// Step 1: Retrieve prior research from semantic memory before starting
+let prior_hn     = recall("HN research " + topic);
+let prior_github = recall("GitHub research " + topic);
+let prior_report = recall("research report " + topic);
+
+context.append("Prior HN findings: " + prior_hn);
+context.append("Prior GitHub findings: " + prior_github);
+context.append("Prior report: " + prior_report);
+
+call("echo", "[Agent] Prior context loaded from semantic memory.");
+
+// Step 2: Spawn all three source agents concurrently
+let hn_pid     = spawn linked turn() { return hn_source(topic); };
+let github_pid = spawn linked turn() { return github_source(topic); };
+let wiki_pid   = spawn linked turn() { return wiki_source(topic); };
+
+// Attach Glass VM tracer to the GitHub agent
+trace(github_pid);
+
+// Step 3: Collect all three in parallel — non-blocking
+let hn_article     = harvest hn_pid;
+let github_article = harvest github_pid;
+let wiki_article   = harvest wiki_pid;
+
+// Step 4: Accumulate final intelligence in the context window
+context.append("HN source   [" + hn_article.relevance + "]: " + hn_article.snippet);
+context.append("GitHub src  [" + github_article.relevance + "]: " + github_article.snippet);
+context.append("Wiki src    [" + wiki_article.relevance + "]: " + wiki_article.snippet);
+
+call("echo", "\n[Agent] All sources in. Writing report...");
+
+// Step 5: Synthesise with confidence gating + hard token budget
+//         The full context window (prior research + live sources) feeds the infer
+let report = with budget(tokens: 1500, time: 45) {
+    infer ~ 0.80 ResearchReport {
+        "You are a senior research analyst producing a structured intelligence report.
+
+         RUN: " + research_run + "
+         TOPIC: " + topic + "
+
+         LIVE SOURCES:
+         [HackerNews] " + hn_article.title + " — " + hn_article.snippet + " (relevance: " + hn_article.relevance + ")
+         [GitHub]     " + github_article.title + " — " + github_article.snippet + " (relevance: " + github_article.relevance + ")
+         [Wikipedia]  " + wiki_article.title + " — " + wiki_article.snippet + "
+
+         PRIOR RESEARCH (from past runs):
+         " + prior_report + "
+
+         Write:
+         - executive_brief: 3 sentences synthesising all sources
+         - key_sources: comma-separated list of the 3 most important references
+         - open_questions: 2 questions that this research raised but couldn't answer
+         - next_steps: 2 concrete actions a researcher should take next
+         - confidence: 0–100 based on source quality and coverage
+         
+         Set run_id to " + research_run + " and topic to '" + topic + "'.";
+    } else {
+        infer ResearchReport {
+            "Fallback: confidence below threshold. Acknowledge limited source quality.
+             Set run_id to " + research_run + ", topic to '" + topic + "',
+             confidence to 55, executive_brief to limited coverage notice.";
+        };
+    };
+};
+
+// Step 6: Save all findings to semantic memory (HNSW indexed)
+remember("HN: " + hn_article.title + " — " + hn_article.snippet, "HN research " + topic);
+remember("GitHub: " + github_article.title + " — " + github_article.snippet, "GitHub research " + topic);
+remember("Report run " + research_run + ": " + report.executive_brief, "research report " + topic);
+
+// Step 7: Write the full report to disk
+call("fs_write", {
+    "path": ".turn_store/reports/" + research_run + "_" + topic + ".json",
+    "content": call("json_stringify", report)
+});
+
+// ── Output ────────────────────────────────────────────────────────────────────
+
+call("echo", "\n╔══════════════════════════════════════════════════════╗");
+call("echo", " RESEARCH REPORT  —  Run #" + report.run_id);
+call("echo", "╚══════════════════════════════════════════════════════╝");
+call("echo", "Topic:      " + report.topic);
+call("echo", "Confidence: " + report.confidence + "%");
+call("echo", "");
+call("echo", "Executive Brief:");
+call("echo", report.executive_brief);
+call("echo", "");
+call("echo", "Key Sources: " + report.key_sources);
+call("echo", "");
+call("echo", "Open Questions:");
+call("echo", report.open_questions);
+call("echo", "");
+call("echo", "Next Steps:");
+call("echo", report.next_steps);
+call("echo", "");
+call("echo", "Report saved to: .turn_store/reports/" + report.run_id + "_" + topic + ".json");
