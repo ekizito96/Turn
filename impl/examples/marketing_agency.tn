@@ -1,0 +1,176 @@
+// ============================================================================
+// Turn Language: Marketing Agency
+// ============================================================================
+//
+// A team of three marketing agents: SEO Specialist, Copywriter, and
+// Creative Director. They collaborate to generate high-converting ad copy
+// for a given product. This script is designed to be wrapped by a production
+// API (e.g., FastAPI) which passes the product name via the process mailbox.
+//
+// Real APIs (no key required):
+//   Wikipedia: https://en.wikipedia.org/api/rest_v1
+//
+// Run stand-alone:
+//   turn run impl/examples/marketing_agency.tn --id mktg
+// ============================================================================
+
+persist let campaign_id = 0;
+persist let campaign_id = campaign_id + 1;
+
+call("echo", "╔══════════════════════════════════════════════╗");
+call("echo", " MARKETING AGENCY — Campaign #" + campaign_id);
+call("echo", "╚══════════════════════════════════════════════╝");
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+struct ProductContext {
+    product_name: Str,
+    background:   Str,
+    seo_keywords: Str
+};
+
+struct DraftCopy {
+    hook:           Str,
+    body:           Str,
+    call_to_action: Str
+};
+
+struct FinalCampaign {
+    campaign_id:  Num,
+    product:      Str,
+    seo_keywords: Str,
+    approved:     Bool,
+    final_copy:   Str,
+    conf_score:   Num
+};
+
+// ── Agent 1: SEO & Research Specialist ────────────────────────────────────────
+
+let seo_specialist = tool turn(product: Str) -> ProductContext {
+    call("echo", "[SEO] Researching market context for: " + product);
+
+    // Fetch background from Wikipedia to ground the LLM
+    // (Replace spaces with underscores for the URL)
+    let url_topic = call("regex_replace", {"pattern": " ", "replacement": "_", "text": product});
+    let raw       = call("http_get", "https://en.wikipedia.org/api/rest_v1/page/summary/" + url_topic);
+    let wiki      = call("json_parse", raw);
+
+    let background = wiki["extract"];
+    // If Wikipedia fails to find it, it returns an error JSON usually missing 'extract'
+    if background == null {
+        let background = "Generic consumer product.";
+    }
+
+    context.append("Product background: " + background);
+
+    let ctx = infer ProductContext {
+        "You are an expert SEO Specialist. Research the product: " + product + "
+         
+         Context from Wikipedia: " + background + "
+
+         product_name: " + product + "
+         background: 1 sentence summary of the product category.
+         seo_keywords: 3-5 comma-separated high-volume SEO keywords.";
+    };
+
+    call("echo", "[SEO] Keywords identified: " + ctx.seo_keywords);
+    return ctx;
+};
+
+// ── Agent 2: Copywriter ───────────────────────────────────────────────────────
+
+let copywriter = tool turn(ctx: ProductContext) -> DraftCopy {
+    call("echo", "[Copywriter] Drafting ad copy...");
+
+    context.append("SEO Keywords to include: " + ctx.seo_keywords);
+
+    let draft = infer DraftCopy {
+        "You are a world-class Direct Response Copywriter.
+         Write an ad for: " + ctx.product_name + "
+
+         Background: " + ctx.background + "
+         Keywords to target: " + ctx.seo_keywords + "
+
+         hook: 1 punchy, attention-grabbing sentence.
+         body: 2 persuasive sentences highlighting benefits.
+         call_to_action: 1 strong, urgent CTA sentence.";
+    };
+
+    call("echo", "[Copywriter] Draft complete. Hook: " + draft.hook);
+    return draft;
+};
+
+// ── Agent 3: Creative Director ────────────────────────────────────────────────
+
+let creative_director = tool turn(ctx: ProductContext, draft: DraftCopy) -> FinalCampaign {
+    call("echo", "[Director] Reviewing campaign...");
+
+    let prior_feedback = recall("agency feedback " + ctx.product_name);
+    context.append("Prior feedback on this product: " + prior_feedback);
+
+    let campaign = infer FinalCampaign {
+        "You are the Creative Director. Review the draft ad copy below.
+
+         Product: " + ctx.product_name + "
+         Keywords: " + ctx.seo_keywords + "
+
+         DRAFT:
+         Hook: " + draft.hook + "
+         Body: " + draft.body + "
+         CTA: " + draft.call_to_action + "
+
+         If the copy is compelling and includes keywords, approve it. Combine
+         the hook, body, and CTA into 'final_copy'.
+
+         campaign_id: " + campaign_id + "
+         product: " + ctx.product_name + "
+         seo_keywords: " + ctx.seo_keywords + "
+         approved: true or false
+         final_copy: The combined ad text, refined if necessary.
+         conf_score: 0-100 indicating quality of the copy.";
+    } ~ 0.85 else {
+        infer FinalCampaign {
+            "Fallback generation. The Director rejected the initial draft due to low confidence.
+             campaign_id: " + campaign_id + ", product: " + ctx.product_name + ",
+             seo_keywords: " + ctx.seo_keywords + ", approved: false, conf_score: 50,
+             final_copy: Draft rejected by creative director. Needs rewrite.";
+        };
+    };
+
+    call("echo", "[Director] Approved: " + campaign.approved + " (Confidence: " + campaign.conf_score + "%)");
+    
+    // Store feedback in semantic memory
+    remember("agency feedback " + ctx.product_name, "Campaign " + campaign_id + " - Approved: " + campaign.approved + ". Copy: " + campaign.final_copy);
+
+    return campaign;
+};
+
+// ── Main Orchestration ────────────────────────────────────────────────────────
+
+// Default product
+persist let target_product = "Electric bicycle";
+
+// Check mailbox for API/external input overriding the product
+let incoming = receive;
+if incoming != null {
+    persist let target_product = incoming;
+    call("echo", "[Agency] Received new product brief from API: " + target_product);
+}
+
+// Step 1: SEO Specialist runs
+let ctx = seo_specialist(target_product);
+
+// Step 2: Copywriter drafts
+let draft = copywriter(ctx);
+
+// Step 3: Director reviews
+let final = creative_director(ctx, draft);
+
+// Archive the result directly to disk
+let final_json = call("json_stringify", final);
+call("fs_write", {"path": ".turn_store/campaigns/camp_" + campaign_id + ".json", "content": final_json});
+
+// Output a clean JSON string at the very end for the FastAPI wrapper to parse easily
+call("echo", "=== API_RESPONSE_START ===");
+call("echo", final_json);
+call("echo", "=== API_RESPONSE_END ===");
