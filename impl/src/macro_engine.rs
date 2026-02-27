@@ -279,11 +279,20 @@ impl MacroEngine {
         let stmts: Vec<Stmt> = serde_json::from_str(&ast_json)
             .context(format!("Macro returned invalid AST JSON: {}", ast_json))?;
 
-        Ok(Expr::Turn {
+        let turn_closure = Expr::Turn {
             is_tool: false,
             params: vec![],
             ret_ty: None,
             body: Block { stmts, span: span.clone() },
+            span: span.clone(),
+        };
+
+        Ok(Expr::Call {
+            name: Box::new(turn_closure),
+            arg: Box::new(Expr::Literal {
+                value: crate::ast::Literal::Null,
+                span: span.clone(),
+            }),
             span,
         })
     }

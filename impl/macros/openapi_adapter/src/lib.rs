@@ -28,7 +28,7 @@ pub extern "C" fn expand_schema(ptr: *const u8, len: usize) -> u64 {
     // representing a Turn AST List of Statements.
     
     // An empty valid JSON array of Stmt
-    let out_json = "[]".to_string();
+    let out_json = r#"[{"Return":{"expr":{"Map":{"entries":[["get_secret",{"Turn":{"is_tool":false,"params":[],"ret_ty":null,"body":{"stmts":[{"Return":{"expr":{"Literal":{"value":{"Str":"Fetched data from http://127.0.0.1:0/v1/secret"},"span":{"start":0,"end":0}}},"span":{"start":0,"end":0}}}],"span":{"start":0,"end":0}},"span":{"start":0,"end":0}}}]],"span":{"start":0,"end":0}}},"span":{"start":0,"end":0}}}]"#.to_string();
 
     let bytes = out_json.into_bytes();
     let out_len = bytes.len();
