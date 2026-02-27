@@ -4,6 +4,44 @@ All notable changes to Turn are documented here. Turn uses [Semantic Versioning]
 
 ---
 
+## [0.6.0] - 2026-02-27 (The Post-Language Ecosystem)
+
+This release eliminates Turn's remaining ecosystem boundaries. Instead of relying on centralized package registries, bulky language SDKs, or native CLI environments, Turn now connects to the outside world through three native language primitives backed by the compiler itself.
+
+### Language
+
+- **`use "https://..."`** (URL-Native Module Caching)
+  Import a pure Turn module directly from any URL. The runtime fetches and cryptographically caches the AST locally so subsequent runs are fully offline. No `turn.toml`, no registry, no dependency resolution step required.
+
+- **`use schema::openapi("url")`** (Compile-Time Schema Adapters)
+  Download an OpenAPI JSON spec at compile time and generate native Turn closures for each endpoint automatically. Zero SDK installation. The generated methods are plain Turn functions that the LLM can call directly through `infer with [tools]`.
+
+- **`use_wasm("path.wasm")`** (Wasm Component FFI)
+  Mount a WebAssembly binary as a native map of Turn closures. Call Rust, Python-compiled, or any other Wasm-compiled function from inside a Turn agent. If the Wasm module panics, the fault is trapped at the boundary and returned as a Turn error value — the agent supervisor tree is unaffected.
+
+### Observability (Phase 5 — now shipping)
+
+- **`trace(pid)`**: Attach a transparent observer to any running agent. The VM routes a copy of every `TraceEvent` to the observer's mailbox in real time with no modifications to the observed agent's code.
+- **`#[mock(infer Type = value)]`**: Replace any LLM call with a deterministic value during `--test` mode. Tests run instantly against the full agent logic without hitting a network.
+- **Time-Travel Replay**: Every `infer` call and state mutation is written to a versioned Write-Ahead Log. Run `turn replay <agent-id>` to step forward and backward through an agent's execution history frame by frame.
+
+### Bytecode
+
+| Instruction | Purpose |
+|---|---|
+| `CallTool` | Dispatch to `sys_wasm_adapter`, `sys_wasm_call`, `sys_schema_adapter`, or a user tool |
+| `MakeMap(n)` | Construct a Turn map from n key-value pairs on the stack |
+
+### Tests
+
+- `url_resolver_test.rs` — URL-native AST fetch and cache roundtrip
+- `schema_adapter_test.rs` — OpenAPI schema expansion into callable Turn closures
+- `wasm_sandbox_test.rs` — Wasm FFI roundtrip through `use_wasm`
+- `trace_test.rs` — Glass VM tracing across spawned agents
+- `mock_test.rs` — Stochastic mock compile-time testing
+
+---
+
 ## [0.5.1] - 2026-02-25 (Agentic Physics — Phase 2)
 
 This release embeds the 5 pillars of **Agentic Physics** directly into the Turn language runtime, making LLM resilience, tooling, token safety, context hygiene, and state persistence first-class language primitives.

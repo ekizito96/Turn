@@ -1,0 +1,85 @@
+// full_agent.tn
+// Demonstrates: all Turn primitives working together
+//
+// A persistent research agent that:
+//   1. Accepts a research topic via mailbox
+//   2. Fetches data from a live API (no SDK required)
+//   3. Runs heavy analysis in a sandboxed Wasm module
+//   4. Infers a typed report with a confidence gate
+//   5. Saves the result to disk and to semantic memory
+//   6. Broadcasts the result to any observers
+//   7. Persists a run counter across restarts (survives crashes)
+
+// Track how many research jobs this agent has completed across restarts
+persist let jobs_completed = 0;
+
+struct ResearchReport {
+    topic: Str,
+    summary: Str,
+    key_findings: Str,
+    confidence: Num,
+    recommended_action: Str,
+}
+
+// Connect to GitHub API without installing any SDK
+// The OpenAPI spec is compiled into native Turn closures at startup
+let github = use schema::openapi("https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json");
+
+// Load a Wasm module for statistical analysis
+let stats = use_wasm("./stats_lib.wasm");
+
+// Spawn a monitoring agent that observes all our tool calls
+let monitor_pid = self();
+let observer = spawn turn() {
+    while true {
+        let event = await receive;
+        call("fs_write", {
+            "path": ".turn_logs/observer.jsonl",
+            "content": call("json_stringify", event) + "\n"
+        });
+    }
+};
+
+// Attach the observer to this agent — zero-cost, zero-code-change
+trace(monitor_pid);
+
+// Wait for a research topic to arrive in our mailbox
+let topic = await receive;
+
+context.append("Research topic: " + topic);
+
+// Use budget to cap how many tokens we spend on this task
+with budget(tokens: 2000, time: 30) {
+
+    // Infer a report with confidence gating
+    // If the model is less than 80% confident, run the fallback block
+    let report = infer ~ 0.8 ResearchReport with [github] {
+        "Research the following topic using the GitHub API to find relevant
+         open-source projects, contributors, and trends.
+         Topic: " + topic;
+    } else {
+        // Fallback: return a basic report without API data
+        infer ResearchReport {
+            "Based on general knowledge, write a basic research summary for: " + topic;
+        };
+    };
+
+    // Update persistent state
+    persist let jobs_completed = jobs_completed + 1;
+
+    // Save the report to disk
+    call("fs_write", {
+        "path": ".turn_store/reports/" + jobs_completed + ".json",
+        "content": call("json_stringify", report)
+    });
+
+    // Save the findings to semantic memory for future recall
+    remember("research:" + topic, report.summary);
+    remember("findings:" + topic, report.key_findings);
+
+    call("echo", "Research complete. Job #" + jobs_completed);
+    call("echo", "Confidence: " + report.confidence);
+    call("echo", report.summary);
+
+    return report;
+}

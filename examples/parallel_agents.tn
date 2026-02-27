@@ -1,0 +1,59 @@
+// parallel_agents.tn
+// Demonstrates: spawn, send, await receive, linked actors, harvest
+//
+// Three specialist agents work in parallel on the same problem,
+// then a coordinator collects and synthesises all their outputs.
+// If any specialist panics, the coordinator is notified immediately.
+
+struct Report {
+    author: Str,
+    summary: Str,
+    confidence: Num,
+}
+
+// Spawn three linked specialist agents
+let market_analyst = spawn linked turn() {
+    let brief = await receive;
+    return infer Report {
+        "You are a market analyst. Write a short analysis for: " + brief;
+    };
+};
+
+let risk_officer = spawn linked turn() {
+    let brief = await receive;
+    return infer Report {
+        "You are a risk officer. Identify the top 3 risks for: " + brief;
+    };
+};
+
+let legal_counsel = spawn linked turn() {
+    let brief = await receive;
+    return infer Report {
+        "You are legal counsel. Identify any regulatory concerns with: " + brief;
+    };
+};
+
+// Distribute the same brief to all three at once
+let brief = "Launching a B2B SaaS product for European healthcare providers.";
+send market_analyst, brief;
+send risk_officer, brief;
+send legal_counsel, brief;
+
+// Collect all three results concurrently
+let market  = harvest market_analyst;
+let risk    = harvest risk_officer;
+let legal   = harvest legal_counsel;
+
+call("echo", "Market: " + market.summary);
+call("echo", "Risk:   " + risk.summary);
+call("echo", "Legal:  " + legal.summary);
+
+// Final synthesis
+let final_brief = infer Report {
+    "Synthesise the following three expert reports into one board-ready executive summary.
+     Market: " + market.summary + "
+     Risk: " + risk.summary + "
+     Legal: " + legal.summary;
+};
+
+return final_brief.summary;
