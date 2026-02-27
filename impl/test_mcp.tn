@@ -1,0 +1,6 @@
+turn {
+    let server = mcp("stdio://echo hello_mcp_test");
+    println("Successfully spawned legacy modelcontextprotocol server with OS PID:");
+    println(server.pid);
+    println(server.status);
+}

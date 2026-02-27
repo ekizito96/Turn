@@ -1,0 +1,9 @@
+turn {
+    let result = call("sys_exec", { 
+        "arg3": "Natively bounded OS process execution from Turn!",
+        "arg2": "import sys; print(f'Turn strict CLI isolation container: {sys.argv[1]}')", 
+        "arg1": "-c", 
+        "bin": "python3"
+    });
+    call("echo", result);
+}

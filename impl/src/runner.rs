@@ -65,7 +65,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                     .map_err(|e| anyhow::anyhow!("Lexer error in std module {}: {}", path, e))?;
 
                 let mut parser = Parser::new(tokens);
-                let program = parser.parse().map_err(|e| {
+                let mut program = parser.parse().map_err(|e| {
                     let offset = e.offset();
                     let snippet = if offset < source.len() {
                         &source[offset..std::cmp::min(offset + 20, source.len())]
@@ -80,6 +80,8 @@ impl<S: Store + std::marker::Send> Runner<S> {
                         snippet
                     )
                 })?;
+
+                crate::macro_engine::MacroEngine::expand(&mut program).await?;
 
                 let mut compiler = Compiler::new();
                 let code = compiler.compile(&program);
@@ -191,8 +193,10 @@ impl<S: Store + std::marker::Send> Runner<S> {
                     .map_err(|e| anyhow::anyhow!("Lexer error in URL module {}: {}", path_str, e))?;
 
                 let mut parser = Parser::new(tokens);
-                let program = parser.parse()
+                let mut program = parser.parse()
                     .map_err(|e| anyhow::anyhow!("Parser error in URL module {}: {}", path_str, e))?;
+
+                crate::macro_engine::MacroEngine::expand(&mut program).await?;
 
                 let mut compiler = Compiler::new();
                 let code = compiler.compile(&program);
@@ -307,9 +311,11 @@ impl<S: Store + std::marker::Send> Runner<S> {
                 .map_err(|e| anyhow::anyhow!("Lexer error in module {}: {}", key, e))?;
 
             let mut parser = Parser::new(tokens);
-            let program = parser
+            let mut program = parser
                 .parse()
                 .map_err(|e| anyhow::anyhow!("Parser error in module {}: {}", key, e))?;
+
+            crate::macro_engine::MacroEngine::expand(&mut program).await?;
 
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
@@ -397,9 +403,11 @@ impl<S: Store + std::marker::Send> Runner<S> {
             .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
 
         let mut parser = Parser::new(tokens);
-        let program = parser
+        let mut program = parser
             .parse()
             .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+
+        crate::macro_engine::MacroEngine::expand(&mut program).await?;
 
         let mut compiler = Compiler::new();
         let code = compiler.compile(&program);

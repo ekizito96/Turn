@@ -56,6 +56,7 @@ pub enum Token {
     False,
     Null,
     UseWasm,
+    Mcp,    // NEW Phase 6c
     Test,   // NEW Phase 5
     Mock,   // NEW Phase 5
     Trace,  // NEW Phase 5
@@ -122,7 +123,7 @@ pub struct SpannedToken {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -142,6 +143,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
     ("use_wasm", Token::UseWasm),
+    ("mcp", Token::Mcp),
     ("match", Token::Match),
     ("ok", Token::Ok),
     ("err", Token::Err),

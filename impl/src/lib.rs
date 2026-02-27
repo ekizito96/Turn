@@ -15,6 +15,7 @@ pub mod tools;
 pub mod value;
 pub mod vm;
 pub mod wasm_host;
+pub mod macro_engine;
 
 pub use analysis::*;
 pub use ast::*;
@@ -31,6 +32,7 @@ pub use store::*;
 pub use tools::*;
 pub use value::*;
 pub use vm::*;
+pub use macro_engine::*;
 
 /// Converts a byte offset into source to (line, column) for error messages.
 pub fn offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {
@@ -86,11 +88,21 @@ pub fn run_with_tools(
     source: &str,
     tools: &tools::ToolRegistry,
 ) -> Result<value::Value, Box<dyn std::error::Error>> {
-    let tokens = lexer::Lexer::new(source).tokenize()?;
-    let program = parser::Parser::new(tokens).parse()?;
-    let mut compiler = compiler::Compiler::new();
-    let code = compiler.compile(&program);
+    let source_str = source.to_string();
+    let tools_clone = tools.clone();
+
     let fut = async move {
+        let tokens = lexer::Lexer::new(&source_str).tokenize()
+            .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
+        let mut program = parser::Parser::new(tokens).parse()
+            .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+        
+        // Execute Wasm macros (Schema Adapters) before compilation
+        crate::macro_engine::MacroEngine::expand(&mut program).await?;
+
+        let mut compiler = compiler::Compiler::new();
+        let code = compiler.compile(&program);
+
         let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
         let vm = vm::Vm::new(&code, host_tx);
         let registry = vm.registry.clone(); // NEW Phase 5: Hook into VM state for telemetry dispatch
@@ -106,7 +118,7 @@ pub fn run_with_tools(
                     }
                     vm::VmEvent::Error { pid, error } => {
                         if pid == 1 {
-                            return Err(error.to_string());
+                            return Err(anyhow::anyhow!("VM Error: {}", error));
                         }
                     }
                     vm::VmEvent::Suspend {
@@ -117,7 +129,7 @@ pub fn run_with_tools(
                         ..
                     } => {
                         let result = tokio::task::block_in_place(|| {
-                            tools.call(&tool_name, arg).unwrap_or_else(|e| {
+                            tools_clone.call(&tool_name, arg).unwrap_or_else(|e| {
                                 value::Value::Str(std::sync::Arc::new(e.to_string()))
                             })
                         });
@@ -153,7 +165,7 @@ pub fn run_with_tools(
                     }
                 }
             } else {
-                return Err("VM unexpectedly halted".to_string());
+                return Err(anyhow::anyhow!("VM unexpectedly halted"));
             }
         }
     };

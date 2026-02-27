@@ -58,6 +58,7 @@ pub enum Instr {
     InferResume(Type, usize, String, String), // Expected type, Tool count, Func Name, Args Str
     PushBudget, // Pops max tokens and max time from stack, pushes new budget frame
     PopBudget,  // Pops current budget frame, merging usage to parent
+    McpStart,   // NEW Phase 6c
     
     // Concurrency
     Spawn(bool, bool), // (linked, monitored)

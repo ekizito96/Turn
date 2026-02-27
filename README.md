@@ -206,6 +206,52 @@ See [PROVIDERS.md](PROVIDERS.md) for the full protocol spec and how to write you
 
 ---
 
+## Ecosystem Bridges
+
+Turn connects to the existing ecosystem through three native primitives. None of them require an SDK, a package install, or a runtime dependency.
+
+### Compile-Time Schema Adapters
+
+```turn
+// GraphQL: fetches introspection at compile time, generates native Turn tools
+let gh = use schema::graphql("https://api.github.com/graphql");
+
+// Swagger/REST: generates a tool closure per API path and operation
+let stripe = use schema::swagger("https://api.stripe.com/openapi.json");
+
+// gRPC: parses .proto text into Turn structs and RPC closures
+let billing = use schema::grpc("proto://billing.proto");
+
+// FHIR: FHIR Conformance into healthcare resource structs and CRUD tools
+let ehr = use schema::fhir("https://fhir.example.com/metadata");
+```
+
+At **runtime** these are plain Turn closures. The LLM calls them with `infer with [tools]`. The schema adapter runs in a `wasm32-unknown-unknown` Wasmtime sandbox. It cannot touch your filesystem, network, or secrets.
+
+### `mcp()`: Native MCP Bridge
+
+```turn
+// Spawns a stdio JSON-RPC MCP server and returns McpServer { pid, status }.
+let legacy = mcp("stdio://npx @modelcontextprotocol/server-stripe");
+```
+
+`mcp()` is a migration bridge. Once you rewrite the server logic in Turn, replace the `mcp()` call with `use schema::openapi(...)` and the subprocess overhead disappears.
+
+### `sys_exec`: CLI Domestication
+
+```turn
+// Strictly typed. No shell. Injection is structurally impossible.
+let out = call("sys_exec", {
+    "bin":  "python3",
+    "arg1": "analyze.py",
+    "arg2": user_input   // Str, passed as a positional arg, not a shell string
+});
+```
+
+The VM calls `python3 analyze.py <user_input>` directly. Shell metacharacters (`&&`, `|`, `` ` ``) are structurally impossible because the LLM never constructs a command string.
+
+---
+
 ## Standard Library
 
 | Module | Functions |
@@ -226,7 +272,16 @@ Turn/
 ├── PROVIDERS.md              ← Wasm driver protocol spec
 ├── ARCHITECTURE.md           ← Internal codebase guide
 ├── install.sh                ← One-line installer
+├── docs/                     ← Developer docs
+│   ├── 05-ecosystem.md       ← Ecosystem bridges guide
+├── spec/                     ← Language specification
+│   ├── 11-ecosystem-bridges.md ← Formal spec for adapters, mcp(), sys_exec
 ├── impl/                     ← Rust bytecode VM
+│   ├── macros/               ← Wasm schema adapter crates
+│   │   ├── graphql_adapter/  ← GraphQL → Turn AST Wasm macro
+│   │   ├── swagger_adapter/  ← Swagger v2 → Turn AST Wasm macro
+│   │   ├── grpc_adapter/     ← gRPC/Protobuf → Turn AST Wasm macro
+│   │   └── fhir_adapter/     ← FHIR → Turn AST Wasm macro
 │   └── src/
 │       ├── lexer.rs          ← Tokenizer
 │       ├── parser.rs         ← Recursive-descent parser
@@ -236,6 +291,7 @@ Turn/
 │       ├── llm_tools.rs      ← infer instruction handler
 │       ├── runtime.rs        ← HNSW semantic memory + WAL
 │       ├── runner.rs         ← Host: tool dispatch, agent lifecycle
+│       ├── tools.rs          ← ToolRegistry (echo, sys_exec, fs_*, ...)
 │       └── server.rs         ← HTTP server mode
 ├── providers/                ← Official Wasm inference drivers
 │   ├── turn-provider-openai/
@@ -263,6 +319,10 @@ cargo build --release
 cd ../providers/turn-provider-openai
 cargo build --target wasm32-unknown-unknown --release
 
+# Build a schema adapter Wasm macro
+cd ../impl/macros/graphql_adapter
+cargo build --target wasm32-unknown-unknown --release
+
 # Start the LSP (for VS Code)
 ./target/release/turn lsp
 ```
@@ -276,7 +336,7 @@ cargo build --target wasm32-unknown-unknown --release
 | [Why Turn](https://turn-lang.dev/docs/why-turn) | [Installation](https://turn-lang.dev/docs/installation) |
 | [The `infer` Primitive](https://turn-lang.dev/docs/inference) | [Inference Providers](https://turn-lang.dev/docs/providers) |
 | [Memory & Context](https://turn-lang.dev/docs/memory) | [The Actor Model](https://turn-lang.dev/docs/concurrency) |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | [`impl/src/`](impl/src/) |
+| [Ecosystem Bridges](https://turn-lang.dev/docs/ecosystem) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 ---
 

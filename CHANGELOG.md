@@ -4,6 +4,60 @@ All notable changes to Turn are documented here. Turn uses [Semantic Versioning]
 
 ---
 
+## [0.7.0] - 2026-02-27 (Ecosystem Mastery)
+
+This release completes Turn's ecosystem bridge layer. Developers working with OpenAPI, GraphQL, gRPC, FHIR, legacy MCP servers, and CLI tools can now integrate all of them **natively in Turn with zero runtime bloat, zero bash injection risk, and zero LLM context pollution**.
+
+### Language
+
+- **`use schema::graphql("url")`** (GraphQL Compile-Time Adapter)
+  Fetches a GraphQL introspection schema at compile time and generates native Turn `StructDef` and `Turn` closures for each `Query` and `Mutation`. The schema is resolved once; the LLM uses the generated closures at runtime with no awareness of the underlying GraphQL wire protocol.
+
+- **`use schema::swagger("url")`** (Swagger/REST Compile-Time Adapter)
+  Parses a Swagger v2 JSON definition and generates a Turn `tool` closure for every path+operation. REST endpoints become natively callable Turn functions.
+
+- **`use schema::grpc("url")`** (gRPC/Protobuf Compile-Time Adapter)
+  Parses `.proto` definition text and generates Turn `StructDef` for each message and a `turn` closure for each `rpc`. No Protobuf runtime or code generation step needed.
+
+- **`use schema::fhir("url")`** (FHIR Conformance Compile-Time Adapter)
+  Parses a FHIR Conformance Statement and generates Turn structs and CRUD closures for every resource type. Healthcare API integration without a FHIR SDK.
+
+- **`mcp("stdio://...")`** (Native MCP Legacy Bridge)
+  Spawns a stdio JSON-RPC MCP server process from within Turn's VM. The spawned subprocess is bound to the agent's lifetime and exposed as a `McpServer` struct containing the PID and status. Syntax: `let tools = mcp("stdio://npx @modelcontextprotocol/server-stripe");`
+
+- **`call("sys_exec", { ... })`** (CLI Domestication Boundary)
+  Strictly typed CLI execution: the OS binary and each argument must be individually declared as `Str` values in a Turn map. Shell operators (`&&`, `|`, `` ` ``) are structurally impossible. The LLM never touches bash; it only calls the Turn `tool` wrapper.
+
+### Wasm Macro Architecture
+
+All schema adapters are implemented as independent `wasm32-unknown-unknown` Rust crates compiled to `.wasm` files:
+
+| Adapter | Wasm Module | Input | Output |
+|---|---|---|---|
+| GraphQL | `graphql_adapter.wasm` | Introspection JSON | Turn AST nodes |
+| Swagger | `swagger_adapter.wasm` | Swagger v2 JSON | Turn AST nodes |
+| gRPC | `grpc_adapter.wasm` | Proto text | Turn AST nodes |
+| FHIR | `fhir_adapter.wasm` | Conformance JSON | Turn AST nodes |
+
+Each adapter exposes `allocate_memory` / `deallocate_memory` / `expand_schema` FFI entry points. The Turn compiler calls these at compile time via Wasmtime, then inlines the resulting AST nodes as if they were hand-written Turn code. **Zero runtime overhead. Zero HTTP calls during execution.**
+
+### Bytecode
+
+| Instruction | Purpose |
+|---|---|
+| `McpStart` | Spawns a `stdio://` subprocess and pushes a `McpServer` struct to the stack |
+
+### Tests
+
+- `test_mcp.tn`: Validates MCP subprocess spawning and struct response
+- `test_sys.tn`: Validates strictly bounded CLI execution via `sys_exec`
+- `impl/macros/graphql_adapter/`: GraphQL Wasm macro source
+- `impl/macros/swagger_adapter/`: Swagger Wasm macro source
+- `impl/macros/grpc_adapter/`: gRPC Wasm macro source
+- `impl/macros/fhir_adapter/`: FHIR Wasm macro source
+
+---
+
 ## [0.6.0] - 2026-02-27 (The Post-Language Ecosystem)
 
 This release eliminates Turn's remaining ecosystem boundaries. Instead of relying on centralized package registries, bulky language SDKs, or native CLI environments, Turn now connects to the outside world through three native language primitives backed by the compiler itself.

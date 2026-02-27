@@ -22,18 +22,18 @@ pub enum Type {
     Result(Box<Type>, Box<Type>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MockDef {
     pub target_ty: Type,
     pub mock_value: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub stmts: Vec<Stmt>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Stmt {
     Turn {
         body: Block,
@@ -116,13 +116,13 @@ pub enum Stmt {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Literal {
         value: Literal,
@@ -149,6 +149,10 @@ pub enum Expr {
     },
     Use {
         module: Box<Expr>,
+        span: Span,
+    },
+    Mcp {
+        url: Box<Expr>,
         span: Span,
     },
     Suspend {
@@ -246,6 +250,11 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
+    UseSchema {
+        protocol: String,
+        url: Box<Expr>,
+        span: Span,
+    },
 
     UseWasm {
         url: Box<Expr>,
@@ -262,8 +271,10 @@ impl Expr {
             Expr::Recall { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
+            Expr::UseSchema { span, .. } => *span,
 
             Expr::UseWasm { span, .. } => *span,
+            Expr::Mcp { span, .. } => *span,
             Expr::Suspend { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
             Expr::Ok(_, span) => *span,
@@ -289,13 +300,13 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnOp {
     Not,
     Neg,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinOp {
     Mul,
     Div,
@@ -312,7 +323,7 @@ pub enum BinOp {
     Or,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     Num(f64),
     Str(String),

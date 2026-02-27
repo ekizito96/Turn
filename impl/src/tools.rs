@@ -313,6 +313,46 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
+        // sys_exec
+        // Phase 6c: CLI Domestication primitive boundary
+        tools.insert(
+            "sys_exec".to_string(),
+            Box::new(|arg| {
+                let args_str = match arg {
+                    Value::Map(m) => {
+                        let mut strings = Vec::new();
+                        for v in m.values() {
+                            match v {
+                                Value::Str(s) => strings.push(s.to_string()),
+                                _ => return Err("sys_exec map values must be strictly Strings".to_string()),
+                            }
+                        }
+                        if strings.is_empty() {
+                            return Err("sys_exec expects at least the binary name as the first map value".to_string());
+                        }
+                        strings
+                    }
+                    _ => return Err("sys_exec expects a Map of Strings: { 'bin': 'python3', 'args': '...' }".to_string()),
+                };
+                
+                let binary = &args_str[0];
+                let cmd_args = &args_str[1..];
+                
+                match Command::new(binary).args(cmd_args).output() {
+                    Ok(output) => {
+                        if output.status.success() {
+                            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                            Ok(Value::Str(std::sync::Arc::new(stdout)))
+                        } else {
+                            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                            Err(format!("Process failed with status {}: {}", output.status, stderr))
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to execute '{}': {}", binary, e)),
+                }
+            }) as ToolHandler,
+        );
+
         // regex_replace
         tools.insert(
             "regex_replace".to_string(),

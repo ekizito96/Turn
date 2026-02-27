@@ -706,6 +706,9 @@ impl Analysis {
             Expr::Trace { pid_expr, span: _ } => {
                 self.visit_expr(pid_expr);
             }
+            Expr::Mcp { url, span: _ } => {
+                self.visit_expr(url);
+            }
             Expr::StructInit { name, fields, span } => {
                 if let Some(def_fields) = self.find_struct(name) {
                     for (field_name, field_ty) in &def_fields {

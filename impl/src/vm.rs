@@ -822,6 +822,54 @@ impl Process {
                     // Just discard the innermost budget scope — its return value is already on the stack
                     self.runtime.budget_stack.pop();
                 }
+                Instr::McpStart => {
+                    let url_val = match self.stack.pop().unwrap_or(Value::Null) {
+                        Value::Str(s) => s.to_string(),
+                        _ => {
+                            self.stack.push(Value::Null);
+                            println!("VM Error: Mcp payload must be a stdio url string");
+                            continue;
+                        }
+                    };
+                    
+                    if url_val.starts_with("stdio://") {
+                        let cmd_str = url_val.strip_prefix("stdio://").unwrap_or("");
+                        let mut parts = cmd_str.split_whitespace();
+                        if let Some(bin) = parts.next() {
+                            let args: Vec<&str> = parts.collect();
+                            
+                            use std::process::Command;
+                            match Command::new(bin).args(&args).spawn() {
+                                Ok(child) => {
+                                    // Successfully spawned MCP Server! 
+                                    // Return a Turn Struct representing the Server connection
+                                    
+                                    let mut server_fields = indexmap::IndexMap::new();
+                                    server_fields.insert("pid".to_string(), Value::Num(child.id() as f64));
+                                    server_fields.insert("status".to_string(), Value::Str(std::sync::Arc::new("active".to_string())));
+                                    
+                                    self.stack.push(Value::Struct(
+                                        std::sync::Arc::new("McpServer".to_string()), 
+                                        std::sync::Arc::new(server_fields)
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.stack.push(Value::Null);
+                                    println!("VM Error: Failed to start MCP server: {}", e);
+                                    continue;
+                                }
+                            }
+                        } else {
+                            self.stack.push(Value::Null);
+                            println!("VM Error: Invalid stdio URL");
+                            continue;
+                        }
+                    } else {
+                        self.stack.push(Value::Null);
+                        println!("VM Error: Only stdio:// MCP URLs are supported");
+                        continue;
+                    }
+                }
                 Instr::PushNull => self.stack.push(Value::Null),
                 Instr::PushTrue => self.stack.push(Value::Bool(true)),
                 Instr::PushFalse => self.stack.push(Value::Bool(false)),
