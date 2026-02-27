@@ -420,6 +420,7 @@ pub struct Runtime {
     pub structs: HashMap<String, IndexMap<String, Type>>,
     pub capabilities: CapabilityRegistry,
     pub budget_stack: Vec<BudgetFrame>, // Thermodynamic guardrails
+    pub active_mocks: Vec<(Type, Value)>, // NEW Phase 5
     #[serde(skip)]
     pub switchboard: Option<std::sync::Arc<dyn NetworkSwitchboard>>,
 }
@@ -433,6 +434,7 @@ impl Clone for Runtime {
             structs: self.structs.clone(),
             capabilities: self.capabilities.clone(),
             budget_stack: self.budget_stack.clone(),
+            active_mocks: self.active_mocks.clone(), // NEW Phase 5
             switchboard: self.switchboard.clone(),
         }
     }
@@ -447,6 +449,7 @@ impl Runtime {
             structs: HashMap::new(),
             capabilities: CapabilityRegistry::new(),
             budget_stack: Vec::new(),
+            active_mocks: Vec::new(), // NEW Phase 5
             switchboard: None,
         }
     }

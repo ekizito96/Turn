@@ -23,6 +23,12 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone)]
+pub struct MockDef {
+    pub target_ty: Type,
+    pub mock_value: Expr,
+}
+
+#[derive(Debug, Clone)]
 pub struct Program {
     pub stmts: Vec<Stmt>,
 }
@@ -102,6 +108,12 @@ pub enum Stmt {
         err_block: Block,
         span: Span,
     },
+    TestDef {         // NEW Phase 5
+        name: String,
+        mocks: Vec<MockDef>,
+        body: Block,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +181,10 @@ pub enum Expr {
     Harvest {
         span: Span,
     },
+    Trace {           // NEW Phase 5
+        pid_expr: Box<Expr>,
+        span: Span,
+    },
 
     Vec {
         items: Vec<Expr>,
@@ -230,6 +246,15 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
+    UseSchema {
+        protocol: String,
+        url: Box<Expr>,
+        span: Span,
+    },
+    UseWasm {
+        url: Box<Expr>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -241,6 +266,8 @@ impl Expr {
             Expr::Recall { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
+            Expr::UseSchema { span, .. } => *span,
+            Expr::UseWasm { span, .. } => *span,
             Expr::Suspend { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
             Expr::Ok(_, span) => *span,
@@ -261,6 +288,7 @@ impl Expr {
             Expr::Paren(inner) => inner.span(),
             Expr::Budget { span, .. } => *span,
             Expr::StructInit { span, .. } => *span,
+            Expr::Trace { span, .. } => *span, // NEW Phase 5
         }
     }
 }

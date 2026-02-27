@@ -6,22 +6,34 @@ use crate::tools::ToolRegistry;
 use crate::value::Value;
 use crate::vm::{Vm, VmEvent};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::fs;
+use wasmtime::*;
 
 pub struct Runner<S: Store> {
     store: S,
     tools: ToolRegistry,
     module_cache: HashMap<String, Value>,
     injected_caps: HashMap<String, String>,
+    wasm_engine: wasmtime::Engine,
+    wasm_store: wasmtime::Store<()>,
+    wasm_instances: std::collections::HashMap<String, wasmtime::Instance>,
 }
 
 impl<S: Store + std::marker::Send> Runner<S> {
     pub fn new(store: S, tools: ToolRegistry) -> Self {
+        let engine = wasmtime::Engine::default();
+        let wasm_store = wasmtime::Store::new(&engine, ());
+        
         Self {
             store,
             tools,
             module_cache: HashMap::new(),
             injected_caps: HashMap::new(),
+            wasm_engine: engine,
+            wasm_store,
+            wasm_instances: std::collections::HashMap::new(),
         }
     }
 
@@ -31,7 +43,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
     }
 
     #[allow(clippy::needless_lifetimes)]
-    fn load_module<'a>(
+    pub fn load_module<'a>(
         &'a mut self,
         path: &'a str,
         current_file: Option<&'a PathBuf>,
@@ -74,6 +86,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
 
                 let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
                 let vm = Vm::new(&code, host_tx);
+                let registry = vm.registry.clone();
                 vm.start().await;
 
                 loop {
@@ -91,7 +104,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                 }
                             }
                             VmEvent::Suspend {
-                                pid: _,
+                                pid,
                                 tool_name,
                                 arg,
                                 resume_tx,
@@ -119,6 +132,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                     });
                                     match result {
                                         Ok(val) => {
+                                            self.dispatch_trace_event(&registry, pid, &tool_name, &val);
                                             let _ = resume_tx.send(val);
                                         }
                                         Err(e) => {
@@ -135,7 +149,104 @@ impl<S: Store + std::marker::Send> Runner<S> {
                 }
             }
 
-            // Resolve path relative to current file if provided
+            // 2. Check if URL module (HTTPS fetches)
+            if path.starts_with("https://") || path.starts_with("http://") {
+                let path_str = path.to_string();
+                let cache_dir = std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(".turn_cache")
+                    .join("ast");
+                if !cache_dir.exists() {
+                    let _ = std::fs::create_dir_all(&cache_dir);
+                }
+
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(path_str.as_bytes());
+                let hash_str = format!("{:x}", hasher.finalize());
+                let cache_file = cache_dir.join(format!("{}.tn", hash_str));
+
+                let source = if cache_file.exists() {
+                    std::fs::read_to_string(&cache_file)
+                        .map_err(|e| anyhow::anyhow!("Cache read error for {}: {}", path_str, e))?
+                } else {
+                    let resp = reqwest::get(&path_str).await
+                        .map_err(|e| anyhow::anyhow!("HTTP request failed for {}: {}", path_str, e))?;
+                    if !resp.status().is_success() {
+                        anyhow::bail!("Failed to fetch URL {}: HTTP {}", path_str, resp.status());
+                    }
+                    let text = resp.text().await
+                        .map_err(|e| anyhow::anyhow!("HTTP body error for {}: {}", path_str, e))?;
+                    let _ = std::fs::write(&cache_file, &text);
+                    text
+                };
+
+                let key = path_str.clone();
+                if let Some(val) = self.module_cache.get(&key) {
+                    return Ok(val.clone());
+                }
+
+                let lexer = Lexer::new(&source);
+                let tokens = lexer.tokenize()
+                    .map_err(|e| anyhow::anyhow!("Lexer error in URL module {}: {}", path_str, e))?;
+
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse()
+                    .map_err(|e| anyhow::anyhow!("Parser error in URL module {}: {}", path_str, e))?;
+
+                let mut compiler = Compiler::new();
+                let code = compiler.compile(&program);
+
+                let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
+                let vm = Vm::new(&code, host_tx);
+                let registry = vm.registry.clone();
+                vm.start().await;
+
+                loop {
+                    if let Some(event) = host_rx.recv().await {
+                        match event {
+                            VmEvent::Complete { pid, result } => {
+                                if pid == 1 {
+                                    self.module_cache.insert(key, result.clone());
+                                    return Ok(result);
+                                }
+                            }
+                            VmEvent::Error { pid, error } => {
+                                if pid == 1 {
+                                    return Err(anyhow::anyhow!("VM Error in URL module {}: {}", path_str, error));
+                                }
+                            }
+                            VmEvent::Suspend { pid, tool_name, arg, resume_tx, continuation: _, expected_type: _ } => {
+                                if tool_name == "sys_import" {
+                                    let inner_path = match arg { Value::Str(s) => s.to_string(), _ => "".to_string() };
+                                    match self.load_module(&inner_path, None).await {
+                                        Ok(val) => { let _ = resume_tx.send(val); }
+                                        Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                                    }
+                                } else if tool_name == "sys_schema_adapter" {
+                                    match crate::schema_compiler::expand_schema_macro(arg).await {
+                                        Ok(module_val) => { let _ = resume_tx.send(module_val); }
+                                        Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                                    }
+                                } else {
+                                    let result = tokio::task::block_in_place(|| self.tools.call(&tool_name, arg));
+                                    match result {
+                                        Ok(val) => {
+                                            self.dispatch_trace_event(&registry, pid, &tool_name, &val);
+                                            let _ = resume_tx.send(val);
+                                        }
+                                        Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        return Err(anyhow::anyhow!("VM unexpectedly halted in URL module {}", path_str));
+                    }
+                }
+            }
+
+            // 3. Resolve path relative to current file if provided
             let mut resolved_path = if let Some(base) = current_file {
                 let parent = base.parent().unwrap_or(std::path::Path::new("."));
                 parent.join(path)
@@ -210,6 +321,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
             // Run module in a fresh VM (recursive)
             let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
             let vm = Vm::new(&code, host_tx);
+            let registry = vm.registry.clone();
             vm.start().await;
 
             loop {
@@ -227,7 +339,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                             }
                         }
                         VmEvent::Suspend {
-                            pid: _,
+                            pid,
                             tool_name,
                             arg,
                             resume_tx,
@@ -248,12 +360,18 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                             .send(Value::Str(std::sync::Arc::new(e.to_string())));
                                     }
                                 }
+                            } else if tool_name == "sys_schema_adapter" {
+                                match crate::schema_compiler::expand_schema_macro(arg).await {
+                                    Ok(module_val) => { let _ = resume_tx.send(module_val); }
+                                    Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                                }
                             } else {
                                 let result = tokio::task::block_in_place(|| {
                                     self.tools.call(&tool_name, arg)
                                 });
                                 match result {
                                     Ok(val) => {
+                                        self.dispatch_trace_event(&registry, pid, &tool_name, &val);
                                         let _ = resume_tx.send(val);
                                     }
                                     Err(e) => {
@@ -295,7 +413,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
         let code = compiler.compile(&program);
 
         let vm = Vm::new(&code, host_tx);
-
+        let registry = vm.registry.clone();
         vm.start().await;
 
         loop {
@@ -312,7 +430,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                         }
                     }
                     VmEvent::Suspend {
-                        pid: _,
+                        pid,
                         tool_name,
                         arg,
                         resume_tx,
@@ -349,12 +467,37 @@ impl<S: Store + std::marker::Send> Runner<S> {
                             continue;
                         }
 
+                        if tool_name == "sys_schema_adapter" {
+                            match crate::schema_compiler::expand_schema_macro(arg).await {
+                                Ok(module_val) => { let _ = resume_tx.send(module_val); }
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                            }
+                            continue;
+                        }
+
+                        if tool_name == "sys_wasm_adapter" {
+                            match self.install_wasm_component(arg) {
+                                Ok(val) => { let _ = resume_tx.send(val); }
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
+                            }
+                            continue;
+                        }
+
+                        if tool_name == "sys_wasm_call" {
+                            match self.invoke_wasm_component(arg) {
+                                Ok(val) => { let _ = resume_tx.send(val); }
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
+                            }
+                            continue;
+                        }
+
                         if let Some(c) = &*continuation {
                             self.store.save(id, c)?;
                         }
 
                         match self.tools.call(&tool_name, arg) {
                             Ok(val) => {
+                                self.dispatch_trace_event(&registry, pid, &tool_name, &val);
                                 let _ = resume_tx.send(val);
                             }
                             Err(e) => {
@@ -408,6 +551,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
             return Err(anyhow::anyhow!("No suspended state found on disk for {}", id));
         };
 
+        let registry = vm.registry.clone();
         vm.start().await;
 
         loop {
@@ -424,7 +568,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
                         }
                     }
                     VmEvent::Suspend {
-                        pid: _,
+                        pid,
                         tool_name,
                         arg,
                         resume_tx,
@@ -458,12 +602,28 @@ impl<S: Store + std::marker::Send> Runner<S> {
                                 }
                             }
 
+                        } else if tool_name == "sys_schema_adapter" {
+                            match crate::schema_compiler::expand_schema_macro(arg).await {
+                                Ok(module_val) => { let _ = resume_tx.send(module_val); }
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e.to_string()))); }
+                            }
+                        } else if tool_name == "sys_wasm_adapter" {
+                            match self.install_wasm_component(arg) {
+                                Ok(val) => { let _ = resume_tx.send(val); }
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
+                            }
+                        } else if tool_name == "sys_wasm_call" {
+                            match self.invoke_wasm_component(arg) {
+                                Ok(val) => { let _ = resume_tx.send(val); }
+                                Err(e) => { let _ = resume_tx.send(Value::Str(std::sync::Arc::new(e))); }
+                            }
                         } else {
                             let result = tokio::task::block_in_place(|| {
                                 self.tools.call(&tool_name, arg)
                             });
                             match result {
                                 Ok(val) => {
+                                    self.dispatch_trace_event(&registry, pid, &tool_name, &val);
                                     let _ = resume_tx.send(val);
                                 }
                                 Err(e) => {
@@ -477,5 +637,140 @@ impl<S: Store + std::marker::Send> Runner<S> {
                 return Err(anyhow::anyhow!("VM unexpectedly halted"));
             }
         }
+    }
+
+    // NEW Phase 5: Helper mapping telemetry to registered tracing loops
+    fn dispatch_trace_event(&self, registry: &crate::vm::Registry, pid: u64, tool_name: &str, result: &Value) {
+        let tracers = registry.get_tracers(pid);
+        if !tracers.is_empty() {
+            let mut map = indexmap::IndexMap::new();
+            map.insert("type".to_string(), Value::Str(std::sync::Arc::new("TraceEvent".to_string())));
+            map.insert("tool".to_string(), Value::Str(std::sync::Arc::new(tool_name.to_string())));
+            
+            match result {
+                Value::ToolCallRequest(func, _) => {
+                    map.insert("action".to_string(), Value::Str(std::sync::Arc::new("ToolCall".to_string())));
+                    map.insert("func".to_string(), Value::Str(std::sync::Arc::new(func.clone())));
+                }
+                Value::Struct(name, _) => {
+                    map.insert("action".to_string(), Value::Str(std::sync::Arc::new("Thought".to_string())));
+                    map.insert("result_type".to_string(), Value::Str(name.clone()));
+                }
+                _ => {
+                    map.insert("action".to_string(), Value::Str(std::sync::Arc::new("Thought".to_string())));
+                }
+            }
+            
+            let trace_val = Value::Struct(std::sync::Arc::new("TraceEvent".to_string()), std::sync::Arc::new(map));
+            for t in tracers {
+                registry.send(t, trace_val.clone());
+            }
+        }
+    }
+
+    fn install_wasm_component(&mut self, arg: Value) -> Result<Value, String> {
+        if let Value::Map(m) = arg {
+            if let Some(Value::Str(url)) = m.get("url") {
+                let url_str = url.to_string();
+                
+                let module = wasmtime::Module::from_file(&self.wasm_engine, &url_str)
+                    .map_err(|e| format!("Wasm fetch failed: {}", e))?;
+                
+                let instance = wasmtime::Instance::new(&mut self.wasm_store, &module, &[])
+                    .map_err(|e| format!("Wasm instantiation failed: {}", e))?;
+                    
+                self.wasm_instances.insert(url_str.clone(), instance);
+                
+                let mut proxy_methods = indexmap::IndexMap::new();
+                for export in module.exports() {
+                    if let wasmtime::ExternType::Func(f_ty) = export.ty() {
+                        let fn_name = export.name().to_string();
+                        let param_count = f_ty.params().len();
+                        
+                        let mut params = vec![];
+                        let mut code = vec![];
+                        
+                        for i in 0..param_count {
+                            let p_name = format!("p{}", i);
+                            params.push((p_name.clone(), None, false));
+                        }
+                        
+                        // Stack bottom -> top
+                        code.push(crate::bytecode::Instr::PushStr("sys_wasm_call".to_string()));
+                        
+                        // MAP PAIR 1: "args" -> [p0, p1...]
+                        code.push(crate::bytecode::Instr::PushStr("args".to_string()));
+                        for i in 0..param_count {
+                            let p_name = format!("p{}", i);
+                            code.push(crate::bytecode::Instr::Load(p_name));
+                        }
+                        code.push(crate::bytecode::Instr::MakeList(param_count));
+                        
+                        // MAP PAIR 2: "url" -> "<url>"
+                        code.push(crate::bytecode::Instr::PushStr("url".to_string()));
+                        code.push(crate::bytecode::Instr::PushStr(url_str.clone()));
+                        
+                        // MAP PAIR 3: "func" -> "<fn_name>"
+                        code.push(crate::bytecode::Instr::PushStr("func".to_string()));
+                        code.push(crate::bytecode::Instr::PushStr(fn_name.clone()));
+                        
+                        // Build the map
+                        code.push(crate::bytecode::Instr::MakeMap(3));
+                        
+                        // Call the tool ("sys_wasm_call" is below the Map)
+                        code.push(crate::bytecode::Instr::CallTool);
+                        code.push(crate::bytecode::Instr::Return);
+                        
+                        let closure = Value::Closure {
+                            is_tool: false,
+                            code: std::sync::Arc::new(code),
+                            ip: 0,
+                            env: std::collections::HashMap::new(),
+                            params,
+                        };
+                        
+                        proxy_methods.insert(fn_name, closure);
+                    }
+                }
+                return Ok(Value::Map(std::sync::Arc::new(proxy_methods)));
+            }
+        }
+        Err("Invalid sys_wasm_adapter map".to_string())
+    }
+
+    fn invoke_wasm_component(&mut self, arg: Value) -> Result<Value, String> {
+        if let Value::Map(m) = arg {
+            if let (Some(Value::Str(url)), Some(Value::Str(fname)), Some(Value::List(args_val))) = (m.get("url"), m.get("func"), m.get("args")) {
+                let url_str = url.to_string();
+                let fn_name = fname.to_string();
+                
+                if let Some(instance) = self.wasm_instances.get(&url_str) {
+                    let func = instance.get_func(&mut self.wasm_store, &fn_name)
+                        .ok_or_else(|| format!("Function {} not found in Wasm module", fn_name))?;
+                    
+                    let mut wasm_args = vec![];
+                    for a in args_val.iter() {
+                        if let Value::Num(n) = a {
+                            wasm_args.push(wasmtime::Val::I32(*n as i32));
+                        } else {
+                            return Err("Only numeric arguments are supported in MVP Wasm bindings".to_string());
+                        }
+                    }
+                    
+                    let mut results = vec![wasmtime::Val::I32(0)];
+                    func.call(&mut self.wasm_store, &wasm_args, &mut results)
+                        .map_err(|e| format!("Wasm call panicked: {}", e))?;
+                        
+                    if let Some(res) = results.first() {
+                        if let wasmtime::Val::I32(i) = res {
+                            return Ok(Value::Num(*i as f64));
+                        }
+                    }
+                    return Ok(Value::Null);
+                }
+                return Err(format!("Wasm instance {} not loaded", url_str));
+            }
+        }
+        Err("Invalid sys_wasm_call map arguments".to_string())
     }
 }

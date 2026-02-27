@@ -4,56 +4,20 @@
     {
       "code": [
         {
-          "PushStr": "echo"
+          "PushStr": "Please review PR #42"
         },
         {
-          "PushStr": "Waiting for payment confirmation..."
-        },
-        "CallTool",
-        "Pop",
-        {
-          "PushStr": "Awaiting callback data"
+          "Suspend": "Str"
         },
         {
-          "Suspend": "Any"
+          "Store": "human_feedback"
         },
         {
-          "Store": "payment"
+          "Load": "human_feedback"
         },
-        {
-          "PushStr": "echo"
-        },
-        {
-          "PushStr": "Payment received, continuing execution."
-        },
-        "CallTool",
-        "Pop",
-        {
-          "PushStr": "Generate receipt for payment: "
-        },
-        {
-          "Load": "payment"
-        },
-        "Add",
-        {
-          "Infer": [
-            {
-              "Struct": [
-                "Receipt",
-                {}
-              ]
-            },
-            0,
-            false,
-            false,
-            0
-          ]
-        },
-        {
-          "Store": "receipt"
-        }
+        "Return"
       ],
-      "ip": 6,
+      "ip": 2,
       "env": {},
       "handlers": []
     }
@@ -74,10 +38,11 @@
     "capabilities": {
       "next_id": 1
     },
-    "budget_stack": []
+    "budget_stack": [],
+    "active_mocks": []
   },
   "mailbox": [],
-  "token_budget": 999994,
+  "token_budget": 999998,
   "strictness_threshold": 0.8,
   "pending_suspend_type": null
 }

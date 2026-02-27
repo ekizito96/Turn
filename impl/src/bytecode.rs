@@ -60,7 +60,6 @@ pub enum Instr {
     PopBudget,  // Pops current budget frame, merging usage to parent
     
     // Concurrency
-    // Concurrency
     Spawn(bool, bool), // (linked, monitored)
     SpawnRemote,
     Send,
@@ -69,6 +68,11 @@ pub enum Instr {
     Confidence,       // NEW
     Infer(Type, u32, bool, bool, u32), // Expected Type, Tool Count, Has Driver, Has Threshold, Fallback Offset
     Suspend(Type),    // NEW
+    
+    // Testing & Observability
+    MockDef(Type),    // NEW Phase 5
+    MockClear,        // NEW Phase 5
+    TraceProcess,     // NEW Phase 5
 
     // Control flow
     Jump(u32),

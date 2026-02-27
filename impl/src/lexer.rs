@@ -55,6 +55,10 @@ pub enum Token {
     True,
     False,
     Null,
+    UseWasm,
+    Test,   // NEW Phase 5
+    Mock,   // NEW Phase 5
+    Trace,  // NEW Phase 5
 
     // Types
     TypeNum,
@@ -95,6 +99,7 @@ pub enum Token {
     Id(String),
 
     // Punctuation
+    Hash, // # NEW Phase 5
     LBrace,
     RBrace,
     LBracket,
@@ -103,6 +108,7 @@ pub enum Token {
     RParen,
     Comma,
     Colon,
+    DoubleColon, // ::
     Semicolon,
     Dot,
 
@@ -135,6 +141,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("suspend", Token::Suspend),       // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
+    ("use_wasm", Token::UseWasm),
     ("match", Token::Match),
     ("ok", Token::Ok),
     ("err", Token::Err),
@@ -173,6 +180,9 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("true", Token::True),
     ("false", Token::False),
     ("null", Token::Null),
+    ("test", Token::Test), // NEW Phase 5
+    ("mock", Token::Mock), // NEW Phase 5
+    ("trace", Token::Trace), // NEW Phase 5
     ("Num", Token::TypeNum),
     ("Str", Token::TypeStr),
     ("Bool", Token::TypeBool),
@@ -382,6 +392,10 @@ impl<'a> Lexer<'a> {
                     Token::Bang
                 }
             }
+            Some('#') => {
+                self.next();
+                Token::Hash
+            }
             Some('{') => {
                 self.next();
                 Token::LBrace
@@ -412,7 +426,12 @@ impl<'a> Lexer<'a> {
             }
             Some(':') => {
                 self.next();
-                Token::Colon
+                if self.peek() == Some(':') {
+                    self.next();
+                    Token::DoubleColon
+                } else {
+                    Token::Colon
+                }
             }
             Some(';') => {
                 self.next();

@@ -15,6 +15,7 @@ pub mod tools;
 pub mod value;
 pub mod vm;
 pub mod wasm_host;
+pub mod schema_compiler;
 
 pub use analysis::*;
 pub use ast::*;
@@ -93,6 +94,7 @@ pub fn run_with_tools(
     let fut = async move {
         let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel();
         let vm = vm::Vm::new(&code, host_tx);
+        let registry = vm.registry.clone(); // NEW Phase 5: Hook into VM state for telemetry dispatch
         vm.start().await;
 
         loop {
@@ -109,6 +111,7 @@ pub fn run_with_tools(
                         }
                     }
                     vm::VmEvent::Suspend {
+                        pid,
                         tool_name,
                         arg,
                         resume_tx,
@@ -119,6 +122,34 @@ pub fn run_with_tools(
                                 value::Value::Str(std::sync::Arc::new(e.to_string()))
                             })
                         });
+                        
+                        // NEW Phase 5 (Pillar 2): Natively route execution trace events to attached processes
+                        let tracers = registry.get_tracers(pid);
+                        if !tracers.is_empty() {
+                            let mut map = indexmap::IndexMap::new();
+                            map.insert("type".to_string(), value::Value::Str(std::sync::Arc::new("TraceEvent".to_string())));
+                            map.insert("tool".to_string(), value::Value::Str(std::sync::Arc::new(tool_name.clone())));
+                            
+                            match &result {
+                                value::Value::ToolCallRequest(func, _args) => {
+                                    map.insert("action".to_string(), value::Value::Str(std::sync::Arc::new("ToolCall".to_string())));
+                                    map.insert("func".to_string(), value::Value::Str(std::sync::Arc::new(func.clone())));
+                                }
+                                value::Value::Struct(name, _fields) => {
+                                    map.insert("action".to_string(), value::Value::Str(std::sync::Arc::new("Thought".to_string())));
+                                    map.insert("result_type".to_string(), value::Value::Str(name.clone()));
+                                }
+                                _ => {
+                                    map.insert("action".to_string(), value::Value::Str(std::sync::Arc::new("Thought".to_string())));
+                                }
+                            }
+                            
+                            let trace_val = value::Value::Struct(std::sync::Arc::new("TraceEvent".to_string()), std::sync::Arc::new(map));
+                            for t in tracers {
+                                registry.send(t, trace_val.clone());
+                            }
+                        }
+
                         let _ = resume_tx.send(result);
                     }
                 }

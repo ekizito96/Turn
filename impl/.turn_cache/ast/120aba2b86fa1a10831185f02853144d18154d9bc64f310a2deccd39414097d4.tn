@@ -1,0 +1,8 @@
+
+        let get_secret = turn {
+            return 42;
+        };
+        return {
+            "get_secret": get_secret
+        };
+    

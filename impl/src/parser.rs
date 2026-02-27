@@ -133,7 +133,40 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         let span = self.span();
+        
+        // Check for #[mock(...)] attributes attached to a test block
+        let mut mocks = Vec::new();
+        while matches!(self.peek(), Some(Token::Hash)) {
+            self.next(); // consume '#'
+            self.expect(Token::LBracket)?;
+            self.expect(Token::Mock)?;
+            self.expect(Token::LParen)?;
+            self.expect(Token::Infer)?;
+            let target_ty = self.parse_type()?;
+            self.expect(Token::Eq)?;
+            let mock_value = self.parse_expr()?;
+            self.expect(Token::RParen)?;
+            self.expect(Token::RBracket)?;
+            mocks.push(MockDef { target_ty, mock_value });
+        }
+
         match self.peek() {
+            Some(Token::Test) => {
+                self.next(); // consume 'test'
+                let Token::Id(name) = self.next().ok_or(ParseError::UnexpectedEof)?.token else {
+                    return Err(ParseError::UnexpectedToken(self.span()));
+                };
+                let body = self.parse_block()?;
+                Ok(Stmt::TestDef {
+                    name,
+                    mocks,
+                    body,
+                    span: Span {
+                        start: span.start,
+                        end: self.last_span.end,
+                    },
+                })
+            }
             Some(Token::Turn) => {
                 self.next();
                 let body = self.parse_block()?;
@@ -565,6 +598,29 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::Trace) => {
+                self.next();
+                
+                // Allow optional parentheses `trace(pid)` or just `trace pid`
+                let has_parens = matches!(self.peek(), Some(Token::LParen));
+                if has_parens {
+                    self.next();
+                }
+                
+                let pid_expr = self.parse_expr()?;
+                
+                if has_parens {
+                    self.expect(Token::RParen)?;
+                }
+                
+                Ok(Expr::Trace {
+                    pid_expr: Box::new(pid_expr),
+                    span: Span {
+                        start: span.start,
+                        end: self.last_span.end,
+                    }
+                })
+            }
             Some(Token::Suspend) => {
                 self.next(); // consume `suspend`
                 self.expect(Token::For)?;
@@ -940,13 +996,46 @@ impl Parser {
                 })
             }
             Token::Use => {
+                // Check if this is a schema import macro: `use schema::openapi("url")`
+                if let Some(Token::Id(id)) = self.peek() {
+                    if id == "schema" {
+                        if matches!(self.peek_at(1), Some(Token::DoubleColon)) {
+                            self.next(); // consume `schema`
+                            self.next(); // consume `::`
+                            let protocol_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                            let protocol = match protocol_token.token {
+                                Token::Id(p) => p,
+                                _ => return Err(ParseError::UnexpectedToken(protocol_token.span)),
+                            };
+                            self.expect(Token::LParen)?;
+                            let url_expr = self.parse_expr()?;
+                            self.expect(Token::RParen)?;
+                            return Ok(Expr::UseSchema {
+                                protocol,
+                                url: Box::new(url_expr),
+                                span,
+                            });
+                        }
+                    }
+                }
+
                 let module = self.parse_expr()?;
                 Ok(Expr::Use {
                     module: Box::new(module),
                     span,
                 })
             }
+            Token::UseWasm => {
+                self.expect(Token::LParen)?;
+                let url_expr = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::UseWasm {
+                    url: Box::new(url_expr),
+                    span,
+                })
+            }
             Token::Receive => Ok(Expr::Receive { is_blocking: false, span }),
+            Token::Harvest => Ok(Expr::Harvest { span }),
             Token::Await => {
                 self.expect(Token::Receive)?;
                 Ok(Expr::Receive { is_blocking: true, span })

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use tower_lsp::{LspService, Server};
 use turn::analysis::Analysis;
-use turn::{FileStore, Runner, ToolRegistry};
+use turn::{FileStore, Store, Runner, ToolRegistry};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -58,6 +58,16 @@ enum Commands {
 
         /// URL to source file (e.g. raw github link)
         url: String,
+    },
+
+    /// Replay a historical Turn execution snapshot natively
+    Replay {
+        /// Agent ID to replay
+        id: String,
+
+        /// Path to store directory
+        #[arg(long, default_value = ".turn_store")]
+        store: PathBuf,
     },
 }
 
@@ -162,6 +172,57 @@ fn main() -> Result<()> {
             fs::write(&file_path, response)?;
 
             println!("Package '{}' installed to {}", name, file_path.display());
+        }
+        Commands::Replay { id, store } => {
+            use std::io::Write;
+            let db = FileStore::new(store);
+            let versions = db.list_versions(&id)?;
+            if versions.is_empty() {
+                anyhow::bail!("No replay WAL history found for agent '{}'", id);
+            }
+            println!("Loaded {} historical snapshots for '{}'", versions.len(), id);
+            
+            let mut current_idx = versions.len() - 1;
+            
+            loop {
+                let version = versions[current_idx];
+                let state = db.load_version(&id, version)?.ok_or_else(|| anyhow::anyhow!("Missing version {} pointer corruption", version))?;
+                
+                println!("\n=== Replay Frame: {}/{} (WAL Version {}) ===", current_idx + 1, versions.len(), version);
+                println!("Token Budget: {}", state.token_budget);
+                println!("Stack Size: {}", state.stack.len());
+                println!("Mailbox Messages: {}", state.mailbox.len());
+                if let Some(top) = state.stack.last() {
+                    println!("Top of Stack: {}", top);
+                }
+                
+                print!("\n[n]ext, [p]revious, [s]tate detail, [q]uit: ");
+                std::io::stdout().flush()?;
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                match input.trim() {
+                    "n" => {
+                        if current_idx + 1 < versions.len() {
+                            current_idx += 1;
+                        } else {
+                            println!("Already at the latest execution frame.");
+                        }
+                    }
+                    "p" => {
+                        if current_idx > 0 {
+                            current_idx -= 1;
+                        } else {
+                            println!("Already at the earliest execution frame.");
+                        }
+                    }
+                    "s" => {
+                        println!("== State Detail Graph ==");
+                        println!("{:#?}", state);
+                    }
+                    "q" => break,
+                    _ => println!("Invalid boundary check. Use n, p, s, or q."),
+                }
+            }
         }
     }
     Ok(())

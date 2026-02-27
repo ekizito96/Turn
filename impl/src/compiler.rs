@@ -173,6 +173,19 @@ impl Compiler {
             Stmt::TypeAlias { .. } => {
                 // Type aliases are static-only.
             }
+            Stmt::TestDef { name: _, mocks, body, .. } => {
+                // Compile test body. During Phase 5, if `MockStart` is encountered, it registers
+                // the struct overrides in the current VM Frame's env to intercept `Infer` calls.
+                for mock in mocks {
+                    self.compile_expr(&mock.mock_value);
+                    self.emit(Instr::MockDef(mock.target_ty.clone()));
+                }
+                
+                self.compile_block(body);
+                
+                // Clear mocks from environment at the end
+                self.emit(Instr::MockClear);
+            }
         }
     }
 
@@ -224,6 +237,22 @@ impl Compiler {
             Expr::Use { module, .. } => {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
+            }
+            Expr::UseSchema { protocol, url, .. } => {
+                self.emit(Instr::PushStr("sys_schema_adapter".to_string()));
+                self.emit(Instr::PushStr("protocol".to_string()));
+                self.emit(Instr::PushStr(protocol.clone()));
+                self.emit(Instr::PushStr("url".to_string()));
+                self.compile_expr(url);
+                self.emit(Instr::MakeMap(2));
+                self.emit(Instr::CallTool);
+            }
+            Expr::UseWasm { url, .. } => {
+                self.emit(Instr::PushStr("sys_wasm_adapter".to_string()));
+                self.emit(Instr::PushStr("url".to_string()));
+                self.compile_expr(url);
+                self.emit(Instr::MakeMap(1));
+                self.emit(Instr::CallTool);
             }
             Expr::Turn {
                 is_tool,
@@ -389,6 +418,10 @@ impl Compiler {
                     self.compile_expr(item);
                 }
                 self.emit(Instr::MakeList(len));
+            }
+            Expr::Trace { pid_expr, span: _ } => {
+                self.compile_expr(pid_expr);
+                self.emit(Instr::TraceProcess);
             }
             Expr::Vec { items, .. } => {
                 let len = items.len();

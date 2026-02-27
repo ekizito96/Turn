@@ -301,6 +301,7 @@ impl Analysis {
                 }
                 Some(Type::Vec)
             }
+            Expr::Trace { span: _, .. } => Some(Type::Bool),
             Expr::StructInit { name, fields, .. } => {
                 // Return struct type if defined
                 if let Some(def_fields) = self.find_struct(name) {
@@ -529,6 +530,14 @@ impl Analysis {
                     .type_aliases
                     .insert(name.clone(), ty.clone());
             }
+            Stmt::TestDef { body, mocks, .. } => {
+                for mock in mocks {
+                    self.visit_expr(&mock.mock_value);
+                }
+                self.enter_scope(body.span, None);
+                self.visit_block(body);
+                self.exit_scope();
+            }
             Stmt::ImplDef {
                 type_name,
                 methods,
@@ -694,6 +703,9 @@ impl Analysis {
 
     fn visit_expr(&mut self, expr: &Expr) {
         match expr {
+            Expr::Trace { pid_expr, span: _ } => {
+                self.visit_expr(pid_expr);
+            }
             Expr::StructInit { name, fields, span } => {
                 if let Some(def_fields) = self.find_struct(name) {
                     for (field_name, field_ty) in &def_fields {
@@ -815,6 +827,8 @@ impl Analysis {
             }
             Expr::Recall { key, .. } => self.visit_expr(key),
             Expr::Use { module, .. } => self.visit_expr(module),
+            Expr::UseSchema { url, .. } => self.visit_expr(url),
+            Expr::UseWasm { url, .. } => self.visit_expr(url),
             Expr::Index { target, index, .. } => {
                 self.visit_expr(target);
                 self.visit_expr(index);

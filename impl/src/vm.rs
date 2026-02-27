@@ -41,6 +41,7 @@ pub struct Registry {
     pub next_pid: Arc<std::sync::RwLock<u64>>,
     pub links: Arc<std::sync::RwLock<HashMap<u64, Vec<u64>>>>, // watched -> watchers
     pub monitors: Arc<std::sync::RwLock<HashMap<u64, Vec<u64>>>>, // watched -> watchers
+    pub tracing_pids: Arc<std::sync::RwLock<HashMap<u64, Vec<u64>>>>, // NEW Phase 5: watched -> tracers
     pub host_tx: tokio::sync::mpsc::UnboundedSender<VmEvent>,
 }
 
@@ -51,6 +52,7 @@ impl Registry {
             next_pid: Arc::new(std::sync::RwLock::new(2)), // Root is 1
             links: Arc::new(std::sync::RwLock::new(HashMap::new())),
             monitors: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            tracing_pids: Arc::new(std::sync::RwLock::new(HashMap::new())), // NEW Phase 5
             host_tx,
         }
     }
@@ -99,6 +101,24 @@ impl Registry {
     }
     pub fn get_monitors(&self, watched: u64) -> Vec<u64> {
         self.monitors
+            .read()
+            .unwrap()
+            .get(&watched)
+            .cloned()
+            .unwrap_or_default()
+    }
+    
+    // NEW Phase 5: Expose tracer mutations
+    pub fn add_tracer(&self, watched: u64, watcher: u64) {
+        self.tracing_pids
+            .write()
+            .unwrap()
+            .entry(watched)
+            .or_default()
+            .push(watcher);
+    }
+    pub fn get_tracers(&self, watched: u64) -> Vec<u64> {
+        self.tracing_pids
             .read()
             .unwrap()
             .get(&watched)
@@ -412,6 +432,21 @@ impl Process {
                         self.stack.push(Value::Null);
                     }
                 }
+                Instr::TraceProcess => {
+                    let target_val = self.stack.pop().unwrap_or(Value::Null);
+                    if let Value::Pid { local_pid, .. } = target_val {
+                        registry.add_tracer(local_pid, self.pid);
+                        self.stack.push(Value::Bool(true));
+                    } else {
+                        self.exit_process(
+                            &registry,
+                            Value::Str(std::sync::Arc::new(
+                                "TypeError: trace expects a Pid".to_string(),
+                            )),
+                        );
+                        return;
+                    }
+                }
                 Instr::Send => {
                     let msg = self.stack.pop().unwrap_or(Value::Null);
                     let pid_val = self.stack.pop().unwrap_or(Value::Null);
@@ -536,6 +571,12 @@ impl Process {
                     };
                     let ty_str =
                         serde_json::to_string(&resolved_ty).unwrap_or_else(|_| "{}".to_string());
+
+                    // NEW Phase 5: Stochastic Mock Intercept (Zero-Cost Bypass)
+                    if let Some((_, mock_val)) = self.runtime.active_mocks.iter().find(|(t, _)| t == &ty || t == &resolved_ty) {
+                        self.stack.push(mock_val.clone());
+                        continue;
+                    }
 
                     // Semantic Auto-Recall (Phase 3)
                     // Take the user's prompt string, generate a vector representation behind the scenes,
@@ -847,6 +888,13 @@ impl Process {
                         let _ = std::fs::write(&path, json);
                     }
                     // Value was consumed from stack; it's already in env via Store
+                }
+                Instr::MockDef(ty) => {
+                    let mock_val = self.stack.pop().unwrap_or(Value::Null);
+                    self.runtime.active_mocks.push((ty.clone(), mock_val));
+                }
+                Instr::MockClear => {
+                    self.runtime.active_mocks.clear();
                 }
                 Instr::Add => {
                     let b = self.stack.pop().unwrap_or(Value::Null);
