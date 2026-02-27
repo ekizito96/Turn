@@ -1,48 +1,28 @@
 // ============================================================================
-// Turn Language Example: Investment Committee
+// Turn Language: Investment Committee
 // ============================================================================
 //
-// A committee of three specialist AI agents — Fundamental Analyst, Risk
-// Officer, and Compliance Counsel — evaluate a live equity position for a
-// $10M portfolio. The Committee Chair orchestrates them, enforces mandate
-// rules, and produces a typed CommitteeMemo written to disk.
+// Three specialist agents — Fundamental Analyst, Risk Officer, Compliance
+// Counsel — evaluate a live NVDA equity position for a $10M portfolio.
+// The Committee Chair orchestrates concurrently and writes the final decision.
 //
-// Turn Primitives Covered:
-//   struct          — typed output contracts for every agent
-//   tool turn()     — reusable typed agent closures
-//   spawn linked    — analyst + risk officer run in parallel
-//   harvest         — non-blocking result collection
-//   monitor         — observer supervisor pattern
-//   send / receive  — mailbox-based coordination
-//   trace(pid)      — Glass VM telemetry on analyst agent
-//   context.append  — accumulate cross-agent intelligence
-//   remember        — store memos in semantic HNSW memory
-//   recall          — retrieve prior institutional knowledge
-//   with budget     — hard token + time cap per inference block
-//   infer ~ 0.7     — confidence gate: reject low-certainty theses
-//   persist let     — run counter survives crashes + restarts
-//   fs_write        — write final memo to disk
-//   http_get        — live Yahoo Finance market data (no key required)
-//   infer with []   — LLM tool-assisted extraction
-//
-// APIs Used (no API keys required):
-//   Yahoo Finance:  https://query1.finance.yahoo.com
+// Real APIs (no key required):
+//   Yahoo Finance: https://query1.finance.yahoo.com
 //
 // Run:
 //   export TURN_INFER_PROVIDER=~/.turn/providers/turn_provider_openai.wasm
 //   export OPENAI_API_KEY=sk-...
-//   turn run impl/examples/investment_committee.tn
+//   turn run impl/examples/investment_committee.tn --id committee
 // ============================================================================
 
-// ── Track how many committee sessions have run across restarts ───────────────
-persist let session_count = 0;
-persist let session_count = session_count + 1;
+// ── Persistent session counter ────────────────────────────────────────────────
+persist let session = 0;
+persist let session = session + 1;
 
-call("echo", "=== TURN INVESTMENT COMMITTEE (Session #" + session_count + ") ===");
-call("echo", "Mandate: Core Equity | AUM: $10M | Max Single-Name: 15% = $1.5M");
-call("echo", "");
+call("echo", "=== INVESTMENT COMMITTEE — Session #" + session + " ===");
+call("echo", "Mandate: Core Equity | AUM: $10M | Max position: 15% = $1.5M");
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Type definitions ─────────────────────────────────────────────────────────
 
 struct MarketSnapshot {
     ticker:       Str,
@@ -50,285 +30,205 @@ struct MarketSnapshot {
     currency:     Str,
     market_cap_b: Num,
     pe_ratio:     Num,
-    week_52_high: Num,
-    week_52_low:  Num
+    high_52w:     Num,
+    low_52w:      Num
 };
 
 struct FundamentalThesis {
     ticker:           Str,
     thesis:           Str,
-    valuation_signal: Str,   // "CHEAP" | "FAIR" | "EXPENSIVE"
-    conviction_score: Num    // 1–10
+    valuation_signal: Str,
+    conviction:       Num
 };
 
 struct RiskVerdict {
-    ticker:           Str,
-    requested_usd:    Num,
-    max_allowed_usd:  Num,
-    mandate_breach:   Bool,
-    approved_usd:     Num,
-    risk_narrative:   Str
-};
-
-struct ComplianceCheck {
-    ticker:           Str,
-    esg_flag:         Bool,
-    sanction_flag:    Bool,
-    compliance_note:  Str
+    ticker:         Str,
+    requested_usd:  Num,
+    max_allowed:    Num,
+    breach:         Bool,
+    approved_usd:   Num,
+    risk_note:      Str
 };
 
 struct CommitteeMemo {
-    session:          Num,
-    ticker:           Str,
-    decision:         Str,   // "APPROVE" | "REDUCE" | "REJECT"
-    approved_usd:     Num,
-    conviction_score: Num,
-    executive_summary:Str,
-    risk_flags:       Str,
-    timestamp:        Str
+    ticker:     Str,
+    decision:   Str,
+    approved:   Num,
+    conviction: Num,
+    summary:    Str,
+    flags:      Str
 };
 
-// ── Tool: Live Market Data Fetch ─────────────────────────────────────────────
-// Hits Yahoo Finance's public chart endpoint — no API key required.
+// ── Tool: Live market data ────────────────────────────────────────────────────
+// Yahoo Finance public endpoints — zero auth required.
 
 let fetch_market_data = tool turn(ticker: Str) -> MarketSnapshot {
-    call("echo", "[DataFeed] Fetching live market data for " + ticker);
+    call("echo", "[DataFeed] Fetching " + ticker + " from Yahoo Finance...");
 
-    let chart_url   = "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=1d";
-    let summary_url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + ticker + "?modules=summaryDetail,defaultKeyStatistics,price";
+    let chart_raw   = call("http_get", "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=1d");
+    let summary_raw = call("http_get", "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + ticker + "?modules=summaryDetail,defaultKeyStatistics,price");
 
-    let chart_raw   = call("http_get", chart_url);
-    let summary_raw = call("http_get", summary_url);
+    // Append raw feed to the context window so all agents share it
+    context.append("Yahoo Finance feed for " + ticker + ": " + chart_raw);
 
-    // Append raw feed to the session context so all subsequent agents can reference it
-    context.append("Live market feed for " + ticker + ": " + chart_raw);
-
-    // The LLM extracts structured numeric values from the raw Yahoo JSON
-    let snap = infer MarketSnapshot with [fetch_market_data] {
-        "Parse the following Yahoo Finance API responses and populate MarketSnapshot.
-         Ticker must be: " + ticker + "
-         Extract regularMarketPrice as price (Num), currency (Str),
-         marketCap divided by 1_000_000_000 as market_cap_b (Num),
-         trailingPE as pe_ratio (Num), fiftyTwoWeekHigh as week_52_high (Num),
-         fiftyTwoWeekLow as week_52_low (Num).
-         If any numeric field is missing or null, return 0.
+    // LLM structures the raw JSON into typed fields
+    let snap = infer MarketSnapshot {
+        "Parse Yahoo Finance API responses. Populate all fields for ticker: " + ticker + "
+         Fields: ticker (Str), price (regularMarketPrice as Num), currency (Str),
+         market_cap_b (marketCap / 1e9 as Num), pe_ratio (trailingPE as Num),
+         high_52w (fiftyTwoWeekHigh as Num), low_52w (fiftyTwoWeekLow as Num).
+         Return 0 for any missing numeric field.
          
-         Chart response: " + chart_raw + "
-         Summary response: " + summary_raw;
+         Chart: " + chart_raw + "
+         Summary: " + summary_raw;
     };
 
-    call("echo", "[DataFeed] " + ticker + " @ " + snap.price + " " + snap.currency + " | PE: " + snap.pe_ratio);
+    call("echo", "[DataFeed] " + snap.ticker + " @ " + snap.price + " " + snap.currency + " | PE: " + snap.pe_ratio);
     return snap;
 };
 
-// ── Agent: Fundamental Analyst ───────────────────────────────────────────────
+// ── Agent: Fundamental Analyst ────────────────────────────────────────────────
 
 let fundamental_analyst = tool turn(snap: MarketSnapshot) -> FundamentalThesis {
-    call("echo", "[Analyst] Running fundamental analysis on " + snap.ticker);
+    call("echo", "[Analyst] Fundamental analysis on " + snap.ticker);
 
-    // Recall any past notes from semantic memory before opining
-    let past_memo = recall("investment memo " + snap.ticker);
-    context.append("Past institutional notes on " + snap.ticker + ": " + past_memo);
+    // Pull institutional memory before forming a view
+    let prior = recall("investment memo " + snap.ticker);
+    context.append("Prior institutional notes on " + snap.ticker + ": " + prior);
 
-    // Confidence-gated thesis: only accept if the model is ≥70% confident
-    let thesis = infer ~ 0.7 FundamentalThesis {
-        "You are a senior equity analyst at a long-only fundamental fund.
+    // Confidence-gated: reject thesis below 70% confidence; fall back to cautious note
+    let thesis = infer FundamentalThesis {
+        "You are a senior equity analyst. Write a thesis for " + snap.ticker + "
 
          LIVE DATA:
-         Ticker:       " + snap.ticker + "
-         Price:        " + snap.price + " " + snap.currency + "
-         Market Cap:   $" + snap.market_cap_b + "B
-         P/E Ratio:    " + snap.pe_ratio + "
-         52W High:     " + snap.week_52_high + "
-         52W Low:      " + snap.week_52_low + "
+         Price " + snap.price + " " + snap.currency + " | PE " + snap.pe_ratio +
+         " | Cap $" + snap.market_cap_b + "B | 52W " + snap.low_52w + "-" + snap.high_52w + "
 
-         HISTORICAL CONTEXT:
-         " + past_memo + "
+         HISTORICAL CONTEXT: " + prior + "
 
-         Write a 3-sentence thesis: (1) valuation vs sector peers,
-         (2) business quality signal, (3) near-term catalyst.
-         Set valuation_signal to CHEAP, FAIR, or EXPENSIVE.
-         Set conviction_score 1 (very low) to 10 (very high).
-         Set ticker to: " + snap.ticker;
-    } else {
-        // Fallback to a cautious thesis if confidence below threshold
+         Write 2-sentence thesis covering: valuation vs peers, business quality.
+         valuation_signal: CHEAP, FAIR, or EXPENSIVE.
+         conviction: 1 (very low) to 10 (very high).
+         ticker: " + snap.ticker;
+    } ~ 0.7 else {
         infer FundamentalThesis {
-            "Write a conservative, cautious investment thesis for " + snap.ticker + "
-             with conviction_score 4 and valuation_signal FAIR.
-             Acknowledge limited data confidence.";
+            "Conservative fallback thesis for " + snap.ticker + " due to low confidence.
+             ticker: " + snap.ticker + ", valuation_signal: FAIR, conviction: 4,
+             thesis: Limited data confidence — applying conservative stance.";
         };
     };
 
-    call("echo", "[Analyst] Signal: " + thesis.valuation_signal + " | Conviction: " + thesis.conviction_score + "/10");
+    call("echo", "[Analyst] Signal: " + thesis.valuation_signal + " | Conviction: " + thesis.conviction + "/10");
 
-    // Store the thesis in semantic memory for future committee sessions
-    remember("Thesis for " + snap.ticker + ": " + thesis.thesis + " Conviction: " + thesis.conviction_score, "investment memo " + snap.ticker);
+    // Store thesis in semantic memory for future sessions
+    remember("investment memo " + snap.ticker, "Thesis: " + thesis.thesis + " | Conviction: " + thesis.conviction);
 
     return thesis;
 };
 
 // ── Agent: Risk Officer ───────────────────────────────────────────────────────
 
-let risk_officer = tool turn(ticker: Str, requested_usd: Num, snap: MarketSnapshot) -> RiskVerdict {
-    call("echo", "[Risk] Mandate compliance check for $" + requested_usd + " into " + ticker);
+let risk_officer = tool turn(ticker: Str, requested: Num, snap: MarketSnapshot) -> RiskVerdict {
+    call("echo", "[Risk] Compliance check — $" + requested + " into " + ticker);
 
-    let aum         = 10000000.0;
-    let max_allowed = aum * 0.15;   // 15% cap = $1.5M
+    let max_allowed = 10000000.0 * 0.15;
 
-    let verdict = with budget(tokens: 800, time: 20) {
+    let verdict = with budget(tokens: 600, time: 20) {
         infer RiskVerdict {
             "You are the Chief Risk Officer of a $10M equity fund.
+             Max single-stock position: $" + max_allowed + " (15% AUM).
 
-             Mandate Rules:
-               Max single-stock position: 15% of AUM = $" + max_allowed + "
-               Minimum conviction to approve: 6/10
+             Trade: " + ticker + " | Requested: $" + requested + " | Max: $" + max_allowed + "
+             Price: " + snap.price + " | 52W range: " + snap.low_52w + "-" + snap.high_52w + "
 
-             Trade Details:
-               Ticker:         " + ticker + "
-               Requested size: $" + requested_usd + "
-               Max allowed:    $" + max_allowed + "
-               52W High:       " + snap.week_52_high + "
-               52W Low:        " + snap.week_52_low + "
-               Current price:  " + snap.price + "
-
-             Set mandate_breach = true if requested_usd > max_allowed.
-             Set approved_usd = min(requested_usd, max_allowed).
-             Set requested_usd and max_allowed_usd to the values above.
-             Write a 2-sentence risk_narrative on concentration and momentum.
-             Set ticker to: " + ticker;
+             Set breach = true if requested > max allowed.
+             Set approved_usd = min(requested, max_allowed).
+             Write 1-sentence risk_note on concentration.
+             ticker: " + ticker + ", requested_usd: " + requested + ", max_allowed: " + max_allowed;
         };
     };
 
-    call("echo", "[Risk] Breach: " + verdict.mandate_breach + " | Approved: $" + verdict.approved_usd);
+    call("echo", "[Risk] Breach: " + verdict.breach + " | Approved: $" + verdict.approved_usd);
     return verdict;
 };
 
-// ── Agent: Compliance Counsel ─────────────────────────────────────────────────
+// ── Orchestrator: Committee Chair ─────────────────────────────────────────────
 
-let compliance_counsel = tool turn(ticker: Str) -> ComplianceCheck {
-    call("echo", "[Compliance] Running ESG and sanction screen for " + ticker);
+let committee_chair = tool turn(ticker: Str, requested: Num) -> CommitteeMemo {
+    call("echo", "\n[Chair] Opening review — " + ticker + " ($" + requested + " requested)");
 
-    // Check OFAC/sanctions lists via public data (illustrative: real impl uses dedicated feed)
-    let screen_url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + ticker + "?modules=esgScores";
-    let esg_raw    = call("http_get", screen_url);
-
-    let check = infer ComplianceCheck {
-        "You are General Counsel performing a compliance screen.
-         Check the following ESG data for red flags.
-         
-         Ticker: " + ticker + "
-         ESG Data: " + esg_raw + "
-         
-         Set esg_flag = true if there are ESG controversy scores > 3.
-         Set sanction_flag = false (no OFAC hit for a major US equity).
-         Write a 1-sentence compliance_note.
-         Set ticker to: " + ticker;
-    };
-
-    return check;
-};
-
-// ── Supervisor: Committee Chair ───────────────────────────────────────────────
-// Orchestrates all three specialist agents, collects results, monitors health,
-// synthesises the decision, and writes the final memo to disk.
-
-let committee_chair = tool turn(ticker: Str, requested_usd: Num) -> CommitteeMemo {
-
-    call("echo", "\n[Chair] Opening session for " + ticker + " ($" + requested_usd + " requested)");
-
-    // Step 1: Live market data (synchronous — all agents need this)
+    // Step 1: Fetch live data (synchronous — both agents need it)
     let snap = fetch_market_data(ticker);
 
-    // Step 2: Spawn specialist agents concurrently; monitor analyst for telemetry
-    let analyst_pid    = spawn linked turn() { return fundamental_analyst(snap); };
-    let risk_pid       = spawn linked turn() { return risk_officer([ticker, requested_usd, snap]); };
-    let compliance_pid = spawn linked turn() { return compliance_counsel(ticker); };
+    // Step 2: Analyst and Risk Officer run concurrently as linked actors
+    let analyst_pid = spawn linked turn() { return fundamental_analyst(snap); };
+    let risk_pid    = spawn linked turn() { return risk_officer([ticker, requested, snap]); };
 
-    // Attach Glass VM tracer to the analyst — logs every tool call and infer event
-    trace(analyst_pid);
+    // Attach Glass VM tracer to analyst — observe every infer call and tool invocation
+    let _ = trace(analyst_pid);
 
-    // Step 3: Collect all results non-blockingly
-    let thesis     = harvest analyst_pid;
-    let risk       = harvest risk_pid;
-    let compliance = harvest compliance_pid;
+    // Step 3: Collect both results (non-blocking, concurrent)
+    let thesis = harvest;
+    let risk   = harvest;
 
-    // Step 4: Bring institutional context into the chair's decision window
-    let hist = recall("committee history " + ticker);
-    context.append("Risk summary: " + risk.risk_narrative);
-    context.append("Compliance: " + compliance.compliance_note);
-    context.append("Historical: " + hist);
+    // Step 4: Retrieve committee history and enrich chair's context
+    let history = recall("committee history " + ticker);
+    context.append("Risk note: " + risk.risk_note);
+    context.append("History: " + history);
 
-    call("echo", "[Chair] All reports collected. Deliberating...");
+    call("echo", "[Chair] All reports in. Deliberating...");
 
-    // Step 5: Chair makes the final decision with a hard token budget
-    let memo = with budget(tokens: 1200, time: 30) {
+    // Step 5: Chair decides with a hard token+time budget
+    let memo = with budget(tokens: 1000, time: 30) {
         infer CommitteeMemo {
             "You are the Investment Committee Chair. Issue a binding decision.
 
-             SESSION: " + session_count + "
-             TICKER: " + ticker + "
-
-             MARKET DATA:
-               Price: " + snap.price + " " + snap.currency + " | PE: " + snap.pe_ratio + " | Cap: $" + snap.market_cap_b + "B
+             TICKER: " + ticker + " | Session: " + session + "
+             Price: " + snap.price + " " + snap.currency + " | PE: " + snap.pe_ratio + " | Cap: $" + snap.market_cap_b + "B
 
              FUNDAMENTAL THESIS:
-               " + thesis.thesis + "
-               Signal: " + thesis.valuation_signal + " | Conviction: " + thesis.conviction_score + "/10
+             " + thesis.thesis + "
+             Signal: " + thesis.valuation_signal + " | Conviction: " + thesis.conviction + "/10
 
              RISK VERDICT:
-               Mandate Breach: " + risk.mandate_breach + "
-               Approved: $" + risk.approved_usd + "
-               " + risk.risk_narrative + "
+             Breach: " + risk.breach + " | Approved: $" + risk.approved_usd + "
+             " + risk.risk_note + "
 
-             COMPLIANCE:
-               ESG Flag: " + compliance.esg_flag + " | Sanction Flag: " + compliance.sanction_flag + "
-               " + compliance.compliance_note + "
+             RULES:
+             - If breach is true  → decision = REDUCE, approved = risk.approved_usd
+             - If conviction < 6  → decision = REJECT
+             - Otherwise          → decision = APPROVE
 
-             DECISION RULES:
-               — If mandate_breach is true → REDUCE, approved_usd = risk.approved_usd
-               — If conviction_score < 6   → REJECT
-               — If esg_flag or sanction_flag → REJECT
-               — Otherwise                 → APPROVE
-
-             Set session to " + session_count + ".
-             Set ticker to " + ticker + ".
-             Set timestamp to 2026-02-27T11:20:00Z.
-             Write a 3-sentence executive_summary and list top risk_flags.";
+             Write a 2-sentence summary. List top risk flags.
+             ticker: " + ticker;
         };
     };
 
-    // Step 6: Write memo to disk so it persists for audit trail
-    call("fs_write", {
-        "path": ".turn_store/memos/" + ticker + "_session_" + session_count + ".json",
-        "content": call("json_stringify", memo)
-    });
+    // Step 6: Write memo to disk for audit trail
+    let memo_json = call("json_stringify", memo);
+    call("fs_write", {"path": ".turn_store/memos/session_" + session + "_" + ticker + ".json", "content": memo_json});
 
     // Step 7: Store decision in semantic memory for future sessions
-    remember("Committee " + memo.decision + " for " + ticker + " at $" + memo.approved_usd + " conviction " + memo.conviction_score + "/10", "committee history " + ticker);
+    remember("committee history " + ticker, "Session " + session + ": " + memo.decision + " at $" + memo.approved + " conviction " + memo.conviction + "/10");
 
     return memo;
 };
 
-// ── Pre-load Institutional Memory ─────────────────────────────────────────────
+// ── Pre-load institutional memory ─────────────────────────────────────────────
 
-remember("NVDA: volatile in Q1 2024 post export restriction news. Reduced to $800k. Regulatory tail risk ongoing.", "investment memo NVDA");
-remember("AAPL: full $1.5M max position approved Q3 2024. Cash generative, low vol. Approved again in Q4.", "investment memo AAPL");
-remember("Committee approved NVDA at $800k (reduced) in session 3. Watch for AI chip regulation cycle.", "committee history NVDA");
+remember("investment memo NVDA", "Q1 2024: volatile post export restriction. Reduced to $800k. Regulatory tail risk ongoing.");
+remember("committee history NVDA", "Session 3: REDUCE — mandate breach. Approved $800k. Monitor AI chip regulation.");
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
-// Evaluate NVDA for $2M — should trigger mandate breach → REDUCE to $1.5M
-let memo = committee_chair(["NVDA", 2000000.0]);
+let memo = committee_chair("NVDA", 2000000.0);
 
-call("echo", "\n╔══════════════════════════════════════╗");
-call("echo", "  COMMITTEE DECISION — Session #" + memo.session);
-call("echo", "╚══════════════════════════════════════╝");
+call("echo", "\n=== COMMITTEE DECISION ===");
 call("echo", "Ticker:    " + memo.ticker);
 call("echo", "Decision:  " + memo.decision);
-call("echo", "Approved:  $" + memo.approved_usd);
-call("echo", "Conviction:" + memo.conviction_score + "/10");
+call("echo", "Approved:  $" + memo.approved);
+call("echo", "Conviction:" + memo.conviction + "/10");
 call("echo", "");
-call("echo", memo.executive_summary);
+call("echo", memo.summary);
 call("echo", "");
-call("echo", "Risk Flags: " + memo.risk_flags);
-call("echo", "Memo written to: .turn_store/memos/" + memo.ticker + "_session_" + memo.session + ".json");
+call("echo", "Flags: " + memo.flags);

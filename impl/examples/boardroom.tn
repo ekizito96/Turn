@@ -1,44 +1,26 @@
 // ============================================================================
-// Turn Language Example: The Autonomous Boardroom
+// Turn Language: The Autonomous Boardroom
 // ============================================================================
 //
-// A company board of directors debates a live strategic motion grounded in
-// real-time tech news. Three functional board members (CTO, CFO, Legal) run
-// as isolated concurrent actors, then the Chairman synthesises a resolution.
+// Three board members (CTO, CFO, Legal) debate a real strategic motion
+// grounded in live Hacker News headlines. The Chairman orchestrates them
+// concurrently, synthesises a typed resolution, and archives it to disk.
 //
-// Turn Primitives Covered:
-//   struct          — typed output contracts for every board member
-//   tool turn()     — reusable typed agent closures
-//   spawn linked    — board members run as parallel isolated actors
-//   spawn monitored — supervisor-style monitoring of an observer process
-//   harvest         — non-blocking concurrent result collection
-//   send / receive  — mailbox for passing the briefing materials
-//   trace(pid)      — Glass VM telemetry on the CTO agent
-//   context.append  — board context accumulates across agent turns
-//   remember        — store past resolutions in semantic memory
-//   recall          — retrieve institutional history before deliberating
-//   with budget     — hard token + time cap on the chairman's deliberation
-//   infer ~ 0.75    — confidence gate on each board memo
-//   persist let     — session counter across process restarts
-//   fs_write        — resolution written to disk for audit
-//   http_get        — live Hacker News API for grounding context
-//   json_parse      — parse API responses natively
-//
-// APIs Used (no API keys required):
-//   Hacker News: https://hacker-news.firebaseio.com
+// Real APIs (no key required):
+//   Hacker News Firebase: https://hacker-news.firebaseio.com
 //
 // Run:
 //   export TURN_INFER_PROVIDER=~/.turn/providers/turn_provider_openai.wasm
 //   export OPENAI_API_KEY=sk-...
-//   turn run impl/examples/boardroom.tn
+//   turn run impl/examples/boardroom.tn --id boardroom
 // ============================================================================
 
-// ── Session persistence ───────────────────────────────────────────────────────
+// ── Persistent session counter ────────────────────────────────────────────────
 persist let board_session = 0;
 persist let board_session = board_session + 1;
 
 call("echo", "╔══════════════════════════════════════════════╗");
-call("echo", " AUTONOMOUS BOARDROOM  —  Session #" + board_session);
+call("echo", " AUTONOMOUS BOARDROOM — Session #" + board_session);
 call("echo", "╚══════════════════════════════════════════════╝");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -47,259 +29,221 @@ struct NewsContext {
     headline_1: Str,
     headline_2: Str,
     headline_3: Str,
-    tech_sentiment: Str    // "BULLISH" | "BEARISH" | "MIXED"
+    sentiment:  Str
 };
 
 struct BoardMemo {
-    executive:     Str,
-    position:      Str,    // "SUPPORT" | "OPPOSE" | "ABSTAIN"
-    key_argument:  Str,
-    risk_factor:   Str,
-    confidence:    Num     // 0–100
+    executive:    Str,
+    position:     Str,
+    argument:     Str,
+    confidence:   Num
 };
 
 struct BoardResolution {
     session:       Num,
     motion:        Str,
-    decision:      Str,    // "PASSED" | "REJECTED" | "DEFERRED"
+    decision:      Str,
     votes_for:     Num,
     votes_against: Num,
     rationale:     Str,
-    action_items:  Str,
-    timestamp:     Str
+    actions:       Str
 };
 
-// ── Tool: Live News Fetcher ───────────────────────────────────────────────────
-// Pulls real Hacker News top stories to ground the board in actual daily context.
+// ── Tool: fetch live Hacker News headlines ────────────────────────────────────
 
-let fetch_news_context = tool turn(motion: Str) -> NewsContext {
-    call("echo", "[News] Pulling live tech headlines from Hacker News...");
+let get_hn_context = tool turn(motion: Str) -> NewsContext {
+    call("echo", "[News] Pulling live HN headlines...");
 
     let ids_raw = call("http_get", "https://hacker-news.firebaseio.com/v0/topstories.json");
     let ids     = call("json_parse", ids_raw);
 
-    // Fetch three stories in sequence
     let s1 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[0] + ".json"));
     let s2 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[1] + ".json"));
     let s3 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[2] + ".json"));
 
-    // Push live context into the board's shared context window immediately
-    context.append("LIVE HN #1: " + s1["title"]);
-    context.append("LIVE HN #2: " + s2["title"]);
-    context.append("LIVE HN #3: " + s3["title"]);
+    // Share live headlines with all agents via the context window
+    context.append("HN today: " + s1["title"] + " | " + s2["title"] + " | " + s3["title"]);
 
     let ctx = infer NewsContext {
-        "You are a strategic intelligence analyst briefing a corporate board.
-         
-         MOTION UNDER CONSIDERATION: " + motion + "
-         
-         TOP HACKER NEWS HEADLINES (live, right now):
+        "Assess industry sentiment for the board motion: " + motion + "
+
+         Live HN headlines (real, right now):
          1. " + s1["title"] + " (score: " + s1["score"] + ")
          2. " + s2["title"] + " (score: " + s2["score"] + ")
          3. " + s3["title"] + " (score: " + s3["score"] + ")
-         
-         Set headline_1, headline_2, headline_3 from the real titles above.
-         Set tech_sentiment to BULLISH, BEARISH, or MIXED based on how the
-         headlines relate to the motion.";
+
+         Set headline_1, headline_2, headline_3 from the exact titles above.
+         Set sentiment to BULLISH, BEARISH, or MIXED based on the headlines
+         in relation to the motion.";
     };
 
-    call("echo", "[News] Industry sentiment: " + ctx.tech_sentiment);
+    call("echo", "[News] Sentiment: " + ctx.sentiment);
     return ctx;
 };
 
-// ── Board Member Agents ───────────────────────────────────────────────────────
+// ── Board members ─────────────────────────────────────────────────────────────
 
-let cto_evaluation = tool turn(motion: Str, news: NewsContext, history: Str) -> BoardMemo {
+let cto_board = tool turn(motion: Str, news: NewsContext, history: Str) -> BoardMemo {
     call("echo", "[CTO] Evaluating technical feasibility...");
-    context.append("CTO is evaluating the motion.");
+    context.append("CTO is deliberating.");
 
-    // Confidence-gated: if model <75% confident, fall back to ABSTAIN
-    let memo = infer ~ 0.75 BoardMemo {
-        "You are the Chief Technology Officer on a corporate board.
-         Evaluate this motion from an engineering, systems, and AI/ML capability lens.
+    let memo = infer BoardMemo {
+        "You are the CTO on a corporate board. Evaluate from a technical lens.
 
          MOTION: " + motion + "
-         TECH SENTIMENT (from live HN): " + news.tech_sentiment + "
-         RECENT HEADLINES: " + news.headline_1 + "; " + news.headline_2 + "
-         PAST BOARD HISTORY: " + history + "
+         LIVE HEADLINES: " + news.headline_1 + "; " + news.headline_2 + "
+         SENTIMENT: " + news.sentiment + "
+         PRIOR HISTORY: " + history + "
 
-         Set executive to 'CTO'.
-         Set position to SUPPORT, OPPOSE, or ABSTAIN.
-         Write a 2-sentence key_argument from a technical perspective.
-         Write 1-sentence risk_factor you are personally most concerned about.
-         Set confidence 0-100 based on how certain you are.";
-    } else {
+         executive: CTO
+         position: SUPPORT, OPPOSE, or ABSTAIN
+         argument: 2-sentence technical assessment
+         confidence: 0-100";
+    } ~ 0.75 else {
         infer BoardMemo {
-            "You are the CTO. Due to limited information, set position to ABSTAIN,
-             key_argument to 'Insufficient technical data to form a view.',
-             risk_factor to 'Uncertainty too high to quantify.',
-             executive to 'CTO', confidence to 40.";
+            "CTO low confidence fallback. executive: CTO, position: ABSTAIN,
+             argument: Insufficient technical data., confidence: 40";
         };
     };
 
-    call("echo", "[CTO] " + memo.position + " (confidence: " + memo.confidence + "%)");
+    call("echo", "[CTO] " + memo.position + " (" + memo.confidence + "%)");
     return memo;
 };
 
-let cfo_evaluation = tool turn(motion: Str, news: NewsContext, history: Str) -> BoardMemo {
+let cfo_board = tool turn(motion: Str, news: NewsContext, history: Str) -> BoardMemo {
     call("echo", "[CFO] Evaluating financial implications...");
-    context.append("CFO is evaluating the motion.");
+    context.append("CFO is deliberating.");
 
-    let memo = infer ~ 0.75 BoardMemo {
-        "You are the Chief Financial Officer on a corporate board.
-         Evaluate this motion from a capital allocation, ROI timeline, and financial risk lens.
+    let memo = infer BoardMemo {
+        "You are the CFO on a corporate board. Evaluate from a financial lens.
 
          MOTION: " + motion + "
-         TECH SENTIMENT (from live HN): " + news.tech_sentiment + "
-         RECENT HEADLINES: " + news.headline_1 + "; " + news.headline_2 + "
-         PAST BOARD HISTORY: " + history + "
+         LIVE HEADLINES: " + news.headline_1 + "; " + news.headline_2 + "
+         SENTIMENT: " + news.sentiment + "
+         PRIOR HISTORY: " + history + "
 
-         Set executive to 'CFO'.
-         Set position to SUPPORT, OPPOSE, or ABSTAIN.
-         Write a 2-sentence key_argument about capital efficiency and risk-adjusted return.
-         Write 1-sentence risk_factor about the biggest financial downside.
-         Set confidence 0-100.";
-    } else {
+         executive: CFO
+         position: SUPPORT, OPPOSE, or ABSTAIN
+         argument: 2-sentence financial assessment
+         confidence: 0-100";
+    } ~ 0.75 else {
         infer BoardMemo {
-            "CFO conservative fallback: ABSTAIN due to low confidence. executive='CFO'.";
+            "CFO low confidence fallback. executive: CFO, position: ABSTAIN,
+             argument: Insufficient financial data., confidence: 40";
         };
     };
 
-    call("echo", "[CFO] " + memo.position + " (confidence: " + memo.confidence + "%)");
+    call("echo", "[CFO] " + memo.position + " (" + memo.confidence + "%)");
     return memo;
 };
 
-let legal_evaluation = tool turn(motion: Str, news: NewsContext, history: Str) -> BoardMemo {
-    call("echo", "[Legal] Evaluating regulatory and compliance implications...");
-    context.append("Legal is evaluating the motion.");
+let legal_board = tool turn(motion: Str, news: NewsContext, history: Str) -> BoardMemo {
+    call("echo", "[Legal] Evaluating regulatory implications...");
+    context.append("Legal is deliberating.");
 
-    let memo = infer ~ 0.75 BoardMemo {
-        "You are General Counsel on a corporate board.
-         Evaluate this motion from a regulatory, liability, and governance lens.
+    let memo = infer BoardMemo {
+        "You are General Counsel on a corporate board. Evaluate from a legal lens.
 
          MOTION: " + motion + "
-         TECH SENTIMENT (from live HN): " + news.tech_sentiment + "
-         RECENT HEADLINE: " + news.headline_3 + "
-         PAST BOARD HISTORY: " + history + "
+         LIVE HEADLINE: " + news.headline_3 + "
+         SENTIMENT: " + news.sentiment + "
+         PRIOR HISTORY: " + history + "
 
-         Set executive to 'Legal'.
-         Set position to SUPPORT, OPPOSE, or ABSTAIN.
-         Write a 2-sentence key_argument about legal and regulatory risk.
-         Write 1-sentence risk_factor about the most significant compliance concern.
-         Set confidence 0-100.";
-    } else {
+         executive: Legal
+         position: SUPPORT, OPPOSE, or ABSTAIN
+         argument: 2-sentence legal assessment
+         confidence: 0-100";
+    } ~ 0.75 else {
         infer BoardMemo {
-            "Legal conservative fallback: ABSTAIN. executive='Legal'.";
+            "Legal low confidence fallback. executive: Legal, position: ABSTAIN,
+             argument: Insufficient regulatory context., confidence: 40";
         };
     };
 
-    call("echo", "[Legal] " + memo.position + " (confidence: " + memo.confidence + "%)");
+    call("echo", "[Legal] " + memo.position + " (" + memo.confidence + "%)");
     return memo;
 };
 
-// ── Chairman: Orchestrator + Supervisor ───────────────────────────────────────
+// ── Chairman (Orchestrator) ───────────────────────────────────────────────────
 
 let chairman = tool turn(motion: Str) -> BoardResolution {
-
     call("echo", "\n[Chairman] Calling the session to order.");
     call("echo", "[Chairman] Motion: " + motion);
 
-    // Retrieve past board decisions involving similar topics
-    let history = recall("board resolution " + motion);
-    context.append("Board historical context: " + history);
+    // Retrieve prior board decisions from semantic memory
+    let history = recall("board history " + motion);
+    context.append("Prior board context: " + history);
 
-    // Step 1: Fetch live news to ground the entire session
-    let news = fetch_news_context(motion);
+    // Fetch live news to ground the debate
+    let news = get_hn_context(motion);
 
-    // Step 2: Spawn all three board members as concurrent isolated processes
-    let cto_pid   = spawn linked turn() { return cto_evaluation([motion, news, history]); };
-    let cfo_pid   = spawn linked turn() { return cfo_evaluation([motion, news, history]); };
-    let legal_pid = spawn linked turn() { return legal_evaluation([motion, news, history]); };
+    // Spawn all three board members as concurrent isolated linked actors
+    let cto_pid   = spawn linked turn() { return cto_board([motion, news, history]); };
+    let cfo_pid   = spawn linked turn() { return cfo_board([motion, news, history]); };
+    let legal_pid = spawn linked turn() { return legal_board([motion, news, history]); };
 
-    // Attach Glass VM tracer to the CTO agent to log every tool call
-    trace(cto_pid);
+    // Attach Glass VM tracer to CTO — logs every infer and tool call
+    let _ = trace(cto_pid);
 
-    // Step 3: Non-blocking collection — wait for all three simultaneously
-    let cto_memo   = harvest cto_pid;
-    let cfo_memo   = harvest cfo_pid;
-    let legal_memo = harvest legal_pid;
+    // Collect all three memos concurrently (harvest in spawn order)
+    let cto_memo   = harvest;
+    let cfo_memo   = harvest;
+    let legal_memo = harvest;
 
-    // Step 4: Accumulate all arguments into the chairman's context
-    context.append("CTO position: " + cto_memo.position + " — " + cto_memo.key_argument);
-    context.append("CFO position: " + cfo_memo.position + " — " + cfo_memo.key_argument);
-    context.append("Legal position: " + legal_memo.position + " — " + legal_memo.key_argument);
+    // Accumulate all positions into the chairman's context window
+    context.append("CTO says " + cto_memo.position + ": " + cto_memo.argument);
+    context.append("CFO says " + cfo_memo.position + ": " + cfo_memo.argument);
+    context.append("Legal says " + legal_memo.position + ": " + legal_memo.argument);
 
-    // Step 5: Chairman deliberates with a hard token+time budget
-    call("echo", "\n[Chairman] All board memos received. Deliberating...");
+    call("echo", "\n[Chairman] All memos received. Deliberating...");
 
-    let resolution = with budget(tokens: 1500, time: 40) {
+    // Chairman synthesises a binding resolution under a budget cap
+    let resolution = with budget(tokens: 1200, time: 40) {
         infer BoardResolution {
-            "You are the Chairman of the Board. Issue a binding resolution.
+            "You are the Board Chairman. Issue a binding resolution.
 
              SESSION: " + board_session + "
              MOTION: " + motion + "
-             
-             LIVE MARKET CONTEXT (Hacker News):
-             Headline of the day: " + news.headline_1 + "
-             Tech Sentiment: " + news.tech_sentiment + "
+             LIVE CONTEXT: " + news.headline_1 + " (sentiment: " + news.sentiment + ")
 
-             BOARD VOTES:
-             CTO (" + cto_memo.position + ", " + cto_memo.confidence + "% confidence):
-               " + cto_memo.key_argument + "
-               Risk: " + cto_memo.risk_factor + "
+             CTO  (" + cto_memo.position + ", " + cto_memo.confidence + "%): " + cto_memo.argument + "
+             CFO  (" + cfo_memo.position + ", " + cfo_memo.confidence + "%): " + cfo_memo.argument + "
+             Legal(" + legal_memo.position + ", " + legal_memo.confidence + "%): " + legal_memo.argument + "
 
-             CFO (" + cfo_memo.position + ", " + cfo_memo.confidence + "% confidence):
-               " + cfo_memo.key_argument + "
-               Risk: " + cfo_memo.risk_factor + "
+             Count SUPPORT positions as votes_for, OPPOSE as votes_against, ABSTAIN as neither.
+             If votes_for > votes_against → decision PASSED.
+             If votes_against > votes_for → decision REJECTED.
+             If equal → decision DEFERRED.
 
-             Legal (" + legal_memo.position + ", " + legal_memo.confidence + "% confidence):
-               " + legal_memo.key_argument + "
-               Risk: " + legal_memo.risk_factor + "
-
-             Tally:
-             votes_for = number of SUPPORT positions.
-             votes_against = number of OPPOSE positions.
-             ABSTAIN counts as neither.
-             If votes_for > votes_against → PASSED.
-             If votes_against > votes_for → REJECTED.
-             If tied → DEFERRED.
-
-             Write a 3-sentence rationale synthesising all arguments.
-             Write 2-3 concrete action_items the company must execute.
-             Set session to " + board_session + ".
-             Set motion to the motion string.
-             Set timestamp to 2026-02-27T11:20:00Z.";
+             session: " + board_session + "
+             motion: the motion string above
+             Write 3-sentence rationale and 2-3 concrete actions.";
         };
     };
 
-    // Step 6: Store this resolution in semantic memory for future sessions
-    remember("Session " + board_session + " " + resolution.decision + " on: " + motion + ". Action: " + resolution.action_items, "board resolution " + motion);
+    // Archive the resolution to disk
+    let res_json = call("json_stringify", resolution);
+    call("fs_write", {"path": ".turn_store/resolutions/session_" + board_session + ".json", "content": res_json});
 
-    // Step 7: Write the binding resolution to disk
-    call("fs_write", {
-        "path": ".turn_store/resolutions/session_" + board_session + ".json",
-        "content": call("json_stringify", resolution)
-    });
+    // Store decision in semantic memory for future sessions
+    remember("board history " + motion, "Session " + board_session + " " + resolution.decision + ": " + resolution.rationale);
 
     return resolution;
 };
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-let motion = "Migrate all core decision-making infrastructure to AI-native architecture within 18 months, replacing legacy rule-based systems with LLM-powered reasoning engines backed by Turn agents.";
+let motion = "Migrate all core decision-making infrastructure to AI-native architecture within 18 months, replacing legacy rule-based systems with Turn-powered agents.";
 
 let resolution = chairman(motion);
 
 call("echo", "\n╔══════════════════════════════════════════════╗");
-call("echo", " BOARD RESOLUTION  —  Session #" + resolution.session);
+call("echo", " BOARD RESOLUTION — Session #" + resolution.session);
 call("echo", "╚══════════════════════════════════════════════╝");
-call("echo", "Decision:  " + resolution.decision);
-call("echo", "Votes For: " + resolution.votes_for + "  |  Against: " + resolution.votes_against);
+call("echo", "Decision: " + resolution.decision);
+call("echo", "For: " + resolution.votes_for + "  |  Against: " + resolution.votes_against);
 call("echo", "");
-call("echo", "Rationale:");
 call("echo", resolution.rationale);
 call("echo", "");
-call("echo", "Action Items:");
-call("echo", resolution.action_items);
-call("echo", "");
-call("echo", "Resolution archived at: .turn_store/resolutions/session_" + resolution.session + ".json");
+call("echo", "Actions: " + resolution.actions);
+call("echo", "Archived to: .turn_store/resolutions/session_" + resolution.session + ".json");

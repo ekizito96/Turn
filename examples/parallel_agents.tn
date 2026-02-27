@@ -1,113 +1,91 @@
 // ============================================================================
-// Turn Language Example: Parallel Research Agents
+// Turn Language: Parallel Research Agents
 // ============================================================================
 //
-// A senior engineer kicks off a competitive intelligence sweep. Two specialist
-// agents — a GitHub Analyst and a Hacker News Analyst — run in parallel,
-// each fetching live data from public APIs. A Coordinator agent synthesises
-// both signals into a ranked developer intelligence brief, persists it to
-// disk, and saves key findings to semantic memory.
+// A coordinator kicks off two specialist agents — GitHub Analyst and Hacker
+// News Analyst — that run concurrently as isolated actors. Both fetch live
+// public APIs. The coordinator synthesises their findings into a typed
+// intelligence brief, persists it across runs, and archives it to disk.
 //
-// Turn Primitives Covered:
-//   struct          — TrendingRepo, NewsStory, IntelBrief
-//   tool turn()     — reusable typed closures for each specialist
-//   spawn linked    — concurrent isolation for both analysts
-//   harvest         — non-blocking result collection
-//   trace(pid)      — Glass VM telemetry on the GitHub analyst
-//   context.append  — coordinator accumulates all signals
-//   remember        — intel findings stored in semantic HNSW
-//   recall          — prior sweep results retrieved before synthesis
-//   infer ~ 0.72    — confidence gate: coordinator rejects weak briefs
-//   with budget     — token cap on the synthesis step
-//   persist let     — sweep count survives restarts
-//   fs_write        — brief written to disk for sharing
-//   http_get        — GitHub API + Hacker News Firebase API (no auth)
-//   json_parse      — native JSON extraction
-//
-// APIs Used (no API keys required):
-//   GitHub:       https://api.github.com
-//   Hacker News:  https://hacker-news.firebaseio.com
+// Real APIs (no key required):
+//   GitHub Search: https://api.github.com
+//   Hacker News:   https://hacker-news.firebaseio.com
 //
 // Run:
 //   export TURN_INFER_PROVIDER=~/.turn/providers/turn_provider_openai.wasm
 //   export OPENAI_API_KEY=sk-...
-//   turn run examples/parallel_agents.tn
+//   turn run examples/parallel_agents.tn --id research
 // ============================================================================
 
-// ── Session counter ───────────────────────────────────────────────────────────
-persist let sweep_count = 0;
-persist let sweep_count = sweep_count + 1;
+// ── Persistent sweep counter ──────────────────────────────────────────────────
+persist let sweep = 0;
+persist let sweep = sweep + 1;
 
 call("echo", "╔══════════════════════════════════════════════╗");
-call("echo", " PARALLEL RESEARCH AGENTS — Sweep #" + sweep_count);
+call("echo", " PARALLEL RESEARCH AGENTS — Sweep #" + sweep);
 call("echo", "╚══════════════════════════════════════════════╝");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 struct TrendingRepo {
-    name:         Str,
-    language:     Str,
-    description:  Str,
-    stars:        Num,
-    trend_signal: Str   // "VIRAL" | "GROWING" | "STABLE"
+    name:        Str,
+    language:    Str,
+    description: Str,
+    stars:       Num,
+    signal:      Str
 };
 
 struct NewsStory {
     title:     Str,
     score:     Num,
-    sentiment: Str,   // "POSITIVE" | "NEGATIVE" | "NEUTRAL"
+    sentiment: Str,
     domain:    Str
 };
 
 struct IntelBrief {
-    sweep_id:         Num,
-    top_theme:        Str,
-    github_highlight: Str,
-    hn_highlight:     Str,
-    developer_action: Str,
-    confidence:       Num
+    sweep_id:   Num,
+    top_theme:  Str,
+    gh_signal:  Str,
+    hn_signal:  Str,
+    action:     Str,
+    confidence: Num
 };
 
 // ── Agent: GitHub Analyst ─────────────────────────────────────────────────────
-// Queries the GitHub Search API for trending repos in a given language.
 
 let github_analyst = tool turn(language: Str) -> TrendingRepo {
-    call("echo", "[GitHub] Searching top repos for language: " + language);
+    call("echo", "[GitHub] Searching top " + language + " repos...");
 
-    let url = "https://api.github.com/search/repositories?q=language:" + language + "&sort=stars&order=desc&per_page=5";
-    let raw = call("http_get", url);
+    let raw = call("http_get", "https://api.github.com/search/repositories?q=language:" + language + "&sort=stars&order=desc&per_page=5");
 
-    // Append raw API response to context for the coordinator
-    context.append("GitHub API response for " + language + ": " + raw);
+    // Share the raw API response with the coordinator's context window
+    context.append("GitHub search (" + language + "): " + raw);
 
     let repo = infer TrendingRepo {
         "You are a developer intelligence analyst scanning GitHub.
-         
-         Language searched: " + language + "
-         GitHub Search API response (JSON):
-         " + raw + "
-         
-         From the items array, select the single most interesting repository.
-         Set name to its full_name.
-         Set language to its language (or '" + language + "' if null).
-         Set description to its description (or 'No description' if null).
-         Set stars to its stargazers_count as a Num.
-         Set trend_signal based on stars: >=10000 = VIRAL, >=1000 = GROWING, else STABLE.";
+
+         Language: " + language + "
+         GitHub Search API response (JSON): " + raw + "
+
+         Pick the most interesting repo from the items array.
+         name: full_name, language: language field (or '" + language + "' if null),
+         description: description (or 'No description' if null),
+         stars: stargazers_count as Num (not string),
+         signal: VIRAL if stars >= 10000, GROWING if >= 1000, else STABLE";
     };
 
-    call("echo", "[GitHub] Top repo: " + repo.name + " (" + repo.stars + " stars, " + repo.trend_signal + ")");
+    call("echo", "[GitHub] " + repo.name + " — " + repo.stars + " stars (" + repo.signal + ")");
 
-    // Remember this finding in semantic memory
-    remember("GitHub trending " + language + ": " + repo.name + " with " + repo.stars + " stars. " + repo.description, "github sweep " + language);
+    // Store finding in semantic memory for next sweep
+    remember("github " + language, repo.name + " | " + repo.stars + " stars | " + repo.description);
 
     return repo;
 };
 
-// ── Agent: Hacker News Analyst ────────────────────────────────────────────────
-// Reads the live HN top-story list and picks the story most relevant to a topic.
+// ── Agent: HN Analyst ────────────────────────────────────────────────────────
 
 let hn_analyst = tool turn(topic: Str) -> NewsStory {
-    call("echo", "[HN] Fetching live top stories for topic: " + topic);
+    call("echo", "[HN] Pulling live top stories for: " + topic);
 
     let ids_raw = call("http_get", "https://hacker-news.firebaseio.com/v0/topstories.json");
     let ids     = call("json_parse", ids_raw);
@@ -118,122 +96,115 @@ let hn_analyst = tool turn(topic: Str) -> NewsStory {
     let s4 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[3] + ".json"));
     let s5 = call("json_parse", call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[4] + ".json"));
 
-    // Push top HN stories into the coordinator's shared context window
-    context.append("HN Top Stories: " + s1["title"] + " | " + s2["title"] + " | " + s3["title"]);
+    // Feed top stories into the shared context window
+    context.append("HN top 5: " + s1["title"] + " | " + s2["title"] + " | " + s3["title"]);
 
     let story = infer NewsStory {
-        "You are a developer trend analyst. Choose the most relevant story from these live HN headlines.
-         
-         Topic of interest: '" + topic + "'
-         
-         Available stories:
+        "You are a developer trend analyst. Pick the most relevant story for: '" + topic + "'
+
+         HN stories (real, live):
          1. " + s1["title"] + " (score: " + s1["score"] + ")
          2. " + s2["title"] + " (score: " + s2["score"] + ")
          3. " + s3["title"] + " (score: " + s3["score"] + ")
          4. " + s4["title"] + " (score: " + s4["score"] + ")
          5. " + s5["title"] + " (score: " + s5["score"] + ")
-         
-         Set title to the most relevant headline.
-         Set score to its numeric score.
-         Set sentiment to POSITIVE, NEGATIVE, or NEUTRAL based on what the headline implies.
-         Set domain to the primary topic keyword.";
+
+         title: the chosen headline,
+         score: its HN score as Num,
+         sentiment: POSITIVE, NEGATIVE, or NEUTRAL,
+         domain: primary topic keyword";
     };
 
-    call("echo", "[HN] Picked: " + story.title + " (score: " + story.score + ")");
+    call("echo", "[HN] " + story.title + " (score: " + story.score + ")");
 
-    // Remember this in semantic memory
-    remember("HN top story for " + topic + ": " + story.title + " score " + story.score, "hn sweep " + topic);
+    // Store in semantic memory
+    remember("hn " + topic, story.title + " | score " + story.score + " | " + story.sentiment);
 
     return story;
 };
 
-// ── Coordinator Agent ─────────────────────────────────────────────────────────
+// ── Coordinator ───────────────────────────────────────────────────────────────
 
 let coordinator = tool turn(topic: Str, language: Str) -> IntelBrief {
-    call("echo", "\n[Coordinator] Launching sweep. Topic: " + topic + " | Language: " + language);
+    call("echo", "\n[Coordinator] Sweep " + sweep + " — " + topic + " | " + language);
 
-    // Retrieve prior sweep insights from semantic memory
-    let prior_github = recall("github sweep " + language);
-    let prior_hn     = recall("hn sweep " + topic);
-    context.append("Prior GitHub sweep: " + prior_github);
+    // Pull prior sweep results into context before dispatching agents
+    let prior_gh = recall("github " + language);
+    let prior_hn = recall("hn " + topic);
+    context.append("Prior GitHub sweep: " + prior_gh);
     context.append("Prior HN sweep: " + prior_hn);
 
-    // Spawn both analysts concurrently
-    let github_pid = spawn linked turn() { return github_analyst(language); };
-    let hn_pid     = spawn linked turn() { return hn_analyst(topic); };
+    // Spawn both analysts as concurrent isolated linked actors
+    let gh_pid = spawn linked turn() { return github_analyst(language); };
+    let hn_pid = spawn linked turn() { return hn_analyst(topic); };
 
-    // Attach Glass VM tracer to the GitHub analyst — observe every tool call
-    trace(github_pid);
+    // Attach Glass VM tracer to GitHub analyst — observes every tool call
+    let _ = trace(gh_pid);
 
-    // Non-blocking parallel collection
-    let repo  = harvest github_pid;
-    let story = harvest hn_pid;
+    // Non-blocking collection — both ran simultaneously
+    let repo  = harvest;
+    let story = harvest;
 
-    // Accumulate final signals into context
-    context.append("GitHub finding: " + repo.name + " (" + repo.stars + " stars)");
-    context.append("HN finding: " + story.title + " (score: " + story.score + ")");
+    // Add final signals to coordinator's context
+    context.append("GitHub: " + repo.name + " " + repo.stars + " stars");
+    context.append("HN: " + story.title);
 
-    call("echo", "\n[Coordinator] Both agents completed. Synthesising...");
+    call("echo", "\n[Coordinator] Both complete. Synthesising brief...");
 
-    // Confidence-gated synthesis with hard token budget
-    let brief = with budget(tokens: 1000, time: 25) {
-        infer ~ 0.72 IntelBrief {
-            "You are a senior developer intelligence coordinator.
-             Synthesise the following real-time data into an actionable brief.
+    // Confidence-gated synthesis under a hard token budget
+    let brief = with budget(tokens: 800, time: 25) {
+        infer IntelBrief {
+            "Synthesise real-time developer intelligence into an actionable brief.
 
-             SWEEP ID: " + sweep_count + "
-             INVESTIGATION: " + topic + " in " + language + "
+             SWEEP: " + sweep + " | TOPIC: " + topic + " | LANGUAGE: " + language + "
 
              GITHUB SIGNAL:
-               Repo: " + repo.name + "
-               Stars: " + repo.stars + " | Trend: " + repo.trend_signal + "
-               Description: " + repo.description + "
+             Repo: " + repo.name + " (" + repo.stars + " stars, " + repo.signal + ")
+             Desc: " + repo.description + "
 
              HACKER NEWS SIGNAL:
-               Headline: " + story.title + "
-               Score: " + story.score + " | Sentiment: " + story.sentiment + "
+             Headline: " + story.title + " (score: " + story.score + ", " + story.sentiment + ")
 
              PRIOR CONTEXT:
-               GitHub history: " + prior_github + "
-               HN history: " + prior_hn + "
+             GitHub: " + prior_gh + "
+             HN: " + prior_hn + "
 
-             Set sweep_id to " + sweep_count + ".
-             Write top_theme: 1 sentence on the dominant developer narrative today.
-             Write github_highlight: why this repo is significant (1 sentence).
-             Write hn_highlight: why this story matters for developers (1 sentence).
-             Write developer_action: one concrete thing to do this week.
-             Set confidence 0–100 based on signal strength.";
-        } else {
+             sweep_id: " + sweep + "
+             top_theme: 1 sentence on dominant developer narrative today
+             gh_signal: why this repo matters (1 sentence)
+             hn_signal: why this story matters (1 sentence)
+             action: 1 concrete thing a developer should do this week
+             confidence: 0-100";
+        } ~ 0.72 else {
             infer IntelBrief {
-                "Fallback: confidence below threshold. Produce a conservative brief
-                 with sweep_id " + sweep_count + ", confidence 50, noting limited signal.";
+                "Fallback brief — signals below confidence threshold.
+                 sweep_id: " + sweep + ", confidence: 50,
+                 top_theme: Insufficient signal strength for confident assessment.
+                 gh_signal: N/A, hn_signal: N/A, action: Retry with stronger signal.";
             };
         };
     };
 
-    // Write the brief to disk
-    call("fs_write", {
-        "path": ".turn_store/intel/sweep_" + sweep_count + ".json",
-        "content": call("json_stringify", brief)
-    });
+    // Write brief to disk
+    let brief_json = call("json_stringify", brief);
+    call("fs_write", {"path": ".turn_store/intel/sweep_" + sweep + ".json", "content": brief_json});
 
-    // Store the synthesis in semantic memory
-    remember("Sweep " + sweep_count + " (" + topic + "/" + language + "): " + brief.top_theme + " Action: " + brief.developer_action, "intel sweep " + topic);
+    // Store synthesis in semantic memory
+    remember("intel " + topic, "Sweep " + sweep + ": " + brief.top_theme + " | Action: " + brief.action);
 
     return brief;
 };
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-let brief = coordinator(["AI inference", "Rust"]);
+let brief = coordinator("AI inference", "Rust");
 
 call("echo", "\n╔══════════════════════════════════════════════╗");
-call("echo", " INTELLIGENCE BRIEF  —  Sweep #" + brief.sweep_id);
+call("echo", " INTELLIGENCE BRIEF — Sweep #" + brief.sweep_id);
 call("echo", "╚══════════════════════════════════════════════╝");
-call("echo", "Theme:          " + brief.top_theme);
-call("echo", "GitHub Signal:  " + brief.github_highlight);
-call("echo", "HN Signal:      " + brief.hn_highlight);
-call("echo", "Action:         " + brief.developer_action);
-call("echo", "Confidence:     " + brief.confidence + "%");
-call("echo", "");
-call("echo", "Brief saved to: .turn_store/intel/sweep_" + brief.sweep_id + ".json");
+call("echo", "Theme:      " + brief.top_theme);
+call("echo", "GitHub:     " + brief.gh_signal);
+call("echo", "HN:         " + brief.hn_signal);
+call("echo", "Action:     " + brief.action);
+call("echo", "Confidence: " + brief.confidence + "%");
+call("echo", "Saved to:   .turn_store/intel/sweep_" + brief.sweep_id + ".json");
