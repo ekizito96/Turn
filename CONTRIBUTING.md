@@ -80,15 +80,25 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full internal guide. Summary:
 
 ```
 impl/src/
-├── lexer.rs       ← Tokenizer
-├── parser.rs      ← Recursive descent parser
-├── compiler.rs    ← AST → Bytecode
-├── vm.rs          ← Async bytecode executor (Tokio actors)
-├── wasm_host.rs   ← Wasmtime sandbox + HTTP delegation
-├── llm_tools.rs   ← infer instruction handler
-├── runtime.rs     ← HNSW semantic memory + WAL
-├── runner.rs      ← Host: tool dispatch, agent lifecycle
-└── tools.rs       ← Standard tool registry
+├── lexer.rs          ← Tokenizer
+├── parser.rs         ← Recursive descent parser
+├── compiler.rs       ← AST → Bytecode
+├── vm.rs             ← Async bytecode executor (Tokio actors)
+├── wasm_host.rs      ← Wasmtime sandbox for use_wasm FFI
+├── schema_compiler.rs← Compile-time OpenAPI schema adapter
+├── llm_tools.rs      ← infer instruction handler
+├── runtime.rs        ← HNSW semantic memory + WAL
+├── runner.rs         ← Host: tool dispatch, agent lifecycle
+├── store.rs          ← Write-ahead log for Time-Travel Replay
+└── tools.rs          ← Standard tool registry (http_get, fs_read, etc.)
+impl/tests/
+├── suspension_test.rs    ← suspend + resume across restart
+├── persistence_test.rs   ← persist let across boots
+├── trace_test.rs         ← trace(pid) Glass VM telemetry
+├── mock_test.rs          ← #[mock(...)] compile-time testing
+├── url_resolver_test.rs  ← use "https://..." fetch + cache
+├── schema_adapter_test.rs← use schema::openapi(...) expansion
+└── wasm_sandbox_test.rs  ← use_wasm(...) FFI roundtrip
 ```
 
 ---

@@ -1,76 +1,254 @@
 // ============================================================================
-// Turn v0.5.0-alpha Example: The Autonomous Boardroom
-// 
-// Use Case: 3 Agents debate a topic in parallel using Native Actor Spawning.
-// Demonstrates: Concurrency (spawn), Mailboxes (send/receive), and Structural 
-// Inference mapping natural language debates into typed JSON outputs.
+// Turn Language Example: The Autonomous Boardroom
+//
+// Use Case: An AI board of directors debates a real-world strategic decision,
+//           grounded by live news data fetched at runtime. Each board member
+//           represents a distinct function: CTO, CFO, and Legal Counsel.
+//           The Chairman synthesises their inputs into a binding resolution.
+//
+// APIs used:
+//   - Hacker News public API (no key required) for live tech news context
+//   - OpenAI (configured via TURN_INFER_PROVIDER + OPENAI_API_KEY)
+//
+// Run:
+//   export TURN_INFER_PROVIDER=~/.turn/providers/turn_provider_openai.wasm
+//   export OPENAI_API_KEY=sk-...
+//   turn run impl/examples/boardroom.tn
 // ============================================================================
 
-use "std/print";
+// ---- Typed Structs ---------------------------------------------------------
 
-// 1. Define the Topic and Output Structure
-let topic = "Should we rewrite our backend in Rust?";
-let _sys = call("echo", "[System] BOARDROOM SESSION STARTED: " + topic);
-
-struct BoardVerdict {
-    consensus_reached: Bool,
-    winning_argument: Str,
-    final_decision: Str
+struct NewsContext {
+    headline_1: Str,
+    headline_2: Str,
+    headline_3: Str,
+    sentiment: Str    // "POSITIVE" | "NEGATIVE" | "MIXED"
 };
 
-// 2. Define the Agent Logic (Actors)
-let run_debater = turn(role: Str, bias: Str) -> Str {
-    let _s = call("echo", "[Debater] " + role + " is thinking...");
-    
-    // Each spawned actor gets a clean, isolated context window
-    let opinion = infer Str { "You are a tech employee answering. Provide your opinion."; };
-    
-    let _arg = call("echo", "[Argument] [" + role + "] " + opinion);
-    
-    return opinion;
+struct BoardMemo {
+    executive: Str,
+    position: Str,        // "SUPPORT" | "OPPOSE" | "NEUTRAL"
+    key_argument: Str,
+    confidence: Num       // 0-100
 };
 
-// 3. Main Orchestrator Layer
-let execute_boardroom = turn(target_topic: Str) -> BoardVerdict {
-    let _wait = call("echo", "[Chairperson] Waiting for expert takes...");
-
-    let cto_pid = spawn linked turn() { 
-        return call(run_debater, ["CTO", "Loves performance and safety. Pro-Rust."]); 
-    };
-    
-    let pm_pid = spawn linked turn() { 
-        return call(run_debater, ["Product Manager", "Cares about shipping speed. Anti-rewrite."]); 
-    };
-    
-    let dev_pid = spawn linked turn() { 
-        return call(run_debater, ["Junior Dev", "Just wants to learn cool stuff. Neutral but excited."]); 
-    };
-
-    // 4. Synchronization (Native Mailbox Blocking via Linked EXIT Trapping)
-    let vote_1_msg = await receive;
-    let vote_2_msg = await receive;
-    let vote_3_msg = await receive;
-
-    let vote_1 = vote_1_msg.reason;
-    let vote_2 = vote_2_msg.reason;
-    let vote_3 = vote_3_msg.reason;
-
-    let _decide = call("echo", "[Chairperson] ALL VOTES IN. DECIDING...");
-
-    // 5. Final Decision (Cognitive Type Checking)
-    let final_prompt = "You are the CEO deciding on the topic: " + target_topic + "\n1. CTO: " + vote_1 + "\n2. PM: " + vote_2 + "\n3. Dev: " + vote_3 + "\n\nSummarize the debate and make a final executive decision." + "\nReturn the strict BoardVerdict struct.";
-
-    let verdict = infer BoardVerdict { final_prompt; };
-    return verdict;
+struct BoardResolution {
+    motion: Str,
+    decision: Str,        // "PASSED" | "REJECTED" | "DEFERRED"
+    votes_for: Num,
+    votes_against: Num,
+    rationale: Str,
+    action_items: Str
 };
 
-// 6. Execute the simulation
-let final_verdict = call(execute_boardroom, topic);
+// ---- Live News Fetcher -----------------------------------------------------
+// Fetches the top Hacker News stories to give the board real-world context.
 
-// 7. Output the Type-Safe Result
-let _o1 = call("echo", "---------------------------------------------------");
-let _o2 = call("echo", "--- FINAL VERDICT ---");
-let _o3 = call("echo", "---------------------------------------------------");
-let _o4 = call("echo", "Consensus Reached: " + final_verdict.consensus_reached);
-let _o5 = call("echo", "Decision: " + final_verdict.final_decision);
-let _o6 = call("echo", "Rationale: " + final_verdict.winning_argument);
+let get_live_tech_context = tool turn(topic: Str) -> NewsContext {
+    call("echo", "[News] Fetching live tech news for context...");
+
+    // Hacker News top stories
+    let top_ids = call("http_get", "https://hacker-news.firebaseio.com/v0/topstories.json");
+    let ids = call("json_parse", top_ids);
+
+    // Fetch first 3 story titles for context
+    let story_1 = call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[0] + ".json");
+    let story_2 = call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[1] + ".json");
+    let story_3 = call("http_get", "https://hacker-news.firebaseio.com/v0/item/" + ids[2] + ".json");
+
+    let s1 = call("json_parse", story_1);
+    let s2 = call("json_parse", story_2);
+    let s3 = call("json_parse", story_3);
+
+    let context = infer NewsContext {
+        "Extract the headlines and assess overall industry sentiment.
+         
+         Story 1: " + s1["title"] + "
+         Story 2: " + s2["title"] + "
+         Story 3: " + s3["title"] + "
+         
+         Board discussion topic: " + topic + "
+         
+         Set headline_1, headline_2, headline_3 from real titles above.
+         Set sentiment to POSITIVE, NEGATIVE, or MIXED based on how these stories
+         relate to the board topic.";
+    };
+
+    call("echo", "[News] Industry sentiment: " + context.sentiment);
+    return context;
+};
+
+// ---- Board Members ---------------------------------------------------------
+
+let cto_agent = tool turn(motion: Str, news: NewsContext) -> BoardMemo {
+    call("echo", "[CTO] Evaluating technical & engineering implications...");
+
+    let memo = infer BoardMemo {
+        "You are the Chief Technology Officer on a board of directors.
+         Evaluate this motion from a technical feasibility and engineering velocity perspective.
+         
+         MOTION: " + motion + "
+         
+         CURRENT INDUSTRY CONTEXT:
+         1. " + news.headline_1 + "
+         2. " + news.headline_2 + "
+         3. " + news.headline_3 + "
+         Industry Sentiment: " + news.sentiment + "
+         
+         Write a concise key_argument (2 sentences) from your technical perspective.
+         Set executive to 'CTO'.
+         Set position to SUPPORT, OPPOSE, or NEUTRAL.
+         Set confidence from 0 to 100.";
+    };
+
+    call("echo", "[CTO] " + memo.position + " | Confidence: " + memo.confidence);
+    return memo;
+};
+
+let cfo_agent = tool turn(motion: Str, news: NewsContext) -> BoardMemo {
+    call("echo", "[CFO] Evaluating financial and risk implications...");
+
+    let memo = infer BoardMemo {
+        "You are the Chief Financial Officer on a board of directors.
+         Evaluate this motion from a capital allocation, ROI, and financial risk perspective.
+         
+         MOTION: " + motion + "
+         
+         CURRENT INDUSTRY CONTEXT:
+         1. " + news.headline_1 + "
+         2. " + news.headline_2 + "
+         3. " + news.headline_3 + "
+         Industry Sentiment: " + news.sentiment + "
+         
+         Write a concise key_argument (2 sentences) from your financial perspective.
+         Set executive to 'CFO'.
+         Set position to SUPPORT, OPPOSE, or NEUTRAL.
+         Set confidence from 0 to 100.";
+    };
+
+    call("echo", "[CFO] " + memo.position + " | Confidence: " + memo.confidence);
+    return memo;
+};
+
+let legal_agent = tool turn(motion: Str, news: NewsContext) -> BoardMemo {
+    call("echo", "[Legal] Evaluating legal, regulatory, and compliance implications...");
+
+    let memo = infer BoardMemo {
+        "You are General Counsel on a board of directors.
+         Evaluate this motion from a regulatory compliance, liability, and legal risk perspective.
+         
+         MOTION: " + motion + "
+         
+         CURRENT INDUSTRY CONTEXT:
+         1. " + news.headline_1 + "
+         2. " + news.headline_2 + "
+         3. " + news.headline_3 + "
+         Industry Sentiment: " + news.sentiment + "
+         
+         Write a concise key_argument (2 sentences) from a legal perspective.
+         Set executive to 'Legal'.
+         Set position to SUPPORT, OPPOSE, or NEUTRAL.
+         Set confidence from 0 to 100.";
+    };
+
+    call("echo", "[Legal] " + memo.position + " | Confidence: " + memo.confidence);
+    return memo;
+};
+
+// ---- Chairman (Orchestrator) -----------------------------------------------
+
+let chairman = tool turn(motion: Str) -> BoardResolution {
+    call("echo", "\n==========================================");
+    call("echo", " BOARD OF DIRECTORS — EMERGENCY SESSION");
+    call("echo", "==========================================");
+    call("echo", "Motion: " + motion);
+    call("echo", "");
+
+    // Fetch live news to ground the debate in real-world context
+    let news = get_live_tech_context(motion);
+
+    // Spawn each board member as an isolated linked agent running in parallel
+    let cto_pid   = spawn linked turn() { return cto_agent([motion, news]); };
+    let cfo_pid   = spawn linked turn() { return cfo_agent([motion, news]); };
+    let legal_pid = spawn linked turn() { return legal_agent([motion, news]); };
+
+    // Collect all memos concurrently
+    let cto_memo   = harvest cto_pid;
+    let cfo_memo   = harvest cfo_pid;
+    let legal_memo = harvest legal_pid;
+
+    call("echo", "\n[Chairman] All memos received. Deliberating...");
+
+    // Tally votes
+    let votes_for = 0;
+    let votes_against = 0;
+
+    if cto_memo.position == "SUPPORT" {
+        let votes_for = votes_for + 1;
+    };
+    if cfo_memo.position == "SUPPORT" {
+        let votes_for = votes_for + 1;
+    };
+    if legal_memo.position == "SUPPORT" {
+        let votes_for = votes_for + 1;
+    };
+    if cto_memo.position == "OPPOSE" {
+        let votes_against = votes_against + 1;
+    };
+    if cfo_memo.position == "OPPOSE" {
+        let votes_against = votes_against + 1;
+    };
+    if legal_memo.position == "OPPOSE" {
+        let votes_against = votes_against + 1;
+    };
+
+    let resolution = infer BoardResolution {
+        "You are the Chairman of the Board. Synthesise the board votes into a binding resolution.
+         
+         MOTION: " + motion + "
+         
+         LIVE NEWS CONTEXT:
+         " + news.headline_1 + "
+         Industry Sentiment: " + news.sentiment + "
+         
+         CTO (" + cto_memo.position + ", confidence " + cto_memo.confidence + "%):
+         " + cto_memo.key_argument + "
+         
+         CFO (" + cfo_memo.position + ", confidence " + cfo_memo.confidence + "%):
+         " + cfo_memo.key_argument + "
+         
+         Legal (" + legal_memo.position + ", confidence " + legal_memo.confidence + "%):
+         " + legal_memo.key_argument + "
+         
+         Votes for: " + votes_for + " | Votes against: " + votes_against + "
+         
+         If votes_for > votes_against, set decision to PASSED.
+         If votes_against > votes_for, set decision to REJECTED.
+         If tied, set decision to DEFERRED.
+         
+         Write a 3-sentence rationale explaining the board's reasoning.
+         Write 2-3 concrete action_items the company must execute immediately.
+         Set motion to the motion string above.";
+    };
+
+    return resolution;
+};
+
+// ---- Main ------------------------------------------------------------------
+
+let motion = "Migrate all core infrastructure to AI-native architecture within 18 months, replacing legacy rule-based systems with LLM-powered decision engines.";
+
+let resolution = chairman(motion);
+
+call("echo", "\n==========================================");
+call("echo", " RESOLUTION");
+call("echo", "==========================================");
+call("echo", "Motion:  " + resolution.motion);
+call("echo", "Outcome: " + resolution.decision);
+call("echo", "For: " + resolution.votes_for + " | Against: " + resolution.votes_against);
+call("echo", "");
+call("echo", "Rationale:");
+call("echo", resolution.rationale);
+call("echo", "");
+call("echo", "Action Items:");
+call("echo", resolution.action_items);

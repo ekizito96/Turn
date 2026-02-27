@@ -1,171 +1,232 @@
 // ============================================================================
-// Turn v0.5.0-alpha Example: Investment Committee (Multi-Agent Swarm)
-// 
-// Use Case: A committee of specialist agents (Market, Fundamental, Risk, Chair)
-// collaborates to evaluate public-equity investment opportunities for a $10M 
-// portfolio under strict constraints.
+// Turn Language Example: Investment Committee (Multi-Agent, Real-World APIs)
+//
+// Use Case: A committee of specialist agents evaluates a live equity position
+//           for a $10M portfolio using real market data from public APIs.
+//           Demonstrates: multi-agent spawning, real HTTP tool calls, typed
+//           inference, semantic memory, and mandate compliance gating.
+//
+// APIs used:
+//   - Yahoo Finance (via unofficial CSV endpoint — no key required)
+//   - OpenAI (configured via TURN_INFER_PROVIDER + OPENAI_API_KEY)
+//
+// Run:
+//   export TURN_INFER_PROVIDER=~/.turn/providers/turn_provider_openai.wasm
+//   export OPENAI_API_KEY=sk-...
+//   turn run impl/examples/investment_committee.tn
 // ============================================================================
 
-use "std/print";
-
-// ============================================================================
-// 1. Data Structures & Types
-// ============================================================================
+// ---- Typed Structs ---------------------------------------------------------
 
 struct MarketData {
+    ticker: Str,
     price: Num,
-    volatility: Num,
+    currency: Str,
+    market_cap_b: Num,
     pe_ratio: Num,
-    market_cap: Num
+    week_52_high: Num,
+    week_52_low: Num,
+    raw_json: Str
 };
 
-struct RiskAnalysis {
-    var_95: Num,
-    max_position_breach: Bool,
-    sector_cap_breach: Bool,
-    recommended_size: Num
+struct FundamentalThesis {
+    ticker: Str,
+    thesis: Str,
+    valuation_signal: Str,    // "CHEAP" | "FAIR" | "EXPENSIVE"
+    conviction_score: Num     // 0-10
+};
+
+struct RiskAssessment {
+    ticker: Str,
+    requested_size_usd: Num,
+    max_position_usd: Num,
+    mandate_breach: Bool,
+    approved_size_usd: Num,
+    risk_summary: Str
 };
 
 struct CommitteeMemo {
     ticker: Str,
-    fundamental_thesis: Str,
-    risk_assessment: RiskAnalysis,
-    final_decision: Str, // "APPROVE" or "REJECT"
-    allocation: Num
+    decision: Str,            // "APPROVE" | "REJECT" | "REDUCE"
+    approved_size_usd: Num,
+    conviction_score: Num,
+    executive_summary: Str,
+    risk_flags: Str
 };
 
-// ============================================================================
-// 2. Shared Tools (Capabilities)
-// ============================================================================
+// ---- Real Market Data Fetch ------------------------------------------------
+// Uses Yahoo Finance's public quote endpoint (no API key needed).
+// Returns raw JSON which the LLM then structures into MarketData.
 
-// Mock Tool: Market Data API
 let fetch_market_data = tool turn(ticker: Str) -> MarketData {
-    call("echo", "[System] Fetching live market data for " + ticker + "...");
-    // Since Turn struct instantiation must go through the model, we use an inline infer workaround
-    // passing the values directly as JSON string representation to guarantee strict adherence.
-    if ticker == "NVDA" {
-        let d1 = infer MarketData { "{ \"price\": 850.50, \"volatility\": 0.45, \"pe_ratio\": 75.2, \"market_cap\": 2100000000000.0 }"; };
-        return d1;
-    } else {
-        if ticker == "AAPL" {
-            let d2 = infer MarketData { "{ \"price\": 175.20, \"volatility\": 0.22, \"pe_ratio\": 28.5, \"market_cap\": 2800000000000.0 }"; };
-            return d2;
-        } else {
-            let d3 = infer MarketData { "{ \"price\": 100.0, \"volatility\": 0.3, \"pe_ratio\": 15.0, \"market_cap\": 10000000000.0 }"; };
-            return d3;
-        }
-    }
-};
+    call("echo", "[Data] Fetching live market data for " + ticker + " ...");
 
-// Mock Tool: Portfolio & Mandate Engine
-let check_mandate = tool turn(ticker: Str, requested_allocation: Num) -> RiskAnalysis {
-    call("echo", "[System] Running mandate compliance check for $" + requested_allocation + " into " + ticker);
-    let total_portfolio = 10000000.0; // $10M
-    let max_position_size = total_portfolio * 0.15; // 15% max ($1.5M)
+    // Build the Yahoo Finance query URL
+    let url = "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=1d";
+    let raw = call("http_get", url);
 
-    if requested_allocation > max_position_size {
-        let risk = infer RiskAnalysis {
-            "{ \"var_95\": " + (max_position_size * 0.08) + ", \"max_position_breach\": true, \"sector_cap_breach\": false, \"recommended_size\": " + max_position_size + " }";
-        };
-        return risk;
-    } else {
-        let risk = infer RiskAnalysis {
-            "{ \"var_95\": " + (requested_allocation * 0.08) + ", \"max_position_breach\": false, \"sector_cap_breach\": false, \"recommended_size\": " + requested_allocation + " }";
-        };
-        return risk;
-    }
-};
+    // Also fetch summary detail for PE and market cap
+    let summary_url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + ticker + "?modules=summaryDetail,defaultKeyStatistics,price";
+    let summary_raw = call("http_get", summary_url);
 
-// ============================================================================
-// 3. Specialist Agents (Actors)
-// ============================================================================
-
-// 3.1 Fundamental Analyst
-let fundamental_analyst = turn(ticker: Str) -> Str {
-    call("echo", "\n--- [Fundamental Analyst] Initializing ---");
-    // The analyst uses the AST lexical scope memory perfectly here
-    let analysis = infer Str with [fetch_market_data] {
-        "You are the Fundamental Analyst. Fetch the market data for " + ticker + ". " +
-        "Write a 2-sentence thesis on its valuation multiples and growth quality.";
-    };
-    call("echo", "[Fundamental Analyst] Thesis generated.");
-    return analysis;
-};
-
-// 3.2 Risk Officer
-let risk_officer = turn(ticker: Str, requested_size: Num) -> RiskAnalysis {
-    call("echo", "\n--- [Risk Officer] Initializing ---");
-    // Ensure the model returns a strictly typed result natively
-    let analysis = infer RiskAnalysis with [check_mandate] {
-        "You are the Risk Officer. Check the mandate for allocating $" + requested_size + 
-        " to " + ticker + ". Return the strict RiskAnalysis struct.";
-    };
-    call("echo", "[Risk Officer] Risk constraints checked.");
-    return analysis;
-};
-
-// 3.3 Knowledge Base / RAG Agent (Demonstrating Semantic Memory)
-let knowledge_agent = turn(ticker: Str) -> Str {
-    call("echo", "\n--- [Knowledge Library] Searching Past Memos ---");
-    // Implicit recall uses the HNSW index to find similar past notes
-    recall("Past memos regarding " + ticker + " sector performance");
-    let rag_context = infer Str {
-        "Based on our semantic memory of past memos, summarize our institutional stance on " + ticker;
-    };
-    return rag_context;
-};
-
-// 3.4 Committee Chair (Orchestrator)
-let committee_chair = turn(ticker: Str, requested_size: Num) -> CommitteeMemo {
-    call("echo", "\n===============================================");
-    call("echo", " [Committee Chair] Opening review for " + ticker);
-    call("echo", "===============================================");
-
-    // 1. Dispatch Analysts synchronously (spawn/send/receive deadlocks without self_pid)
-    let fund_thesis = fundamental_analyst(ticker);
-    let risk_report = risk_officer([ticker, requested_size]);
-    let past_context = knowledge_agent(ticker);
-
-    call("echo", "\n--- [Committee Chair] Reviewing Subordinate Intelligence ---");
-    call("echo", "Using probabilistic logic (confidence traps) to evaluate risk data.");
-
-    // The Chair makes the final decision
-    let final_decision = infer CommitteeMemo {
-        "You are the Committee Chair. Read the following packets:" +
-        "\n1. Thesis: " + fund_thesis +
-        "\n2. Risk Data: Max Breach=" + risk_report.max_position_breach + ", Rec Size=" + risk_report.recommended_size +
-        "\n3. Past Memos: " + past_context +
-        "\n\nIf Max Breach is true, you MUST restrict allocation to the Rec Size or REJECT." +
-        "\nReturn the final CommitteeMemo struct.";
+    // Use the LLM to extract structured values from raw Yahoo Finance JSON
+    let data = infer MarketData {
+        "You are a financial data parser. Extract the following fields from the Yahoo Finance API response.
+         Fields to extract: ticker, current price (regularMarketPrice), currency, market cap in billions,
+         PE ratio (trailingPE), 52-week high, 52-week low.
+         Set raw_json to the first 300 chars of the raw response string.
+         
+         Quote endpoint response:
+         " + raw + "
+         
+         Summary endpoint response:
+         " + summary_raw + "
+         
+         Return a structured MarketData object with numeric values extracted accurately.
+         If a field is unavailable return 0 for numbers and 'N/A' for strings.
+         The ticker field should be: " + ticker;
     };
 
-    return final_decision;
+    call("echo", "[Data] " + ticker + " price: " + data.price + " " + data.currency);
+    return data;
 };
 
-// ============================================================================
-// 4. Main Execution
-// ============================================================================
+// ---- Fundamental Analyst Agent ---------------------------------------------
 
-call("echo", "Welcome to the Turn Investment Committee.");
-call("echo", "Mandate: Core Equity, $10M AUM, Max Position 15% ($1.5M)");
+let fundamental_analyst = tool turn(market_data: MarketData) -> FundamentalThesis {
+    call("echo", "[Fundamental] Analysing " + market_data.ticker + " ...");
 
-// Pre-load some institutional memory into the HNSW index
-remember("NVDA was highly volatile in Q1, we suffered a 10% drawdown. Proceed with extreme caution on sizing.", "NVDA Q1 Memo");
-remember("AAPL is a steady cash generator, approved for max sizing last year.", "AAPL Review");
+    let thesis = infer FundamentalThesis {
+        "You are a senior equity analyst at a long-only fundamental fund.
+         Analyse the following live market data and produce an investment thesis.
+         
+         Ticker:       " + market_data.ticker + "
+         Price:        " + market_data.price + " " + market_data.currency + "
+         Market Cap:   $" + market_data.market_cap_b + "B
+         P/E Ratio:    " + market_data.pe_ratio + "
+         52-Week High: " + market_data.week_52_high + "
+         52-Week Low:  " + market_data.week_52_low + "
+         
+         Write a 3-sentence thesis covering: (1) valuation relative to peers,
+         (2) business quality signal, (3) near-term catalyst.
+         Set valuation_signal to CHEAP, FAIR, or EXPENSIVE.
+         Set conviction_score from 1 (very low) to 10 (very high).";
+    };
 
-// Request: Evaluate NVDA for a $2.0M position (Note: this violates the 15% / $1.5M max rule)
-let target = "NVDA";
-let requested_allocation = 2000000.0;
+    call("echo", "[Fundamental] Signal: " + thesis.valuation_signal + " | Conviction: " + thesis.conviction_score);
+    return thesis;
+};
 
-let final_memo = committee_chair([target, requested_allocation]);
+// ---- Risk Officer Agent ----------------------------------------------------
 
-call("echo", "\n===============================================");
-call("echo", " RAW OUTPUT FROM CHAIR: ");
-call("echo", final_memo);
-call("echo", "\n===============================================");
-call("echo", " FINAL COMMITTEE MEMO: " + final_memo.ticker);
-call("echo", "===============================================");
-call("echo", "Decision:   " + final_memo.final_decision);
-call("echo", "Allocation: $" + final_memo.allocation);
-call("echo", "Thesis:     " + final_memo.fundamental_thesis);
-call("echo", "Risk Breach:" + final_memo.risk_assessment.max_position_breach);
+let risk_officer = tool turn(ticker: Str, requested_usd: Num, market_data: MarketData) -> RiskAssessment {
+    call("echo", "[Risk] Running mandate compliance for $" + requested_usd + " into " + ticker + " ...");
+
+    let total_aum = 10000000.0;
+    let max_position = total_aum * 0.15;   // 15% single-stock cap = $1.5M
+
+    let assessment = infer RiskAssessment {
+        "You are the Chief Risk Officer of a $10M equity fund.
+         Mandate rules:
+           - Maximum single-stock position: 15% of AUM = $1,500,000
+           - Minimum conviction required to approve: score >= 6 out of 10
+         
+         Requested trade:
+           Ticker:          " + ticker + "
+           Requested size:  $" + requested_usd + "
+           Max allowed:     $" + max_position + "
+           52-Week High:    " + market_data.week_52_high + "
+           52-Week Low:     " + market_data.week_52_low + "
+           Current Price:   " + market_data.price + "
+         
+         Determine if mandate_breach is true (requested > max allowed).
+         Set approved_size_usd to min(requested, max_allowed).
+         Write a 2-sentence risk_summary covering concentration risk and momentum.
+         Set requested_size_usd to " + requested_usd + " and max_position_usd to " + max_position + ".";
+    };
+
+    call("echo", "[Risk] Breach: " + assessment.mandate_breach + " | Approved: $" + assessment.approved_size_usd);
+    return assessment;
+};
+
+// ---- Committee Chair (Orchestrator) ----------------------------------------
+
+let committee_chair = tool turn(ticker: Str, requested_usd: Num) -> CommitteeMemo {
+
+    call("echo", "\n=== INVESTMENT COMMITTEE: " + ticker + " ===");
+
+    // Step 1: Fetch live market data (real network call)
+    let market_data = fetch_market_data(ticker);
+
+    // Step 2: Run fundamental analysis in parallel with risk check
+    let analyst_pid = spawn linked turn() {
+        return fundamental_analyst(market_data);
+    };
+
+    let risk_pid = spawn linked turn() {
+        return risk_officer([ticker, requested_usd, market_data]);
+    };
+
+    let thesis    = harvest analyst_pid;
+    let risk      = harvest risk_pid;
+
+    // Step 3: Retrieve any existing institutional memory on this ticker
+    let past_notes = recall("investment history " + ticker);
+
+    // Step 4: Chair synthesises the decision
+    call("echo", "\n[Chair] All reports in. Synthesising decision...");
+
+    let memo = infer CommitteeMemo {
+        "You are the Investment Committee Chair. Make a final investment decision.
+
+         LIVE MARKET DATA:
+         " + market_data.ticker + " @ " + market_data.price + " " + market_data.currency + "
+         PE: " + market_data.pe_ratio + " | Mkt Cap: $" + market_data.market_cap_b + "B
+
+         FUNDAMENTAL ANALYST REPORT:
+         " + thesis.thesis + "
+         Signal: " + thesis.valuation_signal + " | Conviction: " + thesis.conviction_score + "/10
+
+         RISK OFFICER REPORT:
+         Mandate breach: " + risk.mandate_breach + "
+         Approved size: $" + risk.approved_size_usd + "
+         " + risk.risk_summary + "
+
+         INSTITUTIONAL MEMORY:
+         " + past_notes + "
+
+         Rules:
+         - If mandate_breach is true, you MUST set decision to REDUCE and approved_size_usd to the risk officer's approved amount.
+         - If conviction_score < 6, you MUST set decision to REJECT.
+         - Otherwise set decision to APPROVE.
+
+         Write a 3-sentence executive_summary and list the key risk_flags.";
+    };
+
+    return memo;
+};
+
+// ---- Main ------------------------------------------------------------------
+
+call("echo", "TURN INVESTMENT COMMITTEE");
+call("echo", "Mandate: Core Equity | AUM: $10M | Max Position: 15% = $1.5M");
+call("echo", "");
+
+// Save any prior institutional knowledge into semantic memory
+remember("NVDA saw extreme volatility in Q1 2024 following export restriction news. Sizing was reduced. Monitor for regulatory tail risk.", "nvda");
+remember("AAPL received a full mandate allocation in Q3 2024. Strong free cash flow, approved at max size.", "aapl");
+
+// Evaluate NVDA for an aggressive $2M allocation (should trigger mandate breach)
+let memo = committee_chair(["NVDA", 2000000.0]);
+
+call("echo", "\n=== COMMITTEE DECISION ===");
+call("echo", "Ticker:    " + memo.ticker);
+call("echo", "Decision:  " + memo.decision);
+call("echo", "Approved:  $" + memo.approved_size_usd);
+call("echo", "Conviction:" + memo.conviction_score);
+call("echo", "");
+call("echo", "Executive Summary:");
+call("echo", memo.executive_summary);
+call("echo", "");
+call("echo", "Risk Flags:");
+call("echo", memo.risk_flags);
