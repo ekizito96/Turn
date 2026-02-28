@@ -40,6 +40,15 @@ impl Compiler {
         for stmt in &program.stmts {
             self.compile_stmt(stmt);
         }
+        
+        let has_return = program
+            .stmts
+            .last()
+            .is_some_and(|s| matches!(s, Stmt::Return { .. }));
+        if !has_return {
+            self.emit(Instr::PushNull);
+            self.emit(Instr::Return);
+        }
         self.code.clone()
     }
 
@@ -48,15 +57,6 @@ impl Compiler {
             Stmt::Turn { body, .. } => {
                 let enter_turn_addr = self.emit(Instr::EnterTurn(0));
                 self.compile_block(body);
-                // Implicit return if not present
-                let has_return = body
-                    .stmts
-                    .last()
-                    .is_some_and(|s| matches!(s, Stmt::Return { .. }));
-                if !has_return {
-                    self.emit(Instr::PushNull);
-                    self.emit(Instr::Return);
-                }
                 let after_turn = self.code.len() as u32;
                 self.patch_jump(enter_turn_addr, after_turn);
             }

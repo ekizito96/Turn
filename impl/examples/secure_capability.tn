@@ -16,7 +16,7 @@ let stripe_charge = tool turn(
     amount: Num, 
     secret api_key: Cap
 ) -> Bool {
-    println("[Stripe Tool] Attempting to charge $" + amount + " to " + customer_name);
+    call("echo", "[Stripe Tool] Attempting to charge $" + amount + " to " + customer_name);
     
     // The `api_key` here is an Opaque unforgeable handle (e.g. `Cap(42)`).
     // The actual string ("sk_live_123...") lives in the trusted Rust backend Registry.
@@ -24,7 +24,7 @@ let stripe_charge = tool turn(
     // immediately throw a `PrivilegeViolationTrap`. 
     
     // In actual implementation: HTTP Post to stripe using the Cap handle to resolve the header.
-    println("[Stripe Tool] CHARGE SUCCESSFUL for " + customer_name);
+    call("echo", "[Stripe Tool] CHARGE SUCCESSFUL for " + customer_name);
 
     return true;
 };
@@ -36,14 +36,14 @@ let stripe_charge = tool turn(
 let my_app_secret_api_key = null; // Dummy syntax representing an injected opaque value
 
 // 3. Execution
-println("Booting Secure E-Commerce Agent...");
+call("echo", "Booting Secure E-Commerce Agent...");
 
 let response = infer Bool with [stripe_charge] {
     "You are a billing agent. The customer 'Alice' just bought a $150 widget. " +
-    "Please issue the charge now and return true if successful."
+    "Please issue the charge now and return true if successful.";
 };
 
-println("Final LLM Billing State: " + response);
+call("echo", "Final LLM Billing State: " + response);
 
 // ----------------------------------------------------------------------------
 // Why is this revolutionary for Agents?

@@ -36,7 +36,7 @@ struct BoardMemo {
     executive:    Str,
     position:     Str,
     argument:     Str,
-    confidence:   Num
+    conf_score:   Num
 };
 
 struct BoardResolution {
@@ -98,15 +98,15 @@ let cto_board = tool turn(motion: Str, news: NewsContext, history: Str) -> Board
          executive: CTO
          position: SUPPORT, OPPOSE, or ABSTAIN
          argument: 2-sentence technical assessment
-         confidence: 0-100";
+         conf_score: 0-100";
     } ~ 0.75 else {
         infer BoardMemo {
             "CTO low confidence fallback. executive: CTO, position: ABSTAIN,
-             argument: Insufficient technical data., confidence: 40";
+             argument: Insufficient technical data., conf_score: 40";
         };
     };
 
-    call("echo", "[CTO] " + memo.position + " (" + memo.confidence + "%)");
+    call("echo", "[CTO] " + memo.position + " (" + memo.conf_score + "%)");
     return memo;
 };
 
@@ -125,15 +125,15 @@ let cfo_board = tool turn(motion: Str, news: NewsContext, history: Str) -> Board
          executive: CFO
          position: SUPPORT, OPPOSE, or ABSTAIN
          argument: 2-sentence financial assessment
-         confidence: 0-100";
+         conf_score: 0-100";
     } ~ 0.75 else {
         infer BoardMemo {
             "CFO low confidence fallback. executive: CFO, position: ABSTAIN,
-             argument: Insufficient financial data., confidence: 40";
+             argument: Insufficient financial data., conf_score: 40";
         };
     };
 
-    call("echo", "[CFO] " + memo.position + " (" + memo.confidence + "%)");
+    call("echo", "[CFO] " + memo.position + " (" + memo.conf_score + "%)");
     return memo;
 };
 
@@ -152,15 +152,15 @@ let legal_board = tool turn(motion: Str, news: NewsContext, history: Str) -> Boa
          executive: Legal
          position: SUPPORT, OPPOSE, or ABSTAIN
          argument: 2-sentence legal assessment
-         confidence: 0-100";
+         conf_score: 0-100";
     } ~ 0.75 else {
         infer BoardMemo {
             "Legal low confidence fallback. executive: Legal, position: ABSTAIN,
-             argument: Insufficient regulatory context., confidence: 40";
+             argument: Insufficient regulatory context., conf_score: 40";
         };
     };
 
-    call("echo", "[Legal] " + memo.position + " (" + memo.confidence + "%)");
+    call("echo", "[Legal] " + memo.position + " (" + memo.conf_score + "%)");
     return memo;
 };
 
@@ -206,9 +206,9 @@ let chairman = tool turn(motion: Str) -> BoardResolution {
              MOTION: " + motion + "
              LIVE CONTEXT: " + news.headline_1 + " (sentiment: " + news.sentiment + ")
 
-             CTO  (" + cto_memo.position + ", " + cto_memo.confidence + "%): " + cto_memo.argument + "
-             CFO  (" + cfo_memo.position + ", " + cfo_memo.confidence + "%): " + cfo_memo.argument + "
-             Legal(" + legal_memo.position + ", " + legal_memo.confidence + "%): " + legal_memo.argument + "
+             CTO  (" + cto_memo.position + ", " + cto_memo.conf_score + "%): " + cto_memo.argument + "
+             CFO  (" + cfo_memo.position + ", " + cfo_memo.conf_score + "%): " + cfo_memo.argument + "
+             Legal(" + legal_memo.position + ", " + legal_memo.conf_score + "%): " + legal_memo.argument + "
 
              Count SUPPORT positions as votes_for, OPPOSE as votes_against, ABSTAIN as neither.
              If votes_for > votes_against → decision PASSED.

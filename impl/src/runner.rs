@@ -405,7 +405,7 @@ impl<S: Store + std::marker::Send> Runner<S> {
         let mut parser = Parser::new(tokens);
         let mut program = parser
             .parse()
-            .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+            .map_err(anyhow::Error::from)?;
 
         crate::macro_engine::MacroEngine::expand(&mut program).await?;
 

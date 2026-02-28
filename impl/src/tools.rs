@@ -156,6 +156,21 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
+        // env_get
+        tools.insert(
+            "env_get".to_string(),
+            Box::new(|arg| {
+                let key = match arg {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err("env_get expects a string key".to_string()),
+                };
+                match env::var(key.as_ref()) {
+                    Ok(val) => Ok(Value::Str(std::sync::Arc::new(val))),
+                    Err(_) => Ok(Value::Null),
+                }
+            }) as ToolHandler,
+        );
+
         // env_set
         tools.insert(
             "env_set".to_string(),

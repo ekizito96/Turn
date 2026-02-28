@@ -95,7 +95,7 @@ pub fn run_with_tools(
         let tokens = lexer::Lexer::new(&source_str).tokenize()
             .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
         let mut program = parser::Parser::new(tokens).parse()
-            .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+            .map_err(anyhow::Error::from)?;
         
         // Execute Wasm macros (Schema Adapters) before compilation
         crate::macro_engine::MacroEngine::expand(&mut program).await?;

@@ -1,0 +1,64 @@
+{
+  "pid": 1,
+  "frames": [
+    {
+      "code": [
+        {
+          "PushStr": "echo"
+        },
+        {
+          "PushStr": "Phase 1: Start"
+        },
+        "CallTool",
+        "Pop",
+        {
+          "PushStr": "Please press enter"
+        },
+        {
+          "Suspend": "Any"
+        },
+        {
+          "Store": "input"
+        },
+        {
+          "PushStr": "echo"
+        },
+        {
+          "PushStr": "Phase 2: Resumed"
+        },
+        "CallTool",
+        "Pop",
+        {
+          "PushStr": "Done"
+        },
+        "Return"
+      ],
+      "ip": 6,
+      "env": {},
+      "handlers": []
+    }
+  ],
+  "stack": [],
+  "runtime": {
+    "env": {},
+    "context": {
+      "items": [],
+      "token_budget": 8000,
+      "current_tokens": 0
+    },
+    "memory": {
+      "items": [],
+      "entry_point": null
+    },
+    "structs": {},
+    "capabilities": {
+      "next_id": 1
+    },
+    "budget_stack": [],
+    "active_mocks": []
+  },
+  "mailbox": [],
+  "token_budget": 999994,
+  "strictness_threshold": 0.8,
+  "pending_suspend_type": null
+}

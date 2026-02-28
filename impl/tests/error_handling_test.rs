@@ -35,13 +35,11 @@ impl Store for MemoryStore {
 #[tokio::test]
 async fn test_try_catch_basic() {
     let source = r#"
-    turn {
         let result = err("oops");
         match result {
             ok(v) -> { return "uncaught"; }
             err(e) -> { return "caught: " + e; }
         }
-    }
     "#;
 
     let store = MemoryStore::new();
@@ -58,13 +56,11 @@ async fn test_try_catch_basic() {
 #[tokio::test]
 async fn test_try_catch_no_error() {
     let source = r#"
-    turn {
         let result = ok(1);
         match result {
             ok(v) -> { return "success"; }
             err(e) -> { return "caught: " + e; }
         }
-    }
     "#;
 
     let store = MemoryStore::new();
@@ -81,7 +77,6 @@ async fn test_try_catch_no_error() {
 #[tokio::test]
 async fn test_nested_try_catch() {
     let source = r#"
-    turn {
         let res1 = err("inner");
         
         match res1 {
@@ -94,7 +89,6 @@ async fn test_nested_try_catch() {
                 }
             }
         }
-    }
     "#;
 
     let store = MemoryStore::new();
@@ -111,8 +105,7 @@ async fn test_nested_try_catch() {
 #[tokio::test]
 async fn test_cross_function_throw() {
     let source = r#"
-    turn {
-        let fail = turn {
+        let fail = turn() {
             return err("fail");
         };
         
@@ -121,7 +114,6 @@ async fn test_cross_function_throw() {
             ok(v) -> { return "success"; }
             err(e) -> { return "caught: " + e; }
         }
-    }
     "#;
 
     let store = MemoryStore::new();
