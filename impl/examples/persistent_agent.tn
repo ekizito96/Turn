@@ -5,23 +5,27 @@
 // .turn_store/persist_<name>.json after every assignment.
 // On the next boot, the VM pre-loads these values automatically.
 //
-// Run first time:   cargo run -- run examples/persistent_agent.tn --id my_agent
-// Run second time:  cargo run -- run examples/persistent_agent.tn --id my_agent
+// Run first time:   turn run impl/examples/persistent_agent.tn --id my_agent
+// Run second time:  turn run impl/examples/persistent_agent.tn --id my_agent
 // Observe: run_count increments across restarts.
 // ============================================================================
 
-use "std/print";
+struct Analysis {
+    risk_assessment: Str,
+    outlook: Str
+};
 
-println("[Persistent Agent] Booting...");
+call("echo", "[Persistent Agent] Booting...");
 
 persist let run_count = 0;
 persist let company = "NVDA";
 persist let run_count = run_count + 1;
 
-println("[Persistent Agent] Run #" + run_count + " - Analyzing: " + company);
+call("echo", "[Persistent Agent] Run #" + run_count + " - Analyzing: " + company);
 
 let prompt = "In one sentence, assess the investment risk for " + company + ". Run #" + run_count + ".";
-let analysis = infer Str { prompt;};
+let analysis: Analysis = infer Analysis { prompt; };
 
-println("[Persistent Agent] Risk: " + analysis);
-println("[Persistent Agent] State persisted. Next run: run_count = " + run_count + ".");
+call("echo", "[Persistent Agent] Risk: " + analysis.risk_assessment);
+call("echo", "[Persistent Agent] Outlook: " + analysis.outlook);
+call("echo", "[Persistent Agent] State persisted. Next run_count = " + run_count + ".");

@@ -1,15 +1,13 @@
 // ============================================================================
-// Turn v0.5.1 Example: Thermodynamic Budget Guardrails (Pillar 3)
+// Turn Example: Thermodynamic Budget Guardrails
 //
 // The 'with budget(tokens: X, time: Y) { ... }' block enforces hard
 // token and wall-clock limits on any LLM inference inside it.
 // If the LLM burns > X tokens or > Y seconds, the VM raises a
 // Thermodynamic Constraint Exceeded trap and severs execution.
 //
-// Run: TURN_INFER_PROVIDER=<wasm> cargo run -- run examples/budget_guardrail.tn --id budget_demo
+// Run: turn run impl/examples/budget_guardrail.tn --id budget_demo
 // ============================================================================
-
-use "std/print";
 
 struct ResearchSummary {
     key_findings: Str,
@@ -18,16 +16,16 @@ struct ResearchSummary {
 };
 
 let topic = "Advances in neuromorphic computing in 2025";
-println("[Research Agent] Starting analysis with 8000-token budget...");
+call("echo", "[Research Agent] Starting analysis with 8000-token budget...");
 
-let prompt = "Summarize 2025 advances in: " + topic + ". Be concise. Return a structured ResearchSummary.";
+let prompt = "Summarize 2025 advances in: " + topic + ". Be concise.";
 
 let result = with budget(tokens: 8000, time: 60) {
-    infer ResearchSummary { prompt;};
+    infer ResearchSummary { prompt; };
 };
 
 persist let latest_research = result;
 
-println("[Research Agent] Done.");
-println("Confidence: " + result.confidence_level);
-println("Findings: " + result.key_findings);
+call("echo", "[Research Agent] Done.");
+call("echo", "Confidence: " + result.confidence_level);
+call("echo", "Findings: " + result.key_findings);

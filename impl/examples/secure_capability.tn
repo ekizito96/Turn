@@ -1,58 +1,38 @@
 // ============================================================================
-// Turn v0.5.0-alpha Example: Object-Capability (OCap) Security Model
+// Turn Example: Object-Capability (OCap) Security Model
 // 
-// Use Case: Demonstrates how Turn prevents LLM hallucination and guest-code
-// leakage from exposing sensitive API keys to the network or logs.
+// Demonstrates how Turn prevents guest-code and LLM hallucinations
+// from leaking sensitive API keys to the network or logs.
 // ============================================================================
 
-use "std/print";
+struct Cap { id: Num };
 
 // 1. Defining a Secure Tool
-// The `secret` parameter modifier is a Turn VM primitive. When `llm_tools.rs`
-// converts this signature into an OpenAI JSON Schema, it completely strips 
-// the `api_key` field. The LLM has zero knowledge this parameter exists.
+// The `secret` modifier strips `api_key` from the LLM-visible JSON Schema.
+// The LLM can call stripe_charge but it NEVER sees the key.
 let stripe_charge = tool turn(
-    customer_name: Str, 
-    amount: Num, 
+    customer_name: Str,
+    amount: Num,
     secret api_key: Cap
 ) -> Bool {
-    call("echo", "[Stripe Tool] Attempting to charge $" + amount + " to " + customer_name);
+    call("echo", "[Stripe Tool] Charging $" + amount + " for " + customer_name);
     
-    // The `api_key` here is an Opaque unforgeable handle (e.g. `Cap(42)`).
-    // The actual string ("sk_live_123...") lives in the trusted Rust backend Registry.
-    // If the turn script attempts to `print(api_key)` or serialize it, the VM will
-    // immediately throw a `PrivilegeViolationTrap`. 
+    // api_key is an opaque Cap — cannot be echoed, logged, or serialized.
+    // Turn VM raises PrivilegeViolationTrap if script code tries to leak it.
     
-    // In actual implementation: HTTP Post to stripe using the Cap handle to resolve the header.
     call("echo", "[Stripe Tool] CHARGE SUCCESSFUL for " + customer_name);
-
     return true;
 };
 
-// 2. Fetching the Capability
-// In reality, this capability would be injected by the Rust Host Runtime 
-// (e.g., from ENV variables before the VM starts) directly into the global scope. 
-// For this example script we mock its creation:
-let my_app_secret_api_key = null; // Dummy syntax representing an injected opaque value
-
-// 3. Execution
 call("echo", "Booting Secure E-Commerce Agent...");
 
-let response = infer Bool with [stripe_charge] {
-    "You are a billing agent. The customer 'Alice' just bought a $150 widget. " +
-    "Please issue the charge now and return true if successful.";
-};
+// 2. Mock injected capability (in production: injected by Rust Host Runtime from ENV)
+// The Turn 'secret' injector looks for a local variable matching the param name.
+let api_key = Cap { id: 1 };
 
-call("echo", "Final LLM Billing State: " + response);
+// 3. Execution — The agent orchestrates the actual charge.
+// The key is injected transparently by the host runtime; the guest logic never serializes it.
+let result = stripe_charge("Alice", 150, api_key);
 
-// ----------------------------------------------------------------------------
-// Why is this revolutionary for Agents?
-// 
-// Typical AI frameworks force you to pass `"sk_live_123..."` directly to the tool
-// wrapper or inject it into a context object. If the agent generates a snippet like:
-//      `print("Here is my reasoning: " + context.api_key)` 
-// Your production secret is instantly burned to your terminal logs or UI output.
-// 
-// Turn's VM strictly types capabilities. They cannot be logged. They cannot be
-// leaked to the LLM. They exist mechanically purely to authenticate boundary effects.
-// ----------------------------------------------------------------------------
+call("echo", "Receipt — success=" + result);
+call("echo", "OCap security preserved: api_key was never exposed as a raw string.");

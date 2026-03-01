@@ -113,7 +113,6 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
 
     let mut body = json!({
         "messages": messages,
-        "temperature": 0.0,
     });
 
     if req.params.schema != json!({"type": "any"}) {

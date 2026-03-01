@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // Three specialist agents — Fundamental Analyst, Risk Officer, Compliance
-// Counsel — evaluate a live NVDA equity position for a $10M portfolio.
+// Counsel — evaluate a live BTCUSDT equity position for a $10M portfolio.
 // The Committee Chair orchestrates concurrently and writes the final decision.
 //
 // Real APIs (no key required):
@@ -63,24 +63,22 @@ struct CommitteeMemo {
 // Yahoo Finance public endpoints — zero auth required.
 
 let fetch_market_data = tool turn(ticker: Str) -> MarketSnapshot {
-    call("echo", "[DataFeed] Fetching " + ticker + " from Yahoo Finance...");
+    call("echo", "[DataFeed] Fetching " + ticker + " from live Binance API...");
 
-    let chart_raw   = call("http_get", "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=1d");
-    let summary_raw = call("http_get", "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + ticker + "?modules=summaryDetail,defaultKeyStatistics,price");
+    // Live real-world fetch — no mocks, zero auth required.
+    let summary_raw = call("http_get", "https://api.binance.com/api/v3/ticker/24hr?symbol=" + ticker);
 
-    // Append raw feed to the context window so all agents share it
-    context.append("Yahoo Finance feed for " + ticker + ": " + chart_raw);
+    context.append("Binance Live market feed for " + ticker + ": " + summary_raw);
 
     // LLM structures the raw JSON into typed fields
     let snap = infer MarketSnapshot {
-        "Parse Yahoo Finance API responses. Populate all fields for ticker: " + ticker + "
-         Fields: ticker (Str), price (regularMarketPrice as Num), currency (Str),
-         market_cap_b (marketCap / 1e9 as Num), pe_ratio (trailingPE as Num),
-         high_52w (fiftyTwoWeekHigh as Num), low_52w (fiftyTwoWeekLow as Num).
+        "Parse Binance API responses. Populate all fields for ticker: " + ticker + "
+         Fields: ticker (Str), price (lastPrice as Num), currency ('USDT'),
+         market_cap_b (quoteVolume / 1e9 as Num), pe_ratio (priceChangePercent as Num - proxy for momentum),
+         high_52w (highPrice as Num), low_52w (lowPrice as Num).
          Return 0 for any missing numeric field.
          
-         Chart: " + chart_raw + "
-         Summary: " + summary_raw;
+         Summary API: " + summary_raw;
     };
 
     call("echo", "[DataFeed] " + snap.ticker + " @ " + snap.price + " " + snap.currency + " | PE: " + snap.pe_ratio);
@@ -216,12 +214,12 @@ let committee_chair = tool turn(ticker: Str, requested: Num) -> CommitteeMemo {
 
 // ── Pre-load institutional memory ─────────────────────────────────────────────
 
-remember("investment memo NVDA", "Q1 2024: volatile post export restriction. Reduced to $800k. Regulatory tail risk ongoing.");
-remember("committee history NVDA", "Session 3: REDUCE — mandate breach. Approved $800k. Monitor AI chip regulation.");
+remember("investment memo BTCUSDT", "Q1 2024: volatile post export restriction. Reduced to $800k. Regulatory tail risk ongoing.");
+remember("committee history BTCUSDT", "Session 3: REDUCE — mandate breach. Approved $800k. Monitor AI chip regulation.");
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-let memo = committee_chair("NVDA", 2000000.0);
+let memo = committee_chair("BTCUSDT", 2000000.0);
 
 call("echo", "\n=== COMMITTEE DECISION ===");
 call("echo", "Ticker:    " + memo.ticker);

@@ -203,11 +203,18 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a string URL".to_string()),
                 };
 
-                let output = Command::new("curl")
-                    .arg("-s")
-                    .arg("-L")
-                    .arg(url.as_ref())
-                    .output()
+                let mut cmd = Command::new("curl");
+                cmd.arg("-s").arg("-L").arg(url.as_ref());
+
+                // Inject auth and user agent for GitHub API compatibility
+                if url.contains("github.com") {
+                    cmd.arg("-H").arg("User-Agent: Turn Lang Agent");
+                    if let Ok(token) = env::var("GITHUB_TOKEN") {
+                         cmd.arg("-H").arg(format!("Authorization: token {}", token));
+                    }
+                }
+
+                let output = cmd.output()
                     .map_err(|e| format!("Failed to execute curl: {}", e))?;
 
                 if output.status.success() {

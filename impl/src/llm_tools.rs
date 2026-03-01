@@ -302,7 +302,10 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
             // We load the provider once to avoid recompiling Wasm overhead per retry
             let provider = match crate::wasm_host::WasmProvider::new(&provider_file) {
                 Ok(p) => p,
-                Err(_e) => return Ok(Value::Null),
+                Err(e) => {
+                    eprintln!("[Turn VM] WasmProvider load failed: {}", e);
+                    return Ok(Value::Null);
+                },
             };
 
             let mut retries = 0;
@@ -325,7 +328,10 @@ pub fn register_advanced_llm(tools: &mut ToolRegistry) {
 
                 let response_str = match provider.execute_inference(&rpc_request.to_string()) {
                     Ok(res) => res,
-                    Err(_e) => return Ok(Value::Null),
+                    Err(e) => {
+                        eprintln!("[Turn VM] Provider execute_inference failed: {}", e);
+                        return Ok(Value::Null);
+                    },
                 };
 
                 if let Ok(msg) = serde_json::from_str::<JsonValue>(&response_str) {

@@ -198,6 +198,7 @@ impl MacroEngine {
                 bytes
             } else {
                 let remote_url = format!("https://modules.turn-lang.dev/macros/{}_macro.wasm", protocol);
+                println!("Turn Macro Engine: Could not find local macro at {:?} OR {:?}", wasm_cache_path, local_dev_path);
                 println!("Turn Macro Engine: Fetching remote compiler macro from {} ...", remote_url);
                 
                 let client = reqwest::Client::new();

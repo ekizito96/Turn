@@ -1,0 +1,167 @@
+// ============================================================================
+// Turn Language: Autonomous Deep Research Agent
+// ============================================================================
+//
+// A stellar, production-grade Web Search Agent written natively in Turn.
+// This example demonstrates Turn's ability to orchestrate multi-step
+// reasoning natively over live remote HTTP REST endpoints.
+//
+// Workflow:
+// 1. Ingest a broad user research objective.
+// 2. Synthesize the objective into 3 optimized, distinct search queries.
+// 3. Concurrently spawn 3 actors via `spawn linked` to fetch live data
+//    from wikipedia (acting as our public knowledge base wrapper).
+// 4. Harvest the JSON payloads, parsing out the extracted plaintext snippets.
+// 5. Aggregate the concurrent results and stream them into a massive context window.
+// 6. Stochastic execution: Synthesize a final, strictly typed Markdown report.
+// 7. Persist the report utilizing native file system primitives.
+//
+// Powered by: Azure OpenAI (gpt-5.2-chat)
+// Concurrency: Turn Native Actor Model
+// I/O: std/http, std/json, std/fs
+// ============================================================================
+
+use "std/http";
+use "std/json";
+use "std/fs";
+
+// ── Struct Definitions ────────────────────────────────────────────────────────
+
+// The orchestration output returned by the Synthesizer
+struct SearchPlan {
+    rationale: Str,
+    query_1: Str,
+    query_2: Str,
+    query_3: Str
+};
+
+// The structured data output produced by the Author
+struct ResearchReport {
+    title: Str,
+    executive_summary: Str,
+    key_findings: Str, // Bulleted markdown list
+    conclusion: Str,
+    confidence_score: Num // 0-100
+};
+
+// ── Intelligent Tools ─────────────────────────────────────────────────────────
+
+// A robust REST abstraction to hit the Wikipedia API and extract semantic data
+let search_knowledge_base = tool turn(query: Str) -> Str {
+    call("echo", "[Search Agent] Executing remote GET request for: '" + query + "'");
+    
+    // We utilize the public Wikipedia API to simulate a generic Search Engine REST API
+    // without requiring users to inject Serper or Google API keys to run this example.
+    let endpoint = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + query + "&utf8=&format=json";
+    
+    let raw_response = call("http_get", endpoint);
+    let parsed = call("json_parse", raw_response);
+    
+    // We extract the top 3 search result snippets
+    let result_array = parsed["query"]["search"];
+    
+    let aggregated_snippets = "Results for " + query + ":\n";
+    let snip_1_obj = result_array[0];
+    let snip_2_obj = result_array[1];
+    let snip_3_obj = result_array[2];
+    
+    let snip_1 = snip_1_obj["snippet"];
+    let snip_2 = snip_2_obj["snippet"];
+    let snip_3 = snip_3_obj["snippet"];
+    
+    aggregated_snippets = aggregated_snippets + "- " + snip_1 + "\n";
+    aggregated_snippets = aggregated_snippets + "- " + snip_2 + "\n";
+    aggregated_snippets = aggregated_snippets + "- " + snip_3 + "\n";
+    
+    
+    return aggregated_snippets;
+};
+
+// ── Agentic Workflow ──────────────────────────────────────────────────────────
+
+let run_deep_research = tool turn(objective: Str) -> ResearchReport {
+    call("echo", "╔══════════════════════════════════════════════════════════╗");
+    call("echo", " TURN DEEP RESEARCH AGENT INITIALIZED ");
+    call("echo", "╚══════════════════════════════════════════════════════════╝");
+    call("echo", "Objective: " + objective + "\n");
+    
+    // Step 1: Synthesize the Objective into an Actionable Attack Plan
+    call("echo", "[Orchestrator] Deciphering objective and planning search queries...");
+    
+    let plan: SearchPlan = infer SearchPlan {
+        "You are an expert autonomous research planner.
+         The user wants to know about: " + objective + "
+         
+         Break this down into exactly 3 highly specific search terms that will yield 
+         meaningful, factual Wikipedia extracts.
+         CRITICAL REQUIREMENT: The queries MUST BE URL-encoded for an HTTP GET. 
+         DO NOT INCLUDE SPACES. REPLACE ALL SPACES WITH `%20`.
+         Write a 1-sentence analytical rationale for your search angle.";
+    };
+    
+    call("echo", "[Orchestrator] Plan generated:");
+    call("echo", "  1: " + plan.query_1);
+    call("echo", "  2: " + plan.query_2);
+    call("echo", "  3: " + plan.query_3);
+    call("echo", "");
+
+    // Step 2: Concurrent Data Acquisition
+    call("echo", "[Orchestrator] Spawning concurrent browser / network actors...");
+    
+    // Span 3 linked (if they fail, main fails) actors to fetch the web data simultaneously
+    let pid_1 = spawn linked turn() { return search_knowledge_base(plan.query_1); };
+    let pid_2 = spawn linked turn() { return search_knowledge_base(plan.query_2); };
+    let pid_3 = spawn linked turn() { return search_knowledge_base(plan.query_3); };
+    
+    // Wait for all 3 HTTP operations to resolve
+    let data_1 = await receive;
+    let data_2 = await receive;
+    let data_3 = await receive;
+    
+    call("echo", "[Orchestrator] Data acquisition complete. Injecting into Context Window...");
+    
+    // Load the raw scraped data into the LLM context memory buffer
+    let ans_1 = data_1["reason"];
+    context.append(ans_1);
+    let ans_2 = data_2["reason"];
+    context.append(ans_2);
+    let ans_3 = data_3["reason"];
+    context.append(ans_3);
+    
+    call("echo", "[Author] Synthesizing final analytical report...\n");
+    
+    // Step 3: Synthesis & Reporting (bound by a time & token budget constraints)
+    let report: ResearchReport = with budget(tokens: 2000, time: 60) {
+        infer ResearchReport {
+            "You are a stellar analytical agent. Review the raw search snippets currently 
+             in your context window regarding the objective: " + objective + "
+             
+             Synthesize a comprehensive, totally objective Markdown report. 
+             If the search data is contradictory, note the discrepancy.
+             Rate your confidence score from 0-100 based on data quality.";
+        };
+    };
+    
+    // Step 4: System IO Persistence
+    let target_file = "research_report.md";
+    let file_content = "# " + report.title + "\n\n";
+    file_content = file_content + "## Executive Summary\n" + report.executive_summary + "\n\n";
+    file_content = file_content + "## Key Findings\n" + report.key_findings + "\n\n";
+    file_content = file_content + "## Conclusion\n" + report.conclusion + "\n\n";
+    file_content = file_content + "*Agent Confidence Score: " + report.confidence_score + "*";
+                       
+    call("echo", "Writing report to disk: " + target_file);
+    call("fs_write", {"path": target_file, "content": file_content});
+    
+    return report;
+};
+
+// ── Execution Entrypoint ──────────────────────────────────────────────────────
+
+let objective = "The invention, evolution, and future prospects of Solid-State EV Batteries";
+let output = run_deep_research(objective);
+
+call("echo", "\n================ FINAL REPORT ================\n");
+call("echo", output.title);
+call("echo", output.executive_summary);
+call("echo", "\n(Full markdown report saved to disk)");
