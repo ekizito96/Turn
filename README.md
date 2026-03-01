@@ -1,354 +1,79 @@
-<div align="center">
-
 # Turn
 
-**A systems language for agentic computation.**
+**A systems language for agentic computation.** Turn is a compiled language whose primitives encode the physical constraints of agentic software: finite context capacity, stochastic inference, durable state, and suspension/resumption across effects.
 
-Turn's execution model is built from first principles for intelligent agents: bounded context, stochastic inference as a first-class primitive, durable suspension/resumption, and an actor model for multi-agent swarms.
+**Quick Links:**
+- [Vision](VISION.md) — Single source of truth for language vision and roadmap
+- [Whitepaper](WHITEPAPER.md) — Publishable model and semantics overview
+- [Spec](spec/) — Formal grammar and runtime model
 
-[![v0.5.0-alpha](https://img.shields.io/badge/version-v0.5.0--alpha-orange)](https://github.com/ekizito96/Turn/releases)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Built in Rust](https://img.shields.io/badge/built_in-Rust-orange?logo=rust)](https://www.rust-lang.org/)
+## Status
 
-[**Docs**](https://turn-lang.dev/docs) · [**Why Turn**](https://turn-lang.dev/docs/why-turn) · [**The Book**](https://turn-lang.dev/docs/installation) · [**Providers**](PROVIDERS.md)
+**Spec locked for v1 minimal core.** Design mandate and primitives are fixed. **Implementation:** Rust bytecode VM from day one (see [spec/07-implementation-strategy.md](spec/07-implementation-strategy.md)). Not Python/TypeScript—those languages' overhead contradicts Turn's goals (fast, cost-efficient).
 
-</div>
+## Design mandate
 
----
+Mission, design goals, and first-principles justification: [spec/00-design-mandate.md](spec/00-design-mandate.md).
 
-## In 60 Seconds
+High-level design and rationale: [spec/00-design-mandate.md](spec/00-design-mandate.md)
 
-Install Turn and get a real LLM inference running locally without relying on external frameworks, prompt templates, or boilerplate code.
-
-```bash
-# Install
-curl -fsSL https://turn-lang.dev/install.sh | bash
-
-# Configure your LLM provider
-export TURN_INFER_PROVIDER=~/.turn/providers/turn_provider_openai.wasm
-export OPENAI_API_KEY=sk-...
-
-# Write your first Turn program
-cat > sentiment.tn << 'EOF'
-struct Sentiment {
-    score: Num,
-    label: Str,
-    reasoning: Str
-};
-
-let review = "The new MacBook keyboard is finally good again.";
-let result = infer Sentiment { review; };
-
-call("echo", "Score:  " + result.score);
-call("echo", "Label:  " + result.label);
-
-return result;
-EOF
-
-# Run it
-turn run sentiment.tn
-```
-
-```json
-{
-  "score": 0.88,
-  "label": "positive",
-  "reasoning": "Positive sentiment about keyboard improvement."
-}
-```
-
-That's `infer`: LLM inference with compile-time schema guarantees backed by a sandboxed WebAssembly driver. No HTTP calls in your code and no JSON parsing. A structured type, straight from the model.
-
----
-
-## The Problem with Agent Frameworks
-
-Every major "agentic" framework today is built on a fundamental lie: that you can wrap a loop around an LLM and call the result an "agent."
-
-```python
-# This is what every framework reduces to
-while True:
-    response = llm.chat(context)         # context: who manages this?
-    if "DONE" in response: break         # brittle string matching
-    context.append(response)             # unbounded list
-    tool_result = execute(response)      # untyped, unsafe
-    context.append(tool_result)          # still unbounded
-```
-
-The problems are structural:
-- **Context overflows silently.** You append to a list. The model gets confused. You don't know why.
-- **LLM outputs are untyped.** You parse JSON from a string. You hope the schema matched.
-- **State is smeared everywhere.** Between the loop, the DB, the cache, the API response.
-- **There is no language-level concept of a "turn."** The mental model doesn't match the implementation.
-
-Turn solves these at the language level not with a better library, but with a completely different execution model.
-
----
-
-## The Turn Model
-
-Turn programs execute as **stateful processes**, not loops. Every execution unit is a *turn*, which serves as an atomic, durable unit of agentic work with three built-in resources:
-
-| Resource | What it is | Turn primitive |
-|---|---|---|
-| **Environment** | Lexically-scoped variable bindings | `let`, `return` |
-| **Context** | Token-budgeted window of working knowledge | `context.append()` |
-| **Memory** | Persistent semantic key-value store with HNSW vectors | `remember()` / `recall()` |
-
-When the agent needs to call a tool or run inference, the VM **suspends**, serializing its entire state to durable storage. It then **resumes** with the result ensuring no threads are blocked and no state is lost.
-
-```
-Turn Agent
-  │
-  ├── env:     { score → 0.88, label → "positive" }
-  ├── context: [ "Analyzing sentiment...", "Score: 0.88" ]    ← Token-bounded
-  ├── memory:  { "last_review" → "The new MacBook..." }       ← Persisted
-  └── mailbox: []                                              ← Actor inbox
-```
-
----
-
-## Key Primitives
-
-### `infer` : Cognitive Type Safety
-
-```turn
-struct Sentiment {
-    score: Num,
-    label: Str
-};
-
-// The VM generates a JSON Schema from the struct at compile time.
-// The LLM response is validated against it. You get a typed value.
-let result = infer Sentiment { "I love this language!"; };
-
-// result.score is a Num. result.label is a Str.
-// Guaranteed. No parsing needed.
-if result.score > 0.8 {
-    call("echo", "Positive: " + result.label);
-}
-```
-
-### `remember` / `recall` : Semantic RAM
-
-```turn
-// Persist any value to the agent's semantic memory
-remember("preferred_style", "concise bullet points");
-
-// Later, even across process restarts, retrieve by semantic similarity
-let style = recall("preferred_style");
-```
-
-### `spawn` / `send` / `receive` : Actor Model
-
-```turn
-// Spawn a child agent process (returns a PID)
-let analyst = spawn turn() {
-    let task = await receive;
-    let result = infer Analysis { task; };
-    return result;
-};
-
-// Send work to it
-send analyst, "Analyze Q4 revenue trends";
-
-// Each agent: isolated memory, isolated context, isolated mailbox
-```
-
-### `suspend` : Durable Checkpoints
-
-```turn
-// Serialize the full VM state to disk. Safely resume after restart.
-call("echo", "Waiting for human approval...");
-let input = suspend for Any "Please approve this action";
-// Execution picks up here after the operator resumes the agent
-call("echo", "Approved. Continuing...");
-```
-
----
-
-## Architecture: Wasm-Sandboxed Inference Providers
-
-Turn's `infer` primitive does **not** make HTTP calls directly. It delegates to a **WebAssembly plugin** loaded in a strict sandbox:
-
-```
-Turn VM (Host)
-  │  LLM Request
-  ▼
-Wasm Driver (e.g., turn_provider_openai.wasm)
-  │  → HTTP Config (URL, headers with $env:OPENAI_API_KEY template)
-  ▼
-Turn VM (Host)
-  │  Substitutes real env vars, executes the HTTPS call
-  ▼
-Wasm Driver
-  │  → Parses the HTTP response → structured Turn Value
-  ▼
-Turn VM (Host)
-```
-
-**Why this matters:**
-- The `.wasm` driver is a 2MB file that runs on any OS without a native binary distribution
-- The driver **literally cannot** access your filesystem, network, or environment directly. It can only transform JSON strings
-- API keys are injected by the host, never seen by the plugin code
-
-See [PROVIDERS.md](PROVIDERS.md) for the full protocol spec and how to write your own driver.
-
----
-
-## Official Providers
-
-| Provider | Wasm Driver | Required Env Vars |
-|---|---|---|
-| Standard OpenAI | `turn_provider_openai.wasm` | `OPENAI_API_KEY`, `OPENAI_MODEL` |
-| Azure OpenAI | `turn_provider_azure_openai.wasm` | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT` |
-| Azure Anthropic | `turn_provider_azure_anthropic.wasm` | `AZURE_ANTHROPIC_ENDPOINT`, `AZURE_ANTHROPIC_API_KEY` |
-
----
-
-## Ecosystem Bridges
-
-Turn connects to the existing ecosystem through three native primitives. None of them require an SDK, a package install, or a runtime dependency.
-
-### Compile-Time Schema Adapters
-
-```turn
-// GraphQL: fetches introspection at compile time, generates native Turn tools
-let gh = use schema::graphql("https://api.github.com/graphql");
-
-// Swagger/REST: generates a tool closure per API path and operation
-let stripe = use schema::swagger("https://api.stripe.com/openapi.json");
-
-// gRPC: parses .proto text into Turn structs and RPC closures
-let billing = use schema::grpc("proto://billing.proto");
-
-// FHIR: FHIR Conformance into healthcare resource structs and CRUD tools
-let ehr = use schema::fhir("https://fhir.example.com/metadata");
-```
-
-At **runtime** these are plain Turn closures. The LLM calls them with `infer with [tools]`. The schema adapter runs in a `wasm32-unknown-unknown` Wasmtime sandbox. It cannot touch your filesystem, network, or secrets.
-
-### `mcp()`: Native MCP Bridge
-
-```turn
-// Spawns a stdio JSON-RPC MCP server and returns McpServer { pid, status }.
-let legacy = mcp("stdio://npx @modelcontextprotocol/server-stripe");
-```
-
-`mcp()` is a migration bridge. Once you rewrite the server logic in Turn, replace the `mcp()` call with `use schema::openapi(...)` and the subprocess overhead disappears.
-
-### `sys_exec`: CLI Domestication
-
-```turn
-// Strictly typed. No shell. Injection is structurally impossible.
-let out = call("sys_exec", {
-    "bin":  "python3",
-    "arg1": "analyze.py",
-    "arg2": user_input   // Str, passed as a positional arg, not a shell string
-});
-```
-
-The VM calls `python3 analyze.py <user_input>` directly. Shell metacharacters (`&&`, `|`, `` ` ``) are structurally impossible because the LLM never constructs a command string.
-
----
-
-## Standard Library
-
-| Module | Functions |
-|---|---|
-| `std/fs` | `read`, `write`, `exists` |
-| `std/http` | `http_get`, `http_post` |
-| `std/math` | `math.max`, `math.min`, `math.floor`, `math.sqrt` |
-| `std/json` | `json.parse`, `json.stringify` |
-| `std/time` | `time.now` |
-
----
-
-## Project Layout
+## Project layout
 
 ```
 Turn/
-├── README.md
-├── PROVIDERS.md              ← Wasm driver protocol spec
-├── ARCHITECTURE.md           ← Internal codebase guide
-├── install.sh                ← One-line installer
-├── docs/                     ← Developer docs
-│   ├── 05-ecosystem.md       ← Ecosystem bridges guide
-├── spec/                     ← Language specification
-│   ├── 11-ecosystem-bridges.md ← Formal spec for adapters, mcp(), sys_exec
-├── impl/                     ← Rust bytecode VM
-│   ├── macros/               ← Wasm schema adapter crates
-│   │   ├── graphql_adapter/  ← GraphQL → Turn AST Wasm macro
-│   │   ├── swagger_adapter/  ← Swagger v2 → Turn AST Wasm macro
-│   │   ├── grpc_adapter/     ← gRPC/Protobuf → Turn AST Wasm macro
-│   │   └── fhir_adapter/     ← FHIR → Turn AST Wasm macro
-│   └── src/
-│       ├── lexer.rs          ← Tokenizer
-│       ├── parser.rs         ← Recursive-descent parser
-│       ├── compiler.rs       ← AST → Bytecode
-│       ├── vm.rs             ← Async executor (Tokio)
-│       ├── wasm_host.rs      ← Wasmtime sandbox + HTTP delegation
-│       ├── llm_tools.rs      ← infer instruction handler
-│       ├── runtime.rs        ← HNSW semantic memory + WAL
-│       ├── runner.rs         ← Host: tool dispatch, agent lifecycle
-│       ├── tools.rs          ← ToolRegistry (echo, sys_exec, fs_*, ...)
-│       └── server.rs         ← HTTP server mode
-├── providers/                ← Official Wasm inference drivers
-│   ├── turn-provider-openai/
-│   ├── turn-provider-azure-openai/
-│   ├── turn-provider-azure-anthropic/
-│   └── turn-provider-aws-anthropic/
-└── editors/
-    └── vscode/               ← VS Code extension
+├── README.md                    # This file
+├── VISION.md                    # Vision and roadmap (public)
+├── WHITEPAPER.md                # Publishable model + semantics overview
+├── spec/                        # Language specification (locked for v1)
+│   ├── 00-design-mandate.md     # Mission and design goals
+│   ├── 01-minimal-core.md       # Turn, context, memory, tool primitives
+│   ├── 02-grammar.md            # BNF, lexer, operators
+│   ├── 03-runtime-model.md      # Configuration, transitions, semantics
+│   ├── 04-hello-turn.md         # First program example
+│   └── 07-implementation-strategy.md  # Rust VM architecture
+└── impl/                        # Rust bytecode VM implementation
+    ├── src/                     # Lexer, parser, compiler, VM, runtime
+    └── tests/                   # Integration and suspension tests
 ```
 
----
+**New to Turn?** Start with [VISION.md](VISION.md) then read the [spec/](spec/) for formal semantics.
 
-## Building from Source
+## Running
 
 ```bash
-# Prerequisites: Rust (https://rustup.rs/)
-git clone https://github.com/ekizito96/Turn.git
-cd Turn/impl
-cargo build --release
-
-# Run a script
-./target/release/turn run examples/struct_infer.tn
-
-# Build a specific Wasm provider
-cd ../providers/turn-provider-openai
-cargo build --target wasm32-unknown-unknown --release
-
-# Build a schema adapter Wasm macro
-cd ../impl/macros/graphql_adapter
-cargo build --target wasm32-unknown-unknown --release
-
-# Start the LSP (for VS Code)
-./target/release/turn lsp
+cd impl
+./run.sh test      # run tests
+./run.sh hello     # run hello_turn (prints "Hello")
+./run.sh examples  # run all examples
+./run.sh build     # build release binary
 ```
 
----
+Or directly:
+```bash
+cd impl && cargo run -- run ../examples/hello_turn.tn
+```
 
-## Reading Order
+**Features (v0.4.0):**
+- **Standard Library**: Built-in modules `std/fs`, `std/http`, `std/math`, `std/json`, `std/time`, `std/regex`.
+- **Native Intelligence**: `infer Num { "Prompt" }` connected to real LLMs (OpenAI, Anthropic, Gemini, etc.).
+- **Probabilistic Logic**: `confidence` operator and uncertainty propagation.
+- **Concurrency**: Actor model with `spawn`, `send`, `receive`.
+- **Vector Embeddings**: `vec[1,2,3]` and `~>` similarity operator.
+- **Language Core**: Multi-arg methods (`math.max(10, 20)`), object-shaped syntax, comparison operators.
+- **Structured Data**: Typed Generics `List<T>`, `Map<T>`.
+- **Language Server**: `turn lsp` included.
+- **Orthogonal Persistence**: `suspend;` primitive for durable checkpoint boundaries.
 
-| Start here | Then |
-|---|---|
-| [Why Turn](https://turn-lang.dev/docs/why-turn) | [Installation](https://turn-lang.dev/docs/installation) |
-| [The `infer` Primitive](https://turn-lang.dev/docs/inference) | [Inference Providers](https://turn-lang.dev/docs/providers) |
-| [Memory & Context](https://turn-lang.dev/docs/memory) | [The Actor Model](https://turn-lang.dev/docs/concurrency) |
-| [Ecosystem Bridges](https://turn-lang.dev/docs/ecosystem) | [ARCHITECTURE.md](ARCHITECTURE.md) |
+**Legacy Features (v0.2.0):**
+- **Persistence**: Automatic state saving (`.turn_store`).
+- **Server Mode**: Built-in `turn serve` command.
+- **Error Handling**: `try/catch/throw`.
 
----
+**First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
-## License
+## Reading order
 
-Apache 2.0. See [LICENSE](LICENSE).
-
----
-
-<div align="center">
-
-**Created by [Muyukani Ephraim Kizito](https://github.com/ekizito96)**  
-Founder, [AI Dojo](https://ai-dojo.io) · [Prescott Data](https://prescottdata.io)
-
-</div>
+1. `VISION.md`
+2. `WHITEPAPER.md`
+3. `spec/00-design-mandate.md` → `spec/03-runtime-model.md`
+4. `impl/` (reference implementation)

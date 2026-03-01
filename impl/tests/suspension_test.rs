@@ -1,34 +1,52 @@
-use turn::value::Value;
-use turn::store::FileStore;
-use turn::tools::ToolRegistry;
-use turn::runner::Runner;
+use turn::{compiler, lexer, parser, Value, Vm, VmResult};
 
-#[tokio::test]
-async fn test_typed_hitl_suspension_cycle() {
+#[test]
+fn test_manual_suspension_resume_cycle() {
     let source = r#"
-    let human_feedback = suspend for Str "Please review PR #42";
-    return human_feedback;
+    turn {
+        let x = call("my_tool", "ping");
+        return x;
+    }
     "#;
 
-    let store = FileStore::new(".turn_test_store");
-    let tools = ToolRegistry::new();
-    let mut runner = Runner::new(store, tools);
+    // 1. Compile
+    let tokens = lexer::Lexer::new(source).tokenize().unwrap();
+    let program = parser::Parser::new(tokens).parse().unwrap();
+    let mut compiler = compiler::Compiler::new();
+    let code = compiler.compile(&program);
 
-    // 1. Initial run should halt completely at `suspend` and return Ok(Value::Null)
-    let initial_res = runner.run("test_process", source, None).await.unwrap();
-    assert_eq!(initial_res, Value::Null);
+    // 2. Start VM
+    let mut vm = Vm::new(&code);
 
-    // 2. Validate strict payload rejection from the host
-    let bad_json = serde_json::json!({
-        "status": "APPROVED"
-    }); // This is a Map, but the AST strictly expects a Str!
-    
-    let resume_attempt: Result<Value, anyhow::Error> = runner.resume("test_process", bad_json).await;
-    assert!(resume_attempt.is_err(), "VM must strictly reject malformed JSON");
+    // 4. Run -> Suspend
+    let continuation = match vm.run() {
+        VmResult::Suspended {
+            tool_name,
+            arg,
+            continuation,
+        } => {
+            assert_eq!(tool_name, "my_tool");
+            assert_eq!(arg, Value::Str("ping".to_string()));
+            println!("Suspended on tool call. Saving state...");
+            continuation
+        }
+        _ => panic!("Expected suspension, got completion"),
+    };
 
-    // 3. Inject computationally sound struct and resume
-    let valid_json = serde_json::json!("APPROVED_BY_HUMAN");
+    // 5. Simulate "Long Pause" (e.g. human approval or slow API)
+    // The 'continuation' struct holds the entire frozen state of the agent.
 
-    let final_res = runner.resume("test_process", valid_json).await.unwrap();
-    assert_eq!(final_res, Value::Str(std::sync::Arc::new("APPROVED_BY_HUMAN".to_string())));
+    // 6. Resume with Result "pong"
+    println!("Resuming with result 'pong'...");
+    let mut resumed_vm =
+        Vm::resume_with_result(continuation, Value::Str("pong".to_string()));
+
+    // 7. Run -> Complete
+    match resumed_vm.run() {
+        VmResult::Complete(val) => {
+            assert_eq!(val, Value::Str("pong".to_string()));
+            println!("Completed successfully.");
+        }
+        _ => panic!("Expected completion, got suspension"),
+    }
 }

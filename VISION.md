@@ -2,8 +2,8 @@
 
 > "We are not building a framework. We are building a physics engine for cognition."
 
-**Version:** 0.5.0 (Alpha)  
-**Date:** February 23, 2026  
+**Version:** 0.4.0 (Alpha)  
+**Date:** February 18, 2026  
 **Status:** Alpha — Cognitive Type Safety Implemented
 
 ---
@@ -142,13 +142,6 @@ Turn introduces **Confidence** as a language primitive.
 *   **Opcode**: `confidence(val)`.
 *   **Mechanism**: Every value carries a provenance and confidence score (0.0–1.0). The Runtime tracks uncertainty propagation through the call stack.
 *   **Result**: Logic like `if confidence(plan) < 0.8 { ask_human() }` becomes trivial.
-
-### V. Provider Agnosticism (Zero Vendor Lock-in)
-Programming languages must outlive physical hardware and APIs. Holding Turn code hostage to OpenAI or Anthropic API deprecations is an architectural failure.
-Turn enforces a strict **Capability Wall** between the AST and the Network.
-*   **Mechanism**: The Turn language (`infer Struct {}`) does not compile down to HTTP requests. It compiles down to a generic bytecode trap (`Instr::Infer`). 
-*   **The OS Router**: The physical Host running the VM acts as an Operating System processing system calls. It maps the generic `infer` trap into provider-specific REST geometry (JSON schemas, Anthropic XML).
-*   **Result**: When foundation models change APIs, Turn scripts remain completely untouched. You write an Agent once, and the Host runner swaps the engine natively.
 
 ---
 

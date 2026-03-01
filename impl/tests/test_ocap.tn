@@ -1,6 +1,0 @@
-// This script attempts to concatenate an opaque host capability into a String.
-// In traditional frameworks, this would expose the API Key.
-// In the Turn VM physics, this should immediately encounter a PrivilegeViolation trap.
-
-let leak = AZURE_OPENAI_API_KEY + " test";
-return leak;

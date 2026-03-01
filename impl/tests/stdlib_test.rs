@@ -10,8 +10,8 @@ fn analyze(source: &str) -> Analysis {
     analysis
 }
 
-#[tokio::test]
-async fn test_stdlib_return_types() {
+#[test]
+fn test_stdlib_return_types() {
     let source = r#"
     let content: Str = call("fs_read", "file.txt");
     let json: Any = call("json_parse", content);
@@ -20,8 +20,8 @@ async fn test_stdlib_return_types() {
     assert!(analysis.diagnostics.is_empty());
 }
 
-#[tokio::test]
-async fn test_stdlib_type_mismatch() {
+#[test]
+fn test_stdlib_type_mismatch() {
     let source = r#"
     let content: Num = call("fs_read", "file.txt");
     "#;
@@ -33,8 +33,8 @@ async fn test_stdlib_type_mismatch() {
     assert!(msg.contains("got Str"));
 }
 
-#[tokio::test]
-async fn test_single_param_function_inference() {
+#[test]
+fn test_single_param_function_inference() {
     let source = r#"
     let identity = turn(x: Num) -> Num {
         return x;
@@ -47,8 +47,8 @@ async fn test_single_param_function_inference() {
     assert!(analysis.diagnostics.is_empty());
 }
 
-#[tokio::test]
-async fn test_single_param_function_mismatch() {
+#[test]
+fn test_single_param_function_mismatch() {
     let source = r#"
     let identity = turn(x: Num) -> Num {
         return x;

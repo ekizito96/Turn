@@ -1,7 +1,7 @@
 use turn::{run_with_tools, tools, Value};
 
-#[tokio::test]
-async fn test_json_parse() {
+#[test]
+fn test_json_parse() {
     let source = r#"
     turn {
         let s = "{\"a\": 1, \"b\": [2, 3]}";
@@ -9,10 +9,10 @@ async fn test_json_parse() {
         return x;
     }
     "#;
-
+    
     let tools = tools::ToolRegistry::new();
     let result = run_with_tools(source, &tools).unwrap();
-
+    
     if let Value::Map(m) = result {
         assert_eq!(m.get("a"), Some(&Value::Num(1.0)));
         if let Some(Value::List(l)) = m.get("b") {
@@ -26,8 +26,8 @@ async fn test_json_parse() {
     }
 }
 
-#[tokio::test]
-async fn test_json_stringify() {
+#[test]
+fn test_json_stringify() {
     let source = r#"
     turn {
         let x = { "a": 1 };
@@ -35,10 +35,10 @@ async fn test_json_stringify() {
         return s;
     }
     "#;
-
+    
     let tools = tools::ToolRegistry::new();
     let result = run_with_tools(source, &tools).unwrap();
-
+    
     if let Value::Str(s) = result {
         // JSON stringify order is not guaranteed unless we use preserve_order feature or check contains
         assert!(s.contains("\"a\":1") || s.contains("\"a\": 1"));

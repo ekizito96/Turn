@@ -40,4 +40,4 @@ This simplifies distribution. The VSCode extension simply spawns `turn lsp` and 
 ## 4. Future Roadmap
 *   **Go to Definition:** Jump to where a variable was `let` defined.
 *   **Hover:** Show documentation for Standard Library tools.
-*   **Module Resolution:** Resolve `use "./module.tn"` and provide completion for exported keys.
+*   **Module Resolution:** Resolve `use "./module.turn"` and provide completion for exported keys.

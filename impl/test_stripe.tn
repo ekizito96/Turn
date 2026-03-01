@@ -1,1 +1,0 @@
-let stripe = use schema::openapi("https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json");

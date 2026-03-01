@@ -26,14 +26,9 @@ let write = turn(path: Str, content: Str) -> Void {
     return null;
 };
 
-let read_blob = turn(path: Str) -> Blob {
-    return call("fs_read_blob", path);
-};
-
 return {
     "read": read,
-    "write": write,
-    "read_blob": read_blob
+    "write": write
 };
 "#;
 

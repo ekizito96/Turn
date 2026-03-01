@@ -10,13 +10,13 @@ fn analyze(source: &str) -> Analysis {
     analysis
 }
 
-#[tokio::test]
-async fn test_type_check_let() {
+#[test]
+fn test_type_check_let() {
     let source = r#"
     let x: Num = "hello";
     "#;
     let analysis = analyze(source);
-
+    
     assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));
@@ -24,15 +24,15 @@ async fn test_type_check_let() {
     assert!(msg.contains("got Str"));
 }
 
-#[tokio::test]
-async fn test_type_check_return() {
+#[test]
+fn test_type_check_return() {
     let source = r#"
     let f = turn() -> Num {
         return "not a number";
     };
     "#;
     let analysis = analyze(source);
-
+    
     assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));
@@ -40,14 +40,14 @@ async fn test_type_check_return() {
     assert!(msg.contains("got Str"));
 }
 
-#[tokio::test]
-async fn test_type_inference_propagation() {
+#[test]
+fn test_type_inference_propagation() {
     let source = r#"
     let x = 10;
     let y: Str = x;
     "#;
     let analysis = analyze(source);
-
+    
     assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));

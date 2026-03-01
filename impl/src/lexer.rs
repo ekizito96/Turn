@@ -7,46 +7,29 @@ use std::str::Chars;
 pub enum Token {
     // Keywords
     Spawn,
-    SpawnRemote,
+    SpawnLink,
     Send,
     Receive,
-    Harvest,
-    Linked,
-    Monitored,
     Vec,
     Turn,
     Let,
-    Suspend,    // NEW
+    Suspend, // NEW
     Confidence, // NEW
-    For,        // NEW
     Use,
     Context,
     Try,
     Catch,
     Throw,
     Append,
+    System,
     Remember,
     Recall,
     Call,
     Impl,
     Type, // 'type' keyword for aliases
     Return,
-    Infer,  // NEW
-    With,   // NEW
-    Budget, // NEW
-    Tokens, // NEW
-    Time,   // NEW
-    Compress, // NEW Pillar 4
-    Forget,   // NEW Pillar 4
-    Persist,  // NEW Pillar 5
-    Secret, // NEW
-    Tool,   // NEW
-    Via,    // NEW Pillar 4
-    Await,  // NEW Pillar 3.5
+    Infer, // NEW
     Struct,
-    Match,
-    Ok,
-    Err,
     If,
     Else,
     While,
@@ -55,11 +38,6 @@ pub enum Token {
     True,
     False,
     Null,
-    UseWasm,
-    Mcp,    // NEW Phase 6c
-    Test,   // NEW Phase 5
-    Mock,   // NEW Phase 5
-    Trace,  // NEW Phase 5
 
     // Types
     TypeNum,
@@ -71,9 +49,6 @@ pub enum Token {
     TypeVoid,
     TypePid,
     TypeVec,
-    TypeBlob,
-    TypeCap,
-    TypeResult,
 
     // Operators
     Plus,
@@ -81,8 +56,7 @@ pub enum Token {
     Star,
     Slash,
     Similarity, // ~>
-    Tilde,      // ~
-    Eq,         // = (assignment)
+    Eq, // = (assignment)
     EqEq,
     Ne,
     Less,
@@ -90,7 +64,7 @@ pub enum Token {
     LessEq,
     GreaterEq,
     Arrow, // ->
-    Bang,  // !
+    Bang, // !
 
     // Literals
     Num(f64),
@@ -100,7 +74,6 @@ pub enum Token {
     Id(String),
 
     // Punctuation
-    Hash, // # NEW Phase 5
     LBrace,
     RBrace,
     LBracket,
@@ -109,7 +82,6 @@ pub enum Token {
     RParen,
     Comma,
     Colon,
-    DoubleColon, // ::
     Semicolon,
     Dot,
 
@@ -123,7 +95,7 @@ pub struct SpannedToken {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -131,49 +103,29 @@ pub struct Span {
 
 const KEYWORDS: &[(&str, Token)] = &[
     ("spawn", Token::Spawn),
+    ("spawn_link", Token::SpawnLink),
     ("send", Token::Send),
     ("receive", Token::Receive),
-    ("harvest", Token::Harvest),
-    ("linked", Token::Linked),
-    ("monitored", Token::Monitored),
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
-    ("suspend", Token::Suspend),       // NEW
+    ("suspend", Token::Suspend), // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
-    ("use_wasm", Token::UseWasm),
-    ("mcp", Token::Mcp),
-    ("match", Token::Match),
-    ("ok", Token::Ok),
-    ("err", Token::Err),
+    ("try", Token::Try),
+    ("catch", Token::Catch),
+    ("throw", Token::Throw),
     ("context", Token::Context),
     ("append", Token::Append),
+    ("system", Token::System),
     ("remember", Token::Remember),
     ("recall", Token::Recall),
     ("call", Token::Call),
     ("return", Token::Return),
-    ("infer", Token::Infer),   // NEW
-    ("with", Token::With),         // NEW
-    ("budget", Token::Budget),     // NEW
-    ("tokens", Token::Tokens),     // NEW
-    ("time", Token::Time),         // NEW
-    ("persist", Token::Persist),   // NEW Pillar 5
-    ("secret", Token::Secret),     // NEW
-    ("tool", Token::Tool),         // NEW
-    ("spawn", Token::Spawn),
-    ("spawn_remote", Token::SpawnRemote),
-    ("send", Token::Send),
-    ("receive", Token::Receive),
-    ("harvest", Token::Harvest),
-    ("linked", Token::Linked),
-    ("monitored", Token::Monitored),
+    ("infer", Token::Infer), // NEW
     ("struct", Token::Struct),
-    ("for", Token::For),
     ("impl", Token::Impl),
     ("type", Token::Type),
-    ("via", Token::Via),
-    ("await", Token::Await),
     ("if", Token::If),
     ("else", Token::Else),
     ("while", Token::While),
@@ -182,9 +134,6 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("true", Token::True),
     ("false", Token::False),
     ("null", Token::Null),
-    ("test", Token::Test), // NEW Phase 5
-    ("mock", Token::Mock), // NEW Phase 5
-    ("trace", Token::Trace), // NEW Phase 5
     ("Num", Token::TypeNum),
     ("Str", Token::TypeStr),
     ("Bool", Token::TypeBool),
@@ -194,7 +143,6 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("Void", Token::TypeVoid),
     ("Pid", Token::TypePid),
     ("Vec", Token::TypeVec),
-    ("Blob", Token::TypeBlob),
 ];
 
 pub struct Lexer<'a> {
@@ -331,7 +279,7 @@ impl<'a> Lexer<'a> {
                     self.next();
                     Token::Similarity
                 } else {
-                    Token::Tilde
+                    return Err(LexError::UnexpectedChar('~', start));
                 }
             }
             Some('/') => {
@@ -394,10 +342,6 @@ impl<'a> Lexer<'a> {
                     Token::Bang
                 }
             }
-            Some('#') => {
-                self.next();
-                Token::Hash
-            }
             Some('{') => {
                 self.next();
                 Token::LBrace
@@ -428,12 +372,7 @@ impl<'a> Lexer<'a> {
             }
             Some(':') => {
                 self.next();
-                if self.peek() == Some(':') {
-                    self.next();
-                    Token::DoubleColon
-                } else {
-                    Token::Colon
-                }
+                Token::Colon
             }
             Some(';') => {
                 self.next();

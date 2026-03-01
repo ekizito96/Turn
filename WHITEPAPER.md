@@ -1,7 +1,7 @@
 # Turn: A Systems Language for Agentic Computation
 
-**Version:** 0.5.0 (Alpha)  
-**Date:** February 23, 2026  
+**Version:** 0.4.0 (Alpha)  
+**Date:** February 18, 2026  
 **Authors:** Muyukani Ephraim Kizito et al.
 
 ---
@@ -139,19 +139,7 @@ The reference implementation compiles Turn source to bytecode and executes it on
 
 Lexer → Parser → AST → Compiler → Bytecode → VM
 
-### 5.2 The Provider-Agnostic Boundary (Solving Vendor Lock-In)
-
-A critical architectural anti-pattern in agentic engineering is binding the application lifecycle to a specific foundation model provider (e.g., OpenAI, Anthropic). If a provider changes their API endpoint, deprecates a model, or alters their JSON Schema specification, traditional agent architectures break completely.
-
-Turn explicitly prevents this by formalizing a **Language vs. Provider Boundary**:
-- **The Turn AST** has zero knowledge of "OpenAI", "Tokens", or "REST endpoints". The language only understands the `infer` keyword, cognitive types (`Struct`, `List`), and `confidence`.
-- **The Execution Layer (VM)** evaluates `infer` by emitting a generic `VmEvent::Suspend` Host Trap. It requests a capability fulfillment from the physical Host running the VM.
-- **The Host Runtime** (e.g., `runner.rs` in Rust) intercepts the trap, maps Turn's canonical AST Type into the provider's specific proprietary format (e.g., OpenAI's structured outputs or Anthropic's tool use XML), executes the physical HTTP/gRPC request, and casts the payload back into a generic Turn `Value::Struct`.
-
-This guarantees **Absolute Provider Agnosticism**. 
-If a new LLM provider emerges tomorrow, or an old one introduces breaking API changes, **not a single line of Turn script needs to be rewritten**. Only the Rust Host executing the VM needs its HTTP adapter updated, keeping the ecosystem completely decoupled from vendor volatility.
-
-### 5.3 Durable Heap
+### 5.2 Durable Heap
 
 The runtime uses a durable state store for continuations and long-lived state. This enables:
 
@@ -186,30 +174,9 @@ Turn is intended to be evaluated on:
 
 ---
 
-## 8. Implementation Status (v0.5.0-alpha)
+## 8. Implementation Status (Alpha)
 
-The reference implementation is a production-grade Rust bytecode VM. The following subsystems are fully operational in v0.5.0-alpha:
-
-| Subsystem | Status | Notes |
-|---|---|---|
-| Lexer, Parser, AST | ✅ Complete | Recursive-descent, full Turn grammar |
-| Bytecode Compiler | ✅ Complete | AST → typed instruction set |
-| Async VM Executor | ✅ Complete | `tokio`-based work-stealing scheduler |
-| `infer` + Cognitive Type Safety | ✅ Complete | Provider-agnostic host trap; schema-validated |
-| `suspend` / WAL Persistence | ✅ Complete | Write-ahead log; cross-restart replay |
-| Actor Model (`spawn`, `send`, `receive`) | ✅ Complete | Isolated process mailboxes |
-| Supervisor Trees (`link`, `monitor`) | ✅ Complete | Erlang-style fault propagation |
-| HNSW Semantic Memory | ✅ Complete | `O(log N)` vector retrieval with Ebbinghaus decay GC |
-| Structural Sharing (`Arc<T>`) | ✅ Complete | Zero-copy message passing |
-| Object-Capability Security | ✅ Complete | `Value::Cap` with `PrivilegeViolation` traps |
-| Generic Type Boundaries (`List<T>`) | ✅ Complete | AST + semantic analyzer + schema generator |
-| Monadic Error Routing (`Result<T,E>`) | ✅ Complete | Replaces `try/catch` for stochastic paths |
-| Confidence Execution Traps | ✅ Complete | Strictness threshold guards `if`/arithmetic |
-| Distributed Swarms (`spawn_remote`) | ✅ Complete | TCP/gRPC Switchboard for cross-node agents |
-| Standard Library | ✅ Complete | `std/fs`, `std/http`, `std/math`, `std/json`, `std/time`, `std/regex` |
-| Language Server (LSP) | ✅ Complete | Hover, go-to-definition, live diagnostics |
-| VS Code Extension | ✅ Complete | Syntax highlighting + LSP client |
-| Provider Adapters | ✅ Complete | OpenAI, Anthropic, Gemini, Grok, Ollama, vLLM |
+Turn includes a reference VM and tool/effect suspension mechanism. The implementation status for specific primitives and policies is tracked in `VISION.md` and `spec/`.
 
 ---
 

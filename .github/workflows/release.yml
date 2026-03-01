@@ -2,25 +2,12 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
-
-permissions:
-  contents: write
+    tags:
+      - 'v*'
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test
-        working-directory: impl
-
   build:
-    name: Build (${{ matrix.target_name }})
-    needs: test
+    name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,21 +15,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            target_name: linux-amd64
-            binary: turn
+            artifact: turn
           - os: macos-latest
             target: x86_64-apple-darwin
-            target_name: macos-amd64
-            binary: turn
-          - os: macos-14
+            artifact: turn
+          - os: macos-latest
             target: aarch64-apple-darwin
-            target_name: macos-arm64
-            binary: turn
+            artifact: turn
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            target_name: windows-amd64
-            binary: turn.exe
-
+            artifact: turn.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -51,54 +33,47 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: impl
-
-      - name: Build release binary
+      - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: impl
-
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cd impl/target/${{ matrix.target }}/release
-          tar czf ../../../../turn-${{ matrix.target_name }}.tar.gz ${{ matrix.binary }}
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd impl/target/${{ matrix.target }}/release
-          Compress-Archive -Path ${{ matrix.binary }} -DestinationPath ../../../../turn-${{ matrix.target_name }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: turn-${{ matrix.target_name }}
-          path: turn-${{ matrix.target_name }}.*
+          name: turn-${{ matrix.target }}
+          path: impl/target/${{ matrix.target }}/release/${{ matrix.artifact }}
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Collect release assets
+      - name: Prepare release assets
         run: |
-          mkdir -p release-assets
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
-          ls -la release-assets/
+          mkdir -p release
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            if [[ -f "$dir/turn.exe" ]]; then
+              cp "$dir/turn.exe" "release/turn-$name.exe"
+            elif [[ -f "$dir/turn" ]]; then
+              cp "$dir/turn" "release/turn-$name"
+            fi
+          done
+          ls -la release/
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
+          files: release/*
           generate_release_notes: true
-          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

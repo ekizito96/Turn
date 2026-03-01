@@ -19,7 +19,7 @@ We introduce the `use` keyword. It is a statement that binds a module's exports 
 
 ```turn
 // Import a local file module
-let utils = use "./std/utils.tn";
+let utils = use "./std/utils.turn";
 
 // Usage
 let result = utils.helper_function("data");
@@ -31,7 +31,7 @@ To make them available, we must explicitly `return` a map of exports, or use a s
 
 **Decision:** To keep the "minimal core" philosophy and "First-Class Values", a module is simply a script that **returns a Value**. This is similar to Lua or how Node.js `module.exports` works conceptually, but simpler.
 
-**Module `math.tn`:**
+**Module `math.turn`:**
 ```turn
 let pi = 3.14159;
 
@@ -53,7 +53,7 @@ return {
 
 **Main Agent:**
 ```turn
-let math = use "./math.tn";
+let math = use "./math.turn";
 let area = call(math.area, { "r": 10 });
 ```
 

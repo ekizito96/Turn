@@ -1,7 +1,7 @@
 //! Bytecode instruction definitions for the Turn VM.
 
-use crate::ast::Type;
 use serde::{Deserialize, Serialize};
+use crate::ast::Type;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instr {
@@ -18,7 +18,7 @@ pub enum Instr {
     MakeMap(usize),
     MakeStruct(String, usize),
     MakeVec(usize),
-
+    
     // Variables
     Load(String),
     Store(String),
@@ -38,51 +38,41 @@ pub enum Instr {
     Or,
     Not,
     Similarity, // ~>
-
+    
     // Structs
     DefineStruct(String, indexmap::IndexMap<String, Type>),
-
+    
     // Control
     Pop, // discard top of stack
 
     // Agent primitives
     ContextAppend,
+    ContextSystem,
     Remember,
     Recall,
-    StorePersist(String),
     CallTool,
     CallMethod(String), // NEW
     LoadModule,
     Index,
-    MakeTurn(u32, bool, Vec<(String, Option<Type>, bool)>),
-    InferResume(Type, usize, String, String), // Expected type, Tool count, Func Name, Args Str
-    PushBudget, // Pops max tokens and max time from stack, pushes new budget frame
-    PopBudget,  // Pops current budget frame, merging usage to parent
-    McpStart,   // NEW Phase 6c
-    
-    // Concurrency
-    Spawn(bool, bool), // (linked, monitored)
-    SpawnRemote,
-    Send,
-    Receive(bool), // NEW Pillar 3.5: bool is_blocking
-    Harvest,
-    Confidence,       // NEW
-    Infer(Type, u32, bool, bool, u32), // Expected Type, Tool Count, Has Driver, Has Threshold, Fallback Offset
-    Suspend(Type),    // NEW
-    
-    // Testing & Observability
-    MockDef(Type),    // NEW Phase 5
-    MockClear,        // NEW Phase 5
-    TraceProcess,     // NEW Phase 5
+    MakeTurn(u32, Vec<String>),
 
+    // Concurrency
+    Spawn,
+    SpawnLink,
+    Send,
+    Receive,
+    Confidence, // NEW
+    Infer(Type), // NEW
+    Suspend, // NEW
+    
     // Control flow
     Jump(u32),
     JumpIfFalse(u32),
     JumpIfTrue(u32),
 
-    MakeOk,           // NEW
-    MakeErr,          // NEW
-    MatchResult(u32), // NEW: jumps to offset if Err, continues if Ok
+    PushHandler(u32), // offset to catch block
+    PopHandler,
+    Throw,
 
     // Turn
     EnterTurn(u32), // address to jump to when turn returns

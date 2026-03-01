@@ -1,5 +1,5 @@
 // Memory: remember and recall
-// Run: cargo run -- run examples/recall.tn
+// Run: cargo run -- run examples/recall.turn
 
 turn {
   let name = "Turn";

@@ -11,8 +11,8 @@ fn make_runner(suffix: &str) -> Runner<FileStore> {
     Runner::new(store, tools)
 }
 
-#[tokio::test]
-async fn test_std_json_module_parse_and_stringify() {
+#[test]
+fn test_std_json_module_parse_and_stringify() {
     let mut runner = make_runner("std_json");
     let source = r#"
     let json = use "std/json";
@@ -22,15 +22,9 @@ async fn test_std_json_module_parse_and_stringify() {
     return [name, text];
     "#;
 
-    let result = runner
-        .run("test_agent", source, None)
-        .await
-        .expect("Run failed");
+    let result = runner.run("test_agent", source, None).expect("Run failed");
     if let Value::List(items) = result {
-        assert_eq!(
-            items[0],
-            Value::Str(std::sync::Arc::new("turn".to_string()))
-        );
+        assert_eq!(items[0], Value::Str("turn".to_string()));
         match &items[1] {
             Value::Str(s) => {
                 let parsed: serde_json::Value =
@@ -44,44 +38,35 @@ async fn test_std_json_module_parse_and_stringify() {
     }
 }
 
-#[tokio::test]
-async fn test_std_time_module_now() {
+#[test]
+fn test_std_time_module_now() {
     let mut runner = make_runner("std_time");
     let source = r#"
-    let time_mod = use "std/time";
-    return time_mod.now();
+    let time = use "std/time";
+    return time.now();
     "#;
 
-    let result = runner
-        .run("test_agent", source, None)
-        .await
-        .expect("Run failed");
+    let result = runner.run("test_agent", source, None).expect("Run failed");
     match result {
         Value::Num(n) => assert!(n > 0.0),
         _ => panic!("Expected Num timestamp, got {:?}", result),
     }
 }
 
-#[tokio::test]
-async fn test_std_regex_module() {
+#[test]
+fn test_std_regex_module() {
     let mut runner = make_runner("std_regex");
     let source = r#"
     let re = use "std/regex";
-    let is_match = re.matches("^turn$", "turn");
+    let ok = re.matches("^turn$", "turn");
     let out = re.replace("turn", "hello turn world", "TURN");
-    return [is_match, out];
+    return [ok, out];
     "#;
 
-    let result = runner
-        .run("test_agent", source, None)
-        .await
-        .expect("Run failed");
+    let result = runner.run("test_agent", source, None).expect("Run failed");
     if let Value::List(items) = result {
         assert_eq!(items[0], Value::Bool(true));
-        assert_eq!(
-            items[1],
-            Value::Str(std::sync::Arc::new("hello TURN world".to_string()))
-        );
+        assert_eq!(items[1], Value::Str("hello TURN world".to_string()));
     } else {
         panic!("Expected list, got {:?}", result);
     }

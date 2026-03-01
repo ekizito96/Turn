@@ -1,7 +1,7 @@
 //! AST node definitions per spec/02-grammar.md and spec/01-minimal-core.md.
 
-use crate::lexer::Span;
 use indexmap::IndexMap;
+use crate::lexer::Span;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -10,30 +10,21 @@ pub enum Type {
     Str,
     Bool,
     List(Box<Type>),
-    Map(Box<Type>, Box<Type>),              // Key -> Value
-    Function(Box<Type>, Box<Type>),         // Arg -> Ret
+    Map(Box<Type>),
+    Function(Box<Type>, Box<Type>), // Arg -> Ret
     Struct(String, IndexMap<String, Type>), // Name, Fields
     Any,
     Void,
     Pid,
     Vec,
-    Cap,
-    Blob,
-    Result(Box<Type>, Box<Type>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MockDef {
-    pub target_ty: Type,
-    pub mock_value: Expr,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub stmts: Vec<Stmt>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Turn {
         body: Block,
@@ -43,15 +34,13 @@ pub enum Stmt {
         name: String,
         ty: Option<Type>,
         init: Expr,
-        is_persistent: bool, // Pillar 5
-        span: Span,
-    },
-    Assign {
-        target: Expr,
-        value: Expr,
         span: Span,
     },
     ContextAppend {
+        expr: Expr,
+        span: Span,
+    },
+    ContextSystem {
         expr: Expr,
         span: Span,
     },
@@ -99,135 +88,61 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
-
-    Match {
-        expr: Expr,
-        ok_binding: String,
-        ok_block: Block,
-        err_binding: String,
-        err_block: Block,
+    Suspend {
         span: Span,
     },
-    TestDef {         // NEW Phase 5
-        name: String,
-        mocks: Vec<MockDef>,
-        body: Block,
+    TryCatch {
+        try_block: Block,
+        catch_var: String,
+        catch_block: Block,
+        span: Span,
+    },
+    Throw {
+        expr: Expr,
         span: Span,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum Expr {
-    Literal {
-        value: Literal,
-        span: Span,
-    },
-    Id {
-        name: String,
-        span: Span,
-    },
+    Literal { value: Literal, span: Span },
+    Id { name: String, span: Span },
     MethodCall {
         target: Box<Expr>,
         name: String,
         arg: Box<Expr>,
         span: Span,
     },
-    Recall {
-        key: Box<Expr>,
-        span: Span,
-    },
-    Call {
-        name: Box<Expr>,
-        arg: Box<Expr>,
-        span: Span,
-    },
-    Use {
-        module: Box<Expr>,
-        span: Span,
-    },
-    Mcp {
-        url: Box<Expr>,
-        span: Span,
-    },
-    Suspend {
-        expected_type: Type,
-        msg: Box<Expr>,
-        span: Span,
-    },
-    Spawn {
-        expr: Box<Expr>,
-        linked: bool,
-        monitored: bool,
-        span: Span,
-    },
-    SpawnRemote {
-        node_id: Box<Expr>,
-        closure: Box<Expr>,
-        span: Span,
-    },
-    Ok(Box<Expr>, Span),
-    Err(Box<Expr>, Span),
-    Send {
-        pid: Box<Expr>,
-        msg: Box<Expr>,
-        span: Span,
-    },
-    Receive {
-        is_blocking: bool,
-        span: Span,
-    },
-    Harvest {
-        span: Span,
-    },
-    Trace {           // NEW Phase 5
-        pid_expr: Box<Expr>,
-        span: Span,
-    },
-
-    Vec {
-        items: Vec<Expr>,
-        span: Span,
-    },
-    Confidence {
-        expr: Box<Expr>,
-        span: Span,
-    },
-    Budget {
-        tokens: Option<Box<Expr>>,
-        time: Option<Box<Expr>>, // currently an Expr mapping to seconds
-        body: Block,
-        span: Span,
-    },
+    Recall { key: Box<Expr>, span: Span },
+    Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
+    Use { module: Box<Expr>, span: Span },
+    Spawn { expr: Box<Expr>, span: Span },
+    SpawnLink { expr: Box<Expr>, span: Span },
+    Send { pid: Box<Expr>, msg: Box<Expr>, span: Span },
+    Receive { span: Span },
+    Vec { items: Vec<Expr>, span: Span },
+    Confidence { expr: Box<Expr>, span: Span },
     StructInit {
         name: String,
         fields: IndexMap<String, Expr>,
         span: Span,
     },
-    Index {
-        target: Box<Expr>,
-        index: Box<Expr>,
-        span: Span,
-    },
+    Index { target: Box<Expr>, index: Box<Expr>, span: Span },
     Turn {
-        is_tool: bool,
-        params: Vec<(String, Span, Option<Type>, bool)>, // bool is `is_secret`
+        params: Vec<(String, Span, Option<Type>)>,
         ret_ty: Option<Type>,
         body: Block,
         span: Span,
     },
     Infer {
         target_ty: Type,
-        tools: Option<Vec<Expr>>, // `with [tool1, tool2]`
         body: Block,
-        driver: Option<Box<Expr>>, // `via driver_expr`
-        threshold: Option<Box<Expr>>, // `~ 0.9`
-        fallback: Option<Block>,      // `else { ... }`
         span: Span,
     },
     List {
@@ -250,19 +165,9 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
-    UseSchema {
-        protocol: String,
-        url: Box<Expr>,
-        span: Span,
-    },
-
-    UseWasm {
-        url: Box<Expr>,
-        span: Span,
-    },
 }
 
-impl Expr {
+    impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Literal { span, .. } => *span,
@@ -271,18 +176,10 @@ impl Expr {
             Expr::Recall { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::Use { span, .. } => *span,
-            Expr::UseSchema { span, .. } => *span,
-
-            Expr::UseWasm { span, .. } => *span,
-            Expr::Mcp { span, .. } => *span,
-            Expr::Suspend { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
-            Expr::Ok(_, span) => *span,
-            Expr::Err(_, span) => *span,
-            Expr::SpawnRemote { span, .. } => *span,
+            Expr::SpawnLink { span, .. } => *span,
             Expr::Send { span, .. } => *span,
-            Expr::Receive { span, .. } => *span,
-            Expr::Harvest { span } => *span,
+            Expr::Receive { span } => *span,
             Expr::Vec { span, .. } => *span,
             Expr::Confidence { span, .. } => *span,
             Expr::Index { span, .. } => *span,
@@ -293,20 +190,18 @@ impl Expr {
             Expr::Binary { span, .. } => *span,
             Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
-            Expr::Budget { span, .. } => *span,
             Expr::StructInit { span, .. } => *span,
-            Expr::Trace { span, .. } => *span, // NEW Phase 5
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOp {
     Not,
     Neg,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Mul,
     Div,
@@ -323,7 +218,7 @@ pub enum BinOp {
     Or,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     Num(f64),
     Str(String),

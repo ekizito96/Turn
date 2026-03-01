@@ -31,7 +31,7 @@ impl Compiler {
             Instr::JumpIfFalse(ref mut t) => *t = target,
             Instr::JumpIfTrue(ref mut t) => *t = target,
             Instr::EnterTurn(ref mut t) => *t = target,
-            Instr::MatchResult(ref mut t) => *t = target,
+            Instr::PushHandler(ref mut t) => *t = target,
             _ => {}
         }
     }
@@ -39,15 +39,6 @@ impl Compiler {
     pub fn compile(&mut self, program: &Program) -> Vec<Instr> {
         for stmt in &program.stmts {
             self.compile_stmt(stmt);
-        }
-        
-        let has_return = program
-            .stmts
-            .last()
-            .is_some_and(|s| matches!(s, Stmt::Return { .. }));
-        if !has_return {
-            self.emit(Instr::PushNull);
-            self.emit(Instr::Return);
         }
         self.code.clone()
     }
@@ -57,31 +48,32 @@ impl Compiler {
             Stmt::Turn { body, .. } => {
                 let enter_turn_addr = self.emit(Instr::EnterTurn(0));
                 self.compile_block(body);
+                // Implicit return if not present
+                let has_return = body
+                    .stmts
+                    .last()
+                    .is_some_and(|s| matches!(s, Stmt::Return { .. }));
+                if !has_return {
+                    self.emit(Instr::PushNull);
+                    self.emit(Instr::Return);
+                }
                 let after_turn = self.code.len() as u32;
                 self.patch_jump(enter_turn_addr, after_turn);
             }
-            Stmt::Let { name, ty, init, is_persistent, .. } => {
+            Stmt::Let { name, ty, init, .. } => {
                 self.compile_expr(init);
                 if let Some(t) = ty {
                     self.emit(Instr::CheckType(t.clone()));
                 }
                 self.emit(Instr::Store(name.clone()));
-                if *is_persistent {
-                    self.emit(Instr::Load(name.clone()));
-                    self.emit(Instr::StorePersist(name.clone()));
-                }
-            }
-            Stmt::Assign { target, value, .. } => {
-                self.compile_expr(value);
-                if let Expr::Id { name, .. } = target {
-                    self.emit(Instr::Store(name.clone()));
-                } else {
-                    panic!("Compiler error: Reassignment currently only supports simple identifiers");
-                }
             }
             Stmt::ContextAppend { expr, .. } => {
                 self.compile_expr(expr);
                 self.emit(Instr::ContextAppend);
+            }
+            Stmt::ContextSystem { expr, .. } => {
+                self.compile_expr(expr);
+                self.emit(Instr::ContextSystem);
             }
             Stmt::Remember { key, value, .. } => {
                 self.compile_expr(key);
@@ -128,38 +120,40 @@ impl Compiler {
                 self.emit(Instr::Jump(loop_start));
                 self.patch_jump(exit_jump, self.code.len() as u32);
             }
-            Stmt::Match {
-                expr,
-                ok_binding,
-                ok_block,
-                err_binding,
-                err_block,
+            Stmt::TryCatch {
+                try_block,
+                catch_var,
+                catch_block,
                 ..
             } => {
-                // Compile the target expression. It leaves Result(Ok | Err) on stack
+                let push_handler_idx = self.emit(Instr::PushHandler(0)); // Placeholder
+                
+                self.compile_block(try_block);
+                self.emit(Instr::PopHandler);
+                let jump_after_catch = self.emit(Instr::Jump(0));
+                
+                // Catch block starts here
+                let catch_start = self.code.len() as u32;
+                // Patch PushHandler to point here
+                self.patch_jump(push_handler_idx, catch_start);
+                
+                // Catch block expects error on stack. Store it in catch_var.
+                self.emit(Instr::Store(catch_var.clone()));
+                self.compile_block(catch_block);
+                
+                let after_catch = self.code.len() as u32;
+                self.patch_jump(jump_after_catch, after_catch);
+            }
+            Stmt::Throw { expr, .. } => {
                 self.compile_expr(expr);
-
-                // Emits a conditional jump. If stack top is Ok(v), it unwraps `v` and falls through.
-                // If stack top is Err(e), it unwraps `e` and jumps to the target offset.
-                let match_instr = self.emit(Instr::MatchResult(0));
-
-                // Fallthrough (Ok path)
-                self.emit(Instr::Store(ok_binding.clone()));
-                self.compile_block(ok_block);
-                let jump_to_end = self.emit(Instr::Jump(0));
-
-                // Err path
-                let err_start = self.code.len() as u32;
-                self.patch_jump(match_instr, err_start);
-                self.emit(Instr::Store(err_binding.clone()));
-                self.compile_block(err_block);
-
-                let end = self.code.len() as u32;
-                self.patch_jump(jump_to_end, end);
+                self.emit(Instr::Throw);
             }
             Stmt::ExprStmt { expr, .. } => {
                 self.compile_expr(expr);
                 self.emit(Instr::Pop);
+            }
+            Stmt::Suspend { .. } => {
+                self.emit(Instr::Suspend);
             }
             Stmt::StructDef { name, fields, .. } => {
                 self.emit(Instr::DefineStruct(name.clone(), fields.clone()));
@@ -172,19 +166,6 @@ impl Compiler {
             }
             Stmt::TypeAlias { .. } => {
                 // Type aliases are static-only.
-            }
-            Stmt::TestDef { name: _, mocks, body, .. } => {
-                // Compile test body. During Phase 5, if `MockStart` is encountered, it registers
-                // the struct overrides in the current VM Frame's env to intercept `Infer` calls.
-                for mock in mocks {
-                    self.compile_expr(&mock.mock_value);
-                    self.emit(Instr::MockDef(mock.target_ty.clone()));
-                }
-                
-                self.compile_block(body);
-                
-                // Clear mocks from environment at the end
-                self.emit(Instr::MockClear);
             }
         }
     }
@@ -217,14 +198,6 @@ impl Compiler {
             Expr::Id { name, .. } => {
                 self.emit(Instr::Load(name.clone()));
             }
-            Expr::Ok(inner, _) => {
-                self.compile_expr(inner);
-                self.emit(Instr::MakeOk);
-            }
-            Expr::Err(inner, _) => {
-                self.compile_expr(inner);
-                self.emit(Instr::MakeErr);
-            }
             Expr::Recall { key, .. } => {
                 self.compile_expr(key);
                 self.emit(Instr::Recall);
@@ -238,33 +211,13 @@ impl Compiler {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
             }
-            Expr::UseWasm { url, .. } => {
-                self.emit(Instr::PushStr("sys_wasm_adapter".to_string()));
-                self.emit(Instr::PushStr("url".to_string()));
-                self.compile_expr(url);
-                self.emit(Instr::MakeMap(1));
-                self.emit(Instr::CallTool);
-            }
-            Expr::Mcp { url, .. } => {
-                self.compile_expr(url);
-                self.emit(Instr::McpStart);
-            }
-            Expr::UseSchema { .. } => {
-                panic!("Unexpanded Wasm Schema Macro found during AST compilation. MacroEngine failed to run.");
-            }
-            Expr::Turn {
-                is_tool,
-                params,
-                ret_ty: _,
-                body,
-                ..
-            } => {
+            Expr::Turn { params, ret_ty: _, body, .. } => {
                 let jump_over = self.emit(Instr::Jump(0));
                 let start_addr = self.code.len() as u32;
 
                 // Parameter type checks
                 // Assumes arguments are already in env (via CallTool)
-                for (name, _, ty, _) in params {
+                for (name, _, ty) in params {
                     if let Some(t) = ty {
                         self.emit(Instr::Load(name.clone()));
                         self.emit(Instr::CheckType(t.clone()));
@@ -274,34 +227,18 @@ impl Compiler {
 
                 self.compile_block(body);
                 // Implicit return
-                let has_return = body
-                    .stmts
-                    .last()
-                    .is_some_and(|s| matches!(s, Stmt::Return { .. }));
+                let has_return = body.stmts.last().map_or(false, |s| matches!(s, Stmt::Return { .. }));
                 if !has_return {
                     self.emit(Instr::PushNull);
                     self.emit(Instr::Return);
                 }
                 let after_addr = self.code.len() as u32;
                 self.patch_jump(jump_over, after_addr);
-                let param_info = params
-                    .iter()
-                    .map(|(n, _, ty, is_sec)| (n.clone(), ty.clone(), *is_sec))
-                    .collect();
-                self.emit(Instr::MakeTurn(start_addr, *is_tool, param_info));
+                let param_names = params.iter().map(|(n, _, _)| n.clone()).collect();
+                self.emit(Instr::MakeTurn(start_addr, param_names));
             }
-            Expr::Infer {
-                target_ty,
-                tools,
-                body,
-                driver,
-                threshold,
-                fallback,
-                ..
-            } => {
-                let tool_count = tools.as_ref().map(|t| t.len()).unwrap_or(0);
-
-                // Compile body as an expression (leave result on stack, acts as the prompt)
+            Expr::Infer { target_ty, body, .. } => {
+                // Compile body as an expression (leave result on stack)
                 let len = body.stmts.len();
                 if len == 0 {
                     self.emit(Instr::PushNull);
@@ -316,7 +253,10 @@ impl Compiler {
                                 _ => {
                                     self.compile_stmt(stmt);
                                     // Result is Null if stmt is not an expression
-                                    self.emit(Instr::PushNull);
+                                    // But wait, if stmt was `Let`, stack is empty (Let pops).
+                                    // So we must push Null to satisfy `Infer` instruction expectation.
+                                    // But `compile_stmt` keeps stack balanced (0 net change usually).
+                                    self.emit(Instr::PushNull); 
                                 }
                             }
                         } else {
@@ -324,86 +264,7 @@ impl Compiler {
                         }
                     }
                 }
-
-                // Compile tools AFTER body, so they sit on top of the prompt in the stack
-                if let Some(ts) = tools {
-                    for t in ts {
-                        self.compile_expr(t);
-                    }
-                }
-
-                let has_driver = if let Some(drv) = driver {
-                    self.compile_expr(drv);
-                    true
-                } else {
-                    false
-                };
-
-                let has_threshold = if let Some(thresh) = threshold {
-                    self.compile_expr(thresh);
-                    true
-                } else {
-                    false
-                };
-
-                let infer_idx = self.emit(Instr::Infer(
-                    target_ty.clone(),
-                    tool_count as u32,
-                    has_driver,
-                    has_threshold,
-                    0, // fallback offset placeholder
-                ));
-
-                if let Some(fb) = fallback {
-                    let jump_end_idx = self.emit(Instr::Jump(0)); // jump over fallback block on success
-                    let jump_target = self.code.len() as u32;
-                    if let Instr::Infer(_, _, _, _, ref mut offset) = self.code[infer_idx as usize] {
-                        *offset = jump_target; // Jump here if inferior/confident fails
-                    }
-                    self.compile_block(fb);
-                    self.code[jump_end_idx as usize] = Instr::Jump(self.code.len() as u32);
-                }
-            }
-            Expr::Budget {
-                tokens,
-                time,
-                body,
-                ..
-            } => {
-                if let Some(t) = time {
-                    self.compile_expr(t);
-                } else {
-                    self.emit(Instr::PushNull);
-                }
-                if let Some(toks) = tokens {
-                    self.compile_expr(toks);
-                } else {
-                    self.emit(Instr::PushNull);
-                }
-                self.emit(Instr::PushBudget);
-
-                let len = body.stmts.len();
-                if len == 0 {
-                    self.emit(Instr::PushNull);
-                } else {
-                    for (i, stmt) in body.stmts.iter().enumerate() {
-                        if i == len - 1 {
-                            match stmt {
-                                Stmt::ExprStmt { expr, .. } => {
-                                    self.compile_expr(expr);
-                                }
-                                _ => {
-                                    self.compile_stmt(stmt);
-                                    self.emit(Instr::PushNull);
-                                }
-                            }
-                        } else {
-                            self.compile_stmt(stmt);
-                        }
-                    }
-                }
-
-                self.emit(Instr::PopBudget);
+                self.emit(Instr::Infer(target_ty.clone()));
             }
             Expr::Index { target, index, .. } => {
                 self.compile_expr(target);
@@ -416,10 +277,6 @@ impl Compiler {
                     self.compile_expr(item);
                 }
                 self.emit(Instr::MakeList(len));
-            }
-            Expr::Trace { pid_expr, span: _ } => {
-                self.compile_expr(pid_expr);
-                self.emit(Instr::TraceProcess);
             }
             Expr::Vec { items, .. } => {
                 let len = items.len();
@@ -436,51 +293,23 @@ impl Compiler {
                 }
                 self.emit(Instr::MakeMap(len));
             }
-            Expr::Binary {
-                op, left, right, ..
-            } => {
+            Expr::Binary { op, left, right, .. } => {
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
-                    BinOp::Add => {
-                        self.emit(Instr::Add);
-                    }
-                    BinOp::Sub => {
-                        self.emit(Instr::Sub);
-                    }
-                    BinOp::Mul => {
-                        self.emit(Instr::Mul);
-                    }
-                    BinOp::Div => {
-                        self.emit(Instr::Div);
-                    }
-                    BinOp::Eq => {
-                        self.emit(Instr::Eq);
-                    }
-                    BinOp::Ne => {
-                        self.emit(Instr::Ne);
-                    }
-                    BinOp::Lt => {
-                        self.emit(Instr::Lt);
-                    }
-                    BinOp::Gt => {
-                        self.emit(Instr::Gt);
-                    }
-                    BinOp::Le => {
-                        self.emit(Instr::Le);
-                    }
-                    BinOp::Ge => {
-                        self.emit(Instr::Ge);
-                    }
-                    BinOp::And => {
-                        self.emit(Instr::And);
-                    }
-                    BinOp::Or => {
-                        self.emit(Instr::Or);
-                    }
-                    BinOp::Similarity => {
-                        self.emit(Instr::Similarity);
-                    }
+                    BinOp::Add => { self.emit(Instr::Add); }
+                    BinOp::Sub => { self.emit(Instr::Sub); }
+                    BinOp::Mul => { self.emit(Instr::Mul); }
+                    BinOp::Div => { self.emit(Instr::Div); }
+                    BinOp::Eq => { self.emit(Instr::Eq); }
+                    BinOp::Ne => { self.emit(Instr::Ne); }
+                    BinOp::Lt => { self.emit(Instr::Lt); }
+                    BinOp::Gt => { self.emit(Instr::Gt); }
+                    BinOp::Le => { self.emit(Instr::Le); }
+                    BinOp::Ge => { self.emit(Instr::Ge); }
+                    BinOp::And => { self.emit(Instr::And); }
+                    BinOp::Or => { self.emit(Instr::Or); }
+                    BinOp::Similarity => { self.emit(Instr::Similarity); }
                 }
             }
             Expr::Unary { op, expr, .. } => {
@@ -497,33 +326,22 @@ impl Compiler {
                     }
                 }
             }
-            Expr::Spawn { expr, linked, monitored, .. } => {
+            Expr::Spawn { expr, .. } => {
                 self.compile_expr(expr);
-                self.emit(Instr::Spawn(*linked, *monitored));
+                self.emit(Instr::Spawn);
             }
-            Expr::SpawnRemote {
-                node_id, closure, ..
-            } => {
-                self.compile_expr(node_id);
-                self.compile_expr(closure);
-                self.emit(Instr::SpawnRemote);
+            Expr::SpawnLink { expr, .. } => {
+                self.compile_expr(expr);
+                self.emit(Instr::SpawnLink);
             }
             Expr::Send { pid, msg, .. } => {
                 self.compile_expr(pid);
                 self.compile_expr(msg);
                 self.emit(Instr::Send);
             }
-            Expr::Receive { is_blocking, .. } => {
-                self.emit(Instr::Receive(*is_blocking));
+            Expr::Receive { .. } => {
+                self.emit(Instr::Receive);
             }
-            Expr::Harvest { .. } => {
-                self.emit(Instr::Harvest);
-            }
-            Expr::Suspend { expected_type, msg, .. } => {
-                self.compile_expr(msg);
-                self.emit(Instr::Suspend(expected_type.clone()));
-            }
-
             Expr::Confidence { expr, .. } => {
                 self.compile_expr(expr);
                 self.emit(Instr::Confidence);
@@ -538,9 +356,7 @@ impl Compiler {
                 }
                 self.emit(Instr::MakeStruct(name.clone(), len));
             }
-            Expr::MethodCall {
-                target, name, arg, ..
-            } => {
+            Expr::MethodCall { target, name, arg, .. } => {
                 self.compile_expr(target);
                 self.compile_expr(arg);
                 self.emit(Instr::CallMethod(name.clone()));

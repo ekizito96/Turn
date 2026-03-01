@@ -1,8 +1,7 @@
 [package]
 name = "turn"
-version = "0.5.0-alpha"
+version = "0.4.0"
 edition = "2021"
-default-run = "turn"
 description = "Systems language for agentic computation"
 authors = ["Muyukani Ephraim Kizito <muyukaniephraim@yahoo.com>"]
 license = "Apache-2.0"
@@ -12,20 +11,17 @@ categories = ["development-tools"]
 
 [dev-dependencies]
 mockito = "1.2.0"
-proptest = "1.10.0"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 indexmap = { version = "2", features = ["serde"] }
-
+reqwest = { version = "0.11", features = ["blocking", "json"] }
 thiserror = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-sha2 = "0.10"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["trace"] }
 tracing = "0.1"
@@ -33,6 +29,3 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 tower-lsp = "0.20"
 regex = "1.12.3"
-async-recursion = "1.1.1"
-wasmtime = "26.0.0"
-base64 = "0.22"

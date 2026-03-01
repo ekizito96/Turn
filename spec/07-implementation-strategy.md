@@ -225,7 +225,7 @@ impl/
 │   ├── runtime.rs   # Process state, transition rules (spec/03-runtime-model.md)
 │   └── tools.rs     # Tool registry, handlers
 └── tests/
-    └── hello_turn.tn  # Test with spec/04-hello-turn.md
+    └── hello_turn.turn  # Test with spec/04-hello-turn.md
 ```
 
 **Grammar:** v1 includes `+`, `==`, `!=`, `and`, `or`, `true`, `false`, `null`, `while`. See [02-grammar.md](02-grammar.md).
@@ -240,9 +240,9 @@ impl/
 - Single file, no dependencies, ~2–5MB binary
 
 **Workflow:**
-1. `turn compile agent.tn` → `agent.tnc` (bytecode)
-2. `turn run agent.tnc` → execute VM
-3. Or: `turn run agent.tn` → compile + run in one step
+1. `turn compile agent.turn` → `agent.turnc` (bytecode)
+2. `turn run agent.turnc` → execute VM
+3. Or: `turn run agent.turn` → compile + run in one step
 
 ### Why Not Python/TypeScript?
 

@@ -1,4 +1,0 @@
-call("echo", "Hello Turn!");
-let msg = "Echo test";
-call("echo", msg);
-return 42;

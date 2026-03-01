@@ -1,9 +1,9 @@
-//! Integration test: run hello.tn
+//! Integration test: run hello_turn.turn
 
 use turn::run;
 
-#[tokio::test]
-async fn hello_turn_returns_echo_result() {
+#[test]
+fn hello_turn_returns_echo_result() {
     let source = r#"
 turn {
   let name = "Turn";
