@@ -57,6 +57,8 @@ impl<S: Store> Runner<S> {
 
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
+            
+            println!("DEBUG RUNNER CODE SIZE: {}", code.len());
 
             // Run in fresh VM
             let mut vm = Vm::new(&code);

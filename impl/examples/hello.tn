@@ -1,5 +1,5 @@
 // Hello Turn - minimal program
-// Run: cargo run -- run examples/hello.turn
+// Run: cargo run -- run examples/hello.tn
 
 turn {
   let name = "Turn";

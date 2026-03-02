@@ -1,15 +1,19 @@
-turn {
+let main = turn {
+    call("echo", "Starting main block");
     let name = "Turn";
     let greeting = "Hello, " + name + "!";
     context.append(greeting);
     
     let url = "https://httpbin.org/get";
+    call("echo", "Fetching " + url);
     let response = call("http_get", url);
     
     if response == null {
+        call("echo", "Fetch failed");
         return "Failed to fetch";
     }
 
+    call("echo", "Parsing response");
     let parsed = call("json_parse", response);
     
     if parsed != null {
@@ -19,4 +23,9 @@ turn {
     }
     
     return greeting;
-}
+};
+
+call("echo", "Calling main");
+let res = call(main, null);
+call("echo", "Result: " + res);
+return res;

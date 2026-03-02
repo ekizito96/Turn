@@ -1,5 +1,5 @@
 turn {
-    let math = use "./math_lib.turn";
+    let math = use "./math_lib.tn";
     
     let r = 10;
     let a = call(math["area"], { "r": r });
