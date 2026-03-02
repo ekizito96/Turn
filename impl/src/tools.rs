@@ -24,7 +24,7 @@ fn call_openai_chat(
 
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    match client
+    match clien
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&payload)
@@ -87,7 +87,7 @@ fn call_anthropic_chat(
         payload["system"] = serde_json::Value::String(system_prompt);
     }
 
-    match client
+    match clien
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
@@ -133,7 +133,7 @@ fn call_google_chat(
 ) -> Result<(String, u64), String> {
     let client = reqwest::blocking::Client::new();
 
-    // Google Gemini API: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+    // Google Gemini API: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateConten
 
     let mut contents = Vec::new();
     let mut system_instruction = None;
@@ -259,7 +259,7 @@ fn call_azure_chat(
         "messages": messages
     });
 
-    match client
+    match clien
         .post(&url)
         .header("api-key", api_key)
         .json(&payload)
@@ -301,7 +301,7 @@ fn call_azure_responses(
         "max_completion_tokens": 16384
     });
 
-    match client
+    match clien
         .post(responses_url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
@@ -500,7 +500,7 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // env_get
+        // env_ge
         tools.insert(
             "env_get".to_string(),
             Box::new(|arg| {
@@ -515,7 +515,7 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // env_set
+        // env_se
         tools.insert(
             "env_set".to_string(),
             Box::new(|arg| {
@@ -538,7 +538,7 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // http_get
+        // http_ge
         tools.insert(
             "http_get".to_string(),
             Box::new(|arg| {
@@ -571,7 +571,7 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // http_post
+        // http_pos
         tools.insert(
             "http_post".to_string(),
             Box::new(|arg| {
@@ -797,11 +797,11 @@ impl ToolRegistry {
                      let user_content = format!("Schema Type: {}\nPrompt: {}", schema, prompt);
                      msgs.push(serde_json::json!({
                          "role": "user",
-                         "content": user_content
+                         "content": user_conten
                      }));
 
                      let messages = serde_json::Value::Array(msgs);
-                     
+
                      println!("Calling LLM Dispatch with messages: {}", messages);
 
                      match call_llm_dispatch(None, &messages) {
@@ -813,10 +813,10 @@ impl ToolRegistry {
                                      let val_json = json.get("value").unwrap_or(&serde_json::Value::Null);
                                      let conf = json.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.9);
 
-                                     // If schema is Struct, try to parse val_json as Struct
+                                     // If schema is Struct, try to parse val_json as Struc
                                      let turn_val = if let Value::Str(s) = schema {
                                          if s.contains("Struct") {
-                                             // Best-effort struct parsing from JSON object
+                                             // Best-effort struct parsing from JSON objec
                                              match val_json {
                                                  serde_json::Value::Object(map) => {
                                                      let mut fields = indexmap::IndexMap::new();
