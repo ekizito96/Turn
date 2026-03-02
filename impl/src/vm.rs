@@ -263,6 +263,10 @@ impl Vm {
                         let new_pid = self.next_pid;
                         self.next_pid += 1;
 
+                        let mut rt = Runtime::new();
+                        rt.env = env.clone();
+                        rt.structs = process.runtime.structs.clone();
+
                         let mut new_process = Process {
                             pid: new_pid,
                             parent_pid: None, // NO LINK
@@ -273,11 +277,10 @@ impl Vm {
                                 handlers: Vec::new(),
                             }],
                             stack: Vec::new(),
-                            runtime: Runtime::new(),
+                            runtime: rt,
                             mailbox: VecDeque::new(),
                             gas_remaining: default_gas(),
                         };
-                        new_process.runtime.env = env;
 
                         self.scheduler.push_back(new_process);
                         process.stack.push(Value::Pid(new_pid));
@@ -291,6 +294,10 @@ impl Vm {
                         let new_pid = self.next_pid;
                         self.next_pid += 1;
 
+                        let mut rt = Runtime::new();
+                        rt.env = env.clone();
+                        rt.structs = process.runtime.structs.clone();
+
                         let mut new_process = Process {
                             pid: new_pid,
                             parent_pid: Some(process.pid), // LINKED
@@ -301,11 +308,10 @@ impl Vm {
                                 handlers: Vec::new(),
                             }],
                             stack: Vec::new(),
-                            runtime: Runtime::new(),
+                            runtime: rt,
                             mailbox: VecDeque::new(),
                             gas_remaining: default_gas(),
                         };
-                        new_process.runtime.env = env;
 
                         self.scheduler.push_back(new_process);
                         process.stack.push(Value::Pid(new_pid));

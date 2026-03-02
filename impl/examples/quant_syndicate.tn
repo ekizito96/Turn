@@ -9,7 +9,7 @@ struct TechnicalSignal { ticker: Str, signal: Str, strength: Num, rationale: Str
 struct SentimentSignal { ticker: Str, sentiment: Str, score: Num, summary: Str };
 struct TradeDecision { ticker: Str, action: Str, size_pct: Num, conviction: Num, memo: Str };
 
-let run_technical = turn(sym: Str) -> Void {
+let run_technical = turn(sym: Str) -> TechnicalSignal {
     call("echo", "📊 Technical Agent analyzing " + sym + "...");
     context.append("You are a purely technical quantitative analyst. Look at momentum, RSI, and moving averages.");
     context.append("Current target: " + sym);
@@ -21,11 +21,10 @@ let run_technical = turn(sym: Str) -> Void {
     };
     
     call("echo", "   [Technical] Signal: " + tech.signal + " | Strength: " + tech.strength);
-    call("fs_write", {"path": ".turn_store/" + sym + "_tech.json", "content": call("json_stringify", tech)});
-    return null;
+    return tech;
 };
 
-let run_sentiment = turn(sym: Str) -> Void {
+let run_sentiment = turn(sym: Str) -> SentimentSignal {
     call("echo", "📰 Sentiment Agent parsing news for " + sym + "...");
     context.append("You are a macro-economic news sentiment parser.");
     context.append("Current target: " + sym);
@@ -37,8 +36,7 @@ let run_sentiment = turn(sym: Str) -> Void {
     };
     
     call("echo", "   [Sentiment] Score: " + sent.score + " | Summary: " + sent.summary);
-    call("fs_write", {"path": ".turn_store/" + sym + "_sent.json", "content": call("json_stringify", sent)});
-    return null;
+    return sent;
 };
 
 let main = turn() {
@@ -49,26 +47,24 @@ let main = turn() {
     call("echo", "Target Asset: " + symbol);
 
     // Spawn the sub-agents in parallel supervisor trees
-    let tech_pid = spawn_link turn() { return call(run_technical, [symbol]); };
-    let sent_pid = spawn_link turn() { return call(run_sentiment, [symbol]); };
+    let tech_pid = spawn_link turn() { return call(run_technical, symbol); };
+    let sent_pid = spawn_link turn() { return call(run_sentiment, symbol); };
 
-    // The Chairman waits for the agents to finish computing
+    // Wait for the agents to finish computing and receive their signals
     call("echo", "⏳ Chairman waiting for quantitative signals...");
-    time.sleep(4.0);
+    let sig1 = receive;
+    let sig2 = receive;
 
-    // Read the signals back from the virtual filesystem
-    let tech_raw = call("fs_read", ".turn_store/" + symbol + "_tech.json");
-    let sent_raw = call("fs_read", ".turn_store/" + symbol + "_sent.json");
-
-    let tech_map = call("json_parse", tech_raw);
-    let sent_map = call("json_parse", sent_raw);
+    // Extract the raw Struct objects from the ExitSignal messages
+    let tech = sig1["result"];
+    let sent = sig2["result"];
 
     call("echo", "⚖️  Chairman synthesizing final trade...");
 
     // The Chairman Agent decides based on the sub-agents' output
     context.append("You are the Syndicate Chairman. Synthesize the following signals into a final trade decision for " + symbol + ".");
-    context.append("Technical Signal: " + tech_map["signal"] + " (Strength: " + tech_map["strength"] + ")");
-    context.append("Sentiment Score: " + sent_map["score"] + " - " + sent_map["summary"]);
+    context.append("Technical Signal: " + tech.signal + " (Strength: " + tech.strength + ")");
+    context.append("Sentiment Score: " + sent.score + " - " + sent.summary);
 
     let decision = infer TradeDecision {
         "Output the final consensus trade. If signals conflict heavily, conviction should be low and action should be HOLD. Size percentage should be 0-100.";

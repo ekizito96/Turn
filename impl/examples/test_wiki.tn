@@ -1,0 +1,8 @@
+turn {
+    let product = "Electric bicycle";
+    let url_topic = call("regex_replace", {"pattern": " ", "replacement": "_", "text": product});
+    call("echo", url_topic);
+    let raw = call("http_get", "https://en.wikipedia.org/api/rest_v1/page/summary/" + url_topic);
+    call("echo", raw);
+    return raw;
+}

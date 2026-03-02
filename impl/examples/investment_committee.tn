@@ -16,7 +16,7 @@ let fetch_market_data = turn(ticker: Str) -> MarketSnapshot {
     return snap;
 };
 
-let run_fundamental_analyst = turn(snap: MarketSnapshot) -> Void {
+let run_fundamental_analyst = turn(snap: MarketSnapshot) -> FundamentalThesis {
     call("echo", "📈 Fundamental Analyst reviewing " + snap.ticker);
     let prior = recall("investment memo " + snap.ticker);
     context.append("Prior notes: " + prior);
@@ -28,44 +28,40 @@ let run_fundamental_analyst = turn(snap: MarketSnapshot) -> Void {
             conviction: 4.0,
             thesis: "Low confidence execution. Reverting to neutral fair value."
         };
-        call("fs_write", {"path": ".turn_store/thesis.json", "content": call("json_stringify", fallback)});
-        return null;
+        return fallback;
     }
     
     remember("investment memo " + snap.ticker, thesis.thesis);
-    call("fs_write", {"path": ".turn_store/thesis.json", "content": call("json_stringify", thesis)});
-    return null;
+    return thesis;
 };
 
-let run_risk_officer = turn(snap: MarketSnapshot) -> Void {
+let run_risk_officer = turn(snap: MarketSnapshot) -> RiskVerdict {
     call("echo", "🛡️ Risk Officer reviewing exposure for " + snap.ticker);
     context.append("You are the Chief Risk Officer. Ensure we do not breach $5M exposure.");
     
-    let verdict = infer RiskVerdict { "Review the asset and determine if risk limits are breached." };
-    call("fs_write", {"path": ".turn_store/risk.json", "content": call("json_stringify", verdict)});
-    return null;
+    let verdict = infer RiskVerdict { "Review the asset and determine if risk limits are breached."; };
+    return verdict;
 };
 
 let committee_chair = turn(ticker: Str, requested: Num) -> CommitteeMemo {
-    let snap = fetch_market_data(ticker);
+    let snap = call(fetch_market_data, ticker);
     
     // Spawn specialized agents concurrently
-    let analyst_pid = spawn_link turn() { return call(run_fundamental_analyst, [snap]); };
-    let risk_pid = spawn_link turn() { return call(run_risk_officer, [snap]); };
+    let analyst_pid = spawn_link turn() { return call(run_fundamental_analyst, snap); };
+    let risk_pid = spawn_link turn() { return call(run_risk_officer, snap); };
     
-    time.sleep(5.0); // Wait for agents
+    // Wait for agents
+    let sig1 = receive;
+    let sig2 = receive;
     
-    let thesis_raw = call("fs_read", ".turn_store/thesis.json");
-    let risk_raw = call("fs_read", ".turn_store/risk.json");
-    
-    let thesis = call("json_parse", thesis_raw);
-    let risk = call("json_parse", risk_raw);
+    let thesis = sig1["result"];
+    let risk = sig2["result"];
     
     context.append("Committee Chair decision for " + ticker);
-    context.append("Analyst Thesis: " + thesis["thesis"] + " Conviction: " + thesis["conviction"]);
-    context.append("Risk Officer: breach=" + risk["breach"] + " note: " + risk["risk_note"]);
+    context.append("Analyst Thesis: " + thesis.thesis + " Conviction: " + thesis.conviction);
+    context.append("Risk Officer: breach=" + risk.breach + " note: " + risk.risk_note);
     
-    let memo = infer CommitteeMemo { "Synthesize the final binding committee decision." };
+    let memo = infer CommitteeMemo { "Synthesize the final binding committee decision."; };
     
     let session = 1;
     call("fs_write", {"path": ".turn_store/memos/session_" + session + "_" + ticker + ".json", "content": call("json_stringify", memo)});

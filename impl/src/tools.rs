@@ -547,7 +547,12 @@ impl ToolRegistry {
                     _ => return Err("Argument must be a string URL".to_string()),
                 };
 
-                match reqwest::blocking::get(&url) {
+                let client = reqwest::blocking::Client::builder()
+                    .user_agent("TurnLang/1.0 (https://turn-lang.dev)")
+                    .build()
+                    .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+                match client.get(&url).send() {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {
