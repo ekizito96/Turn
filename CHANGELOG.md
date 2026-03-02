@@ -1,52 +1,30 @@
 # Changelog
 
-## [0.4.0] - 2026-02-18 (Alpha: Control-Cycle + Cognitive Type Safety)
+All notable changes to the Turn Language will be documented in this file.
 
-### Major Features
-- **Orthogonal Persistence**: `suspend;` primitive added for durable checkpoint boundaries.
-- **Cognitive Type Safety (Struct Inference)**: `infer StructName { ... }` now resolves named struct schemas at runtime for reliable, typed LLM output.
-- **Documentation Overhaul**: Added public-facing `VISION.md` and a publishable `WHITEPAPER.md`. Consolidated specs for consistency and removed internal-only documents.
-
-### Changed
-- **Project Positioning**: Turn described as a systems language for agentic computation (capability objects + explicit effects + control-cycle semantics).
-
-## [0.3.0] - 2026-02-18 (Alpha Release)
-
-### Major Features
-- **Standard Library**: Full suite of built-in modules accessible via `use "std/..."`:
-  - `std/fs`: File system I/O.
-  - `std/http`: Web client (GET, POST).
-  - `std/math`: Math utilities (`max`, `min`, `abs`).
-  - `std/env`: Environment variables.
-  - `std/json`: Parse and stringify JSON.
-  - `std/time`: System time and sleep.
-  - `std/regex`: Pattern matching and replacement.
-- **Real-World Intelligence**: `infer` keyword now connects to real LLM providers (OpenAI, Anthropic, Gemini, Grok, Ollama) via environment configuration.
-
-### Language Improvements
-- **Operators**: Added missing comparison operators (`<`, `>`, `<=`, `>=`).
-- **Method Calls**: Support for multi-argument methods (e.g., `math.max(10, 20)`) and unified property/global function invocation.
-- **Parser**: improved ambiguity resolution for blocks vs struct initializers.
-
-### Breaking Changes
-- **Persistence**: Updated `Closure` serialization format (store files from v0.2.0 are incompatible).
-
-## [0.2.0] - 2026-02-18
+## [1.0.0] - 2026-03-02
 
 ### Added
-- **Native Intelligence**: `infer <Type> { ... }` keyword for direct LLM calls from language syntax.
-- **Probabilistic Logic**: `confidence` operator, `Uncertain` value type, and probabilistic propagation for `+`, `*`, `and`, `or`, `!`.
-- **Concurrency**: Actor model primitives `spawn`, `send`, `receive`, `PID` type.
-- **Vector Embeddings**: First-class `vec[...]` literals and `~>` cosine similarity operator.
-- **Language Server**: Initial LSP implementation (`turn lsp`).
-- **Package Manager**: `turn add <pkg>` command.
-- **Runtime**: `llm_infer` mock provider for testing agentic logic.
+- **Turn Language Core**: First stable release of the Turn programming language and its native Rust Bytecode VM.
+- **Cognitive Type Safety (`infer Struct`)**: Natively intercept struct definitions to ensure exact JSON schema outputs from language models.
+- **Probabilistic Routing (`confidence`)**: First-class `confidence` operator allowing conditional branching logic based on the certainty of probabilistic model outputs (`if confidence x < 0.85 { ... }`).
+- **Actor-Model Concurrency (`spawn_link`, `receive`)**: Multi-agent orchestration through isolated VM execution trees (Actors) and deterministic, zero-shared-state mailboxes.
+- **Semantic Memory Integration (`remember`, `recall`)**: Built-in keywords for managing persistent vector-based institutional memory across long-running autonomous processes.
+- **Provider Agnostic Infrastructure**: Core dispatcher natively routes inference requests to Anthropic, Azure OpenAI, standard OpenAI, Google Gemini, xAI Grok, and Ollama using standard `TURN_LLM_PROVIDER` and `*_API_KEY` environment variables.
+- **Standard Library Core Tools**: Out-of-the-box support for `http_get`, `http_post`, `json_parse`, `json_stringify`, `regex_replace`, `fs_read`, `fs_write`, and `time.sleep`.
+- **Advanced Examples**: Added production-grade autonomous templates including `quant_syndicate.tn`, `investment_committee.tn`, and `marketing_agency.tn` which fully demonstrate the type-safety, concurrency, and intelligence routing capabilities of the framework.
 
 ### Changed
-- **Type System**: Enhanced with Generics (`List<T>`, `Map<T>`) and Runtime Type Checking.
-- **Performance**: Optimized VM instruction dispatch and memory model.
+- Transitioned the default open-source license from Apache 2.0 to the MIT License.
+- Revamped the main `README.md` to properly communicate Turn's paradigm shift as a compiled systems language for non-deterministic compute.
+- Improved the compiler Lexer and Parser, introducing more robust syntax error spans.
 
-## [0.1.0] - Initial Release
-- Basic VM, Lexer, Parser.
-- Functions, Structs, primitive types.
-- HTTP and File I/O tools.
+### Fixed
+- Fixed a major concurrency bug in the VM where `spawn_link` child processes failed to inherit the parent's runtime `struct` definitions, ensuring exact type conformity during parallel execution.
+- Added strict `User-Agent` headers to the native `http_get` and `http_post` tools to prevent failures on restrictive public endpoints (like Wikipedia REST API).
+- Resolved unused mutability warnings enforcing a clean `cargo clippy` and stricter CI pass rates.
+
+## [0.4.0] - Prior Work
+- Initial prototyping of the lexical analyzer, parser, compiler, and stack-based virtual machine.
+- Implementation of base AST components (`Expr::Infer`, `Expr::Confidence`, `Expr::Spawn`).
+- Foundational scaffolding for standard library and context windows.
