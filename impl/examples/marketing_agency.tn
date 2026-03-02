@@ -1,0 +1,75 @@
+// impl/examples/marketing_agency.tn
+// SEO Specialist, Copywriter, and Creative Director agents collaborate to generate high-converting ad copy.
+// Demonstrates: Multi-agent Pipelines, Actor mailbox (receive), Probabilistic routing.
+
+struct ProductContext { product_name: Str, background: Str, seo_keywords: Str };
+struct DraftCopy { hook: Str, body: Str, call_to_action: Str };
+struct FinalCampaign { campaign_id: Num, product: Str, approved: Bool, final_copy: Str, conf_score: Num };
+
+let run_seo_specialist = turn(product: Str) -> ProductContext {
+    call("echo", "🔍 SEO Specialist researching " + product + "...");
+    let url_topic = call("regex_replace", {"pattern": " ", "replacement": "_", "text": product});
+    let raw = call("http_get", "https://en.wikipedia.org/api/rest_v1/page/summary/" + url_topic);
+    
+    let wiki = call("json_parse", raw);
+    if wiki != null {
+        context.append("Product background: " + wiki["extract"]);
+    }
+    
+    let ctx = infer ProductContext { "SEO Specialist for " + product + ". Extract 3-5 keywords." };
+    return ctx;
+};
+
+let run_copywriter = turn(ctx: ProductContext) -> DraftCopy {
+    call("echo", "✍️  Copywriter drafting copy for " + ctx.product_name + "...");
+    context.append("Keywords: " + ctx.seo_keywords);
+    let draft = infer DraftCopy { "World-class Direct Response Copywriter. Write ad for: " + ctx.product_name };
+    return draft;
+};
+
+let run_creative_director = turn(ctx: ProductContext, draft: DraftCopy, campaign_id: Num) -> FinalCampaign {
+    call("echo", "🎭 Creative Director reviewing draft...");
+    let prior = recall("agency feedback " + ctx.product_name);
+    if prior != null {
+        context.append("Prior feedback: " + prior);
+    }
+    
+    let campaign = infer FinalCampaign { "Creative Director approving draft for " + ctx.product_name + ": " + draft.hook };
+    
+    if confidence campaign < 0.85 {
+        call("echo", "❌ Creative Director rejected draft (Low Confidence).");
+        let fallback = FinalCampaign {
+            campaign_id: campaign_id,
+            product: ctx.product_name,
+            approved: false,
+            final_copy: "Fallback: draft rejected due to low confidence score.",
+            conf_score: 0.0
+        };
+        return fallback;
+    }
+    
+    remember("agency feedback " + ctx.product_name, "Campaign " + campaign_id + ": " + campaign.final_copy);
+    return campaign;
+};
+
+turn {
+    let campaign_id = 1;
+    call("echo", "=== MARKETING AGENCY: Campaign #" + campaign_id + " ===");
+
+    // Simulate checking mailbox for API input
+    let target_product = "Electric bicycle";
+    
+    // We could use `let incoming = receive;` if another process sent us a message
+    // For this standalone script, we just proceed.
+    
+    // Pipeline execution
+    let ctx = call(run_seo_specialist, [target_product]);
+    let draft = call(run_copywriter, [ctx]);
+    let final = call(run_creative_director, [ctx, draft, campaign_id]);
+
+    call("echo", "=== API_RESPONSE_START ===");
+    call("echo", call("json_stringify", final));
+    call("echo", "=== API_RESPONSE_END ===");
+    
+    return final;
+}

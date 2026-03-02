@@ -1,0 +1,102 @@
+// impl/examples/quant_syndicate.tn
+// The Algorithmic Trading Syndicate: Concurrent multi-agent hedge fund.
+// Demonstrates: Actor Model (spawn_link), Struct Inference, Concurrency, and Context memory.
+
+use "std/time";
+
+struct MarketData { symbol: Str, price: Num, volume: Num };
+struct TechnicalSignal { ticker: Str, signal: Str, strength: Num, rationale: Str };
+struct SentimentSignal { ticker: Str, sentiment: Str, score: Num, summary: Str };
+struct TradeDecision { ticker: Str, action: Str, size_pct: Num, conviction: Num, memo: Str };
+
+let run_technical = turn(sym: Str) -> Void {
+    call("echo", "📊 Technical Agent analyzing " + sym + "...");
+    context.append("You are a purely technical quantitative analyst. Look at momentum, RSI, and moving averages.");
+    context.append("Current target: " + sym);
+    
+    time.sleep(1.0);
+    
+    let tech = infer TechnicalSignal { 
+        "Generate a realistic technical analysis signal for " + sym + " based on recent market trends. Include 'BUY', 'SELL', or 'HOLD' as the signal.";
+    };
+    
+    call("echo", "   [Technical] Signal: " + tech.signal + " | Strength: " + tech.strength);
+    call("fs_write", {"path": ".turn_store/" + sym + "_tech.json", "content": call("json_stringify", tech)});
+    return null;
+};
+
+let run_sentiment = turn(sym: Str) -> Void {
+    call("echo", "📰 Sentiment Agent parsing news for " + sym + "...");
+    context.append("You are a macro-economic news sentiment parser.");
+    context.append("Current target: " + sym);
+    
+    time.sleep(1.5);
+    
+    let sent = infer SentimentSignal { 
+        "Generate a realistic news sentiment score (0.0 to 1.0) and summary for " + sym + " based on current tech news.";
+    };
+    
+    call("echo", "   [Sentiment] Score: " + sent.score + " | Summary: " + sent.summary);
+    call("fs_write", {"path": ".turn_store/" + sym + "_sent.json", "content": call("json_stringify", sent)});
+    return null;
+};
+
+let main = turn() {
+    let session = 1;
+    let symbol = "NVDA";
+
+    call("echo", "=== QUANT SYNDICATE: Session #" + session + " ===");
+    call("echo", "Target Asset: " + symbol);
+
+    // Spawn the sub-agents in parallel supervisor trees
+    let tech_pid = spawn_link turn() { return call(run_technical, [symbol]); };
+    let sent_pid = spawn_link turn() { return call(run_sentiment, [symbol]); };
+
+    // The Chairman waits for the agents to finish computing
+    call("echo", "⏳ Chairman waiting for quantitative signals...");
+    time.sleep(4.0);
+
+    // Read the signals back from the virtual filesystem
+    let tech_raw = call("fs_read", ".turn_store/" + symbol + "_tech.json");
+    let sent_raw = call("fs_read", ".turn_store/" + symbol + "_sent.json");
+
+    let tech_map = call("json_parse", tech_raw);
+    let sent_map = call("json_parse", sent_raw);
+
+    call("echo", "⚖️  Chairman synthesizing final trade...");
+
+    // The Chairman Agent decides based on the sub-agents' output
+    context.append("You are the Syndicate Chairman. Synthesize the following signals into a final trade decision for " + symbol + ".");
+    context.append("Technical Signal: " + tech_map["signal"] + " (Strength: " + tech_map["strength"] + ")");
+    context.append("Sentiment Score: " + sent_map["score"] + " - " + sent_map["summary"]);
+
+    let decision = infer TradeDecision {
+        "Output the final consensus trade. If signals conflict heavily, conviction should be low and action should be HOLD. Size percentage should be 0-100.";
+    };
+
+    // Probabilistic fallback: if model is uncertain, force safety
+    if confidence decision < 0.85 {
+        call("echo", "⚠️  WARNING: Confidence threshold not met. Executing fallback to HOLD.");
+        let fallback = TradeDecision {
+            ticker: symbol,
+            action: "HOLD",
+            size_pct: 0,
+            conviction: 0,
+            memo: "System fallback triggered due to inference uncertainty."
+        };
+        return fallback;
+    }
+
+    // Log trade history using semantic memory
+    remember("trade history " + symbol, "Session " + session + ": " + decision.action + " at " + decision.size_pct + "% size. Conviction: " + decision.conviction);
+
+    call("echo", "===================================================");
+    call("echo", "🏆 FINAL EXECUTED TRADE: " + decision.action + " " + decision.size_pct + "%");
+    call("echo", "Rationale: " + decision.memo);
+    call("echo", "===================================================");
+
+    return decision;
+};
+
+let res = call(main, null);
+return res;

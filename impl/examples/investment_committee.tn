@@ -1,0 +1,84 @@
+// impl/examples/investment_committee.tn
+// Three specialist agents evaluate a live NVDA equity position concurrently.
+// Demonstrates: Actor Model (spawn_link), Struct Inference, Concurrency, and Context memory.
+
+use "std/time";
+
+struct MarketSnapshot { ticker: Str, price: Num, pe_ratio: Num };
+struct FundamentalThesis { valuation_signal: Str, conviction: Num, thesis: Str };
+struct RiskVerdict { breach: Bool, approved_usd: Num, risk_note: Str };
+struct CommitteeMemo { decision: Str, approved: Num, summary: Str, flags: Str };
+
+let fetch_market_data = turn(ticker: Str) -> MarketSnapshot {
+    let raw = call("http_get", "https://query1.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=1d");
+    context.append("Yahoo Finance feed: " + raw);
+    let snap = infer MarketSnapshot { "Parse the Yahoo Finance JSON for " + ticker + ". Return price, pe_ratio."; };
+    return snap;
+};
+
+let run_fundamental_analyst = turn(snap: MarketSnapshot) -> Void {
+    call("echo", "📈 Fundamental Analyst reviewing " + snap.ticker);
+    let prior = recall("investment memo " + snap.ticker);
+    context.append("Prior notes: " + prior);
+    
+    let thesis = infer FundamentalThesis { "Senior equity analyst thesis for " + snap.ticker + ". Price: " + snap.price + " PE: " + snap.pe_ratio; };
+    if confidence thesis < 0.7 {
+        let fallback = FundamentalThesis {
+            valuation_signal: "FAIR",
+            conviction: 4.0,
+            thesis: "Low confidence execution. Reverting to neutral fair value."
+        };
+        call("fs_write", {"path": ".turn_store/thesis.json", "content": call("json_stringify", fallback)});
+        return null;
+    }
+    
+    remember("investment memo " + snap.ticker, thesis.thesis);
+    call("fs_write", {"path": ".turn_store/thesis.json", "content": call("json_stringify", thesis)});
+    return null;
+};
+
+let run_risk_officer = turn(snap: MarketSnapshot) -> Void {
+    call("echo", "🛡️ Risk Officer reviewing exposure for " + snap.ticker);
+    context.append("You are the Chief Risk Officer. Ensure we do not breach $5M exposure.");
+    
+    let verdict = infer RiskVerdict { "Review the asset and determine if risk limits are breached." };
+    call("fs_write", {"path": ".turn_store/risk.json", "content": call("json_stringify", verdict)});
+    return null;
+};
+
+let committee_chair = turn(ticker: Str, requested: Num) -> CommitteeMemo {
+    let snap = fetch_market_data(ticker);
+    
+    // Spawn specialized agents concurrently
+    let analyst_pid = spawn_link turn() { return call(run_fundamental_analyst, [snap]); };
+    let risk_pid = spawn_link turn() { return call(run_risk_officer, [snap]); };
+    
+    time.sleep(5.0); // Wait for agents
+    
+    let thesis_raw = call("fs_read", ".turn_store/thesis.json");
+    let risk_raw = call("fs_read", ".turn_store/risk.json");
+    
+    let thesis = call("json_parse", thesis_raw);
+    let risk = call("json_parse", risk_raw);
+    
+    context.append("Committee Chair decision for " + ticker);
+    context.append("Analyst Thesis: " + thesis["thesis"] + " Conviction: " + thesis["conviction"]);
+    context.append("Risk Officer: breach=" + risk["breach"] + " note: " + risk["risk_note"]);
+    
+    let memo = infer CommitteeMemo { "Synthesize the final binding committee decision." };
+    
+    let session = 1;
+    call("fs_write", {"path": ".turn_store/memos/session_" + session + "_" + ticker + ".json", "content": call("json_stringify", memo)});
+    remember("committee history " + ticker, "Session " + session + ": " + memo.decision);
+    
+    return memo;
+};
+
+turn {
+    call("echo", "=== INVESTMENT COMMITTEE START ===");
+    let memo = call(committee_chair, ["NVDA", 2000000.0]);
+    call("echo", "Decision: " + memo.decision);
+    call("echo", "Approved Amount: $" + memo.approved);
+    call("echo", "Summary: " + memo.summary);
+    return memo;
+}
