@@ -267,7 +267,7 @@ impl Vm {
                         rt.env = env.clone();
                         rt.structs = process.runtime.structs.clone();
 
-                        let mut new_process = Process {
+                        let new_process = Process {
                             pid: new_pid,
                             parent_pid: None, // NO LINK
                             frames: vec![Frame {
@@ -298,7 +298,7 @@ impl Vm {
                         rt.env = env.clone();
                         rt.structs = process.runtime.structs.clone();
 
-                        let mut new_process = Process {
+                        let new_process = Process {
                             pid: new_pid,
                             parent_pid: Some(process.pid), // LINKED
                             frames: vec![Frame {
