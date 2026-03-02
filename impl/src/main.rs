@@ -103,9 +103,10 @@ fn main() -> Result<()> {
                             .offset()
                             .map(|o| turn::offset_to_line_col(&source_content, o))
                     } else {
-                        e.downcast_ref::<turn::parser::ParseError>().map(|parse_err| {
-                            turn::offset_to_line_col(&source_content, parse_err.offset())
-                        })
+                        e.downcast_ref::<turn::parser::ParseError>()
+                            .map(|parse_err| {
+                                turn::offset_to_line_col(&source_content, parse_err.offset())
+                            })
                     };
                     match loc {
                         Some((l, c)) => eprintln!("{}:{}:{}: {}", file.display(), l, c, msg),
