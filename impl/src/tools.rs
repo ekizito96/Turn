@@ -350,6 +350,7 @@ fn call_llm_dispatch(
         "azure" => {
             let api_key = env::var("AZURE_OPENAI_KEY")
                 .or_else(|_| env::var("AZURE_API_KEY"))
+                .or_else(|_| env::var("AZURE_OPENAI_API_KEY"))
                 .map_err(|_| "AZURE_OPENAI_KEY or AZURE_API_KEY not set".to_string())?;
 
             // If full Responses API URL is provided, use it directly.
