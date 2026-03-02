@@ -795,9 +795,12 @@ impl ToolRegistry {
                      }));
 
                      let messages = serde_json::Value::Array(msgs);
+                     
+                     println!("Calling LLM Dispatch with messages: {}", messages);
 
                      match call_llm_dispatch(None, &messages) {
                          Ok((content, tokens)) => {
+                             println!("LLM Reply: {}", content);
                              let clean = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
                              match serde_json::from_str::<serde_json::Value>(clean) {
                                  Ok(json) => {
@@ -830,10 +833,14 @@ impl ToolRegistry {
 
                                      Ok((Value::Uncertain(Box::new(turn_val), conf), tokens))
                                  },
-                                 Err(e) => Err(format!("Failed to parse LLM JSON: {} in '{}'", e, clean)),
+                                 Err(e) => {
+                                    println!("Failed to parse LLM JSON: {} in '{}'", e, clean);
+                                    Err(format!("Failed to parse LLM JSON: {} in '{}'", e, clean))
+                                 },
                              }
                          },
-                         Err(_) => {
+                         Err(e) => {
+                             println!("LLM Dispatch failed: {}", e);
                              // Fallback to Mock
                              match schema {
                                  Value::Str(s) if s.contains("Num") => {
