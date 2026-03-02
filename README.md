@@ -1,79 +1,86 @@
-# Turn
+# Turn Language
 
-**A systems language for agentic computation.** Turn is a compiled language whose primitives encode the physical constraints of agentic software: finite context capacity, stochastic inference, durable state, and suspension/resumption across effects.
+<p align="center">
+  <a href="https://turn-lang.dev"><strong>Website & Documentation</strong></a> ·
+  <a href="https://turn-lang.dev/#playground"><strong>Live Playground</strong></a>
+</p>
 
-**Quick Links:**
-- [Vision](VISION.md) — Single source of truth for language vision and roadmap
-- [Whitepaper](WHITEPAPER.md) — Publishable model and semantics overview
-- [Spec](spec/) — Formal grammar and runtime model
+Turn is a compiled systems programming language designed specifically for autonomous, multi-agent AI workflows. It treats Large Language Models (LLMs) as native computational units (ALUs) rather than external API endpoints.
 
-## Status
+Powered by a custom Rust bytecode Virtual Machine, Turn solves the inherent unreliability of bolting probabilistic LLMs onto deterministic languages like Python and TypeScript.
 
-**Spec locked for v1 minimal core.** Design mandate and primitives are fixed. **Implementation:** Rust bytecode VM from day one (see [spec/07-implementation-strategy.md](spec/07-implementation-strategy.md)). Not Python/TypeScript—those languages' overhead contradicts Turn's goals (fast, cost-efficient).
+## Why Turn?
 
-## Design mandate
+Current AI frameworks rely on massive layers of Pydantic models, JSON-parsing retry loops, and async spaghetti to coordinate agents. Turn fixes this at the compiler level with three core primitives:
 
-Mission, design goals, and first-principles justification: [spec/00-design-mandate.md](spec/00-design-mandate.md).
+1. **Cognitive Type Safety (`infer Struct`)**: Define a struct and call `infer`. The VM natively intercepts the schema constraints and guarantees the inference provider returns exactly the memory shape you asked for. No manual parsing required.
+2. **Probabilistic Routing (`confidence`)**: LLMs hallucinate. Turn makes uncertainty a first-class citizen. Use the `confidence` operator to build native fail-safes directly into your control flow (e.g., `if confidence decision < 0.85 { return Fallback; }`).
+3. **Erlang-style Actors (`spawn_link` & `receive`)**: Multi-agent orchestration in Python is a race-condition nightmare. Turn uses an Actor model. Agents run in isolated VM threads (`spawn_link`) and communicate safely via deterministic mailboxes (`receive`).
 
-High-level design and rationale: [spec/00-design-mandate.md](spec/00-design-mandate.md)
+## Features
 
-## Project layout
+*   **Custom Rust Bytecode VM**: Fast, sandboxed, stack-based execution.
+*   **Provider Agnostic**: Natively routes to Anthropic, Azure OpenAI, standard OpenAI, Google Gemini, xAI Grok, and Ollama via a single environment variable (`TURN_LLM_PROVIDER`). No bloated SDKs required.
+*   **Semantic Memory**: Built-in `remember` and `recall` for cross-session vector persistence.
+*   **Native Standard Library**: HTTP, Regex, JSON parsing, and File System operations built directly into the bytecode execution loop.
 
-```
-Turn/
-├── README.md                    # This file
-├── VISION.md                    # Vision and roadmap (public)
-├── WHITEPAPER.md                # Publishable model + semantics overview
-├── spec/                        # Language specification (locked for v1)
-│   ├── 00-design-mandate.md     # Mission and design goals
-│   ├── 01-minimal-core.md       # Turn, context, memory, tool primitives
-│   ├── 02-grammar.md            # BNF, lexer, operators
-│   ├── 03-runtime-model.md      # Configuration, transitions, semantics
-│   ├── 04-hello-turn.md         # First program example
-│   └── 07-implementation-strategy.md  # Rust VM architecture
-└── impl/                        # Rust bytecode VM implementation
-    ├── src/                     # Lexer, parser, compiler, VM, runtime
-    └── tests/                   # Integration and suspension tests
-```
+## Quick Start
 
-**New to Turn?** Start with [VISION.md](VISION.md) then read the [spec/](spec/) for formal semantics.
+### Installation
 
-## Running
+You can install the Turn CLI using Cargo:
 
 ```bash
-cd impl
-./run.sh test      # run tests
-./run.sh hello     # run hello_turn (prints "Hello")
-./run.sh examples  # run all examples
-./run.sh build     # build release binary
+cargo install --git https://github.com/ekizito96/Turn turn
 ```
 
-Or directly:
+### Writing Your First Agent
+
+Create a file named `hello.tn`:
+
+```turn
+struct Sentiment { score: Num, reasoning: Str };
+
+turn {
+    let input = "I absolutely love building systems in Rust!";
+    
+    let result = infer Sentiment {
+        "Analyze the sentiment of the following text: " + input
+    };
+    
+    if confidence result < 0.8 {
+        call("echo", "Low confidence. Fallback triggered.");
+        return null;
+    }
+    
+    call("echo", "Score: " + result.score);
+    call("echo", "Reasoning: " + result.reasoning);
+    
+    return result;
+}
+```
+
+### Running the Agent
+
+Set your preferred provider and API key, then run the script:
+
 ```bash
-cd impl && cargo run -- run ../examples/hello_turn.tn
+export TURN_LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-your-api-key
+turn run hello.tn
 ```
 
-**Features (v0.4.0):**
-- **Standard Library**: Built-in modules `std/fs`, `std/http`, `std/math`, `std/json`, `std/time`, `std/regex`.
-- **Native Intelligence**: `infer Num { "Prompt" }` connected to real LLMs (OpenAI, Anthropic, Gemini, etc.).
-- **Probabilistic Logic**: `confidence` operator and uncertainty propagation.
-- **Concurrency**: Actor model with `spawn`, `send`, `receive`.
-- **Vector Embeddings**: `vec[1,2,3]` and `~>` similarity operator.
-- **Language Core**: Multi-arg methods (`math.max(10, 20)`), object-shaped syntax, comparison operators.
-- **Structured Data**: Typed Generics `List<T>`, `Map<T>`.
-- **Language Server**: `turn lsp` included.
-- **Orthogonal Persistence**: `suspend;` primitive for durable checkpoint boundaries.
+## Advanced Examples
 
-**Legacy Features (v0.2.0):**
-- **Persistence**: Automatic state saving (`.turn_store`).
-- **Server Mode**: Built-in `turn serve` command.
-- **Error Handling**: `try/catch/throw`.
+Check out the `impl/examples/` directory for production-grade multi-agent workflows:
+*   [**Algorithmic Trading Syndicate**](impl/examples/quant_syndicate.tn): Three autonomous agents (Technical, Sentiment, and Risk) debate a trade concurrently, and a Chairman executes the final decision.
+*   [**Investment Committee**](impl/examples/investment_committee.tn): Specialist agents evaluate a live equity position concurrently using Yahoo Finance data.
+*   [**Marketing Agency**](impl/examples/marketing_agency.tn): An SEO Specialist, Copywriter, and Creative Director collaborate to generate high-converting ad copy using Wikipedia research.
 
-**First time?** Install Rust if needed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+## Documentation
 
-## Reading order
+For a comprehensive guide to the language grammar, runtime model, and ecosystem bridges, visit the official documentation at [turn-lang.dev/docs](https://turn-lang.dev/docs).
 
-1. `VISION.md`
-2. `WHITEPAPER.md`
-3. `spec/00-design-mandate.md` → `spec/03-runtime-model.md`
-4. `impl/` (reference implementation)
+## License
+
+Turn is open-source software licensed under the [MIT License](LICENSE).
