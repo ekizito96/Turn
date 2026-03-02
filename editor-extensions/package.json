@@ -1,0 +1,35 @@
+{
+    "name": "turn-language",
+    "displayName": "Turn Language",
+    "description": "Syntax highlighting and language support for the Turn programming language",
+    "version": "1.0.0",
+    "publisher": "ekizito",
+    "engines": {
+        "vscode": "^1.70.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "turn",
+                "aliases": [
+                    "Turn",
+                    "turn"
+                ],
+                "extensions": [
+                    ".tn"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "turn",
+                "scopeName": "source.turn",
+                "path": "./syntaxes/turn.tmLanguage.json"
+            }
+        ]
+    }
+}

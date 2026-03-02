@@ -1,0 +1,81 @@
+{
+    "name": "Turn",
+    "scopeName": "source.turn",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#types"
+        },
+        {
+            "include": "#functions"
+        },
+        {
+            "include": "#numbers"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.turn",
+                    "match": "//.*$"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.turn",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.turn",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.turn",
+                    "match": "\\b(let|return|if|else|spawn|spawn_link|receive|send|harvest|with|budget|persist|confidence|turn|null|true|false)\\b"
+                },
+                {
+                    "name": "keyword.other.turn",
+                    "match": "\\b(struct|use)\\b"
+                },
+                {
+                    "name": "keyword.operator.turn",
+                    "match": "=|\\+|\\-|\\*|/|==|!=|<|>|<=|>="
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "support.type.turn",
+                    "match": "\\b(Str|Num|Bool|Void|List|Map|Any|Pid)\\b"
+                }
+            ]
+        },
+        "functions": {
+            "patterns": [
+                {
+                    "name": "support.function.turn",
+                    "match": "\\b(call|infer|remember|recall|context\\.append)\\b"
+                }
+            ]
+        },
+        "numbers": {
+            "name": "constant.numeric.turn",
+            "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+        }
+    }
+}
