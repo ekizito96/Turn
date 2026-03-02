@@ -1,11 +1,11 @@
+use crate::ast::Type;
 use crate::bytecode::Instr;
 use crate::runtime::Runtime;
 use crate::value::Value;
-use crate::ast::Type;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Frame {
@@ -43,9 +43,12 @@ pub struct Process {
     pub gas_remaining: u64,
 }
 
-fn default_gas() -> u64 { 1_000_000 }
+fn default_gas() -> u64 {
+    1_000_000
+}
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum VmResult {
     Complete(Value),
     Suspended {
@@ -69,7 +72,7 @@ impl Vm {
             env: HashMap::new(),
             handlers: Vec::new(),
         };
-        
+
         let root_process = Process {
             pid: 1,
             parent_pid: None,
@@ -99,12 +102,12 @@ impl Vm {
             mailbox: state.mailbox,
             gas_remaining: state.gas_remaining,
         };
-        
+
         process.stack.push(tool_result);
-        
+
         let mut scheduler = state.scheduler;
         scheduler.push_back(process);
-        
+
         Self {
             scheduler,
             next_pid: state.next_pid,
@@ -121,20 +124,20 @@ impl Vm {
             mailbox: state.mailbox,
             gas_remaining: state.gas_remaining,
         };
-        
+
         let mut scheduler = state.scheduler;
         scheduler.push_back(process);
-        
+
         let mut vm = Self {
             scheduler,
             next_pid: state.next_pid,
         };
 
         let err = Value::Str(error_msg);
-        
+
         // Unwind stack looking for catch
         if let Some(p) = vm.scheduler.front_mut() {
-             loop {
+            loop {
                 if p.frames.is_empty() {
                     // No frames left, push error to stack (uncaught)
                     p.stack.push(err);
@@ -165,7 +168,7 @@ impl Vm {
 
             let mut process = self.scheduler.pop_front().unwrap();
             let result = self.run_process(&mut process, 1000); // 1000 ops slice
-            
+
             match result {
                 VmResult::Yielded => {
                     self.scheduler.push_back(process);
@@ -181,14 +184,19 @@ impl Vm {
                         map.insert("pid".to_string(), Value::Pid(process.pid));
                         map.insert("result".to_string(), v);
                         let signal = Value::Map(map);
-                        
-                        if let Some(parent) = self.scheduler.iter_mut().find(|p| p.pid == parent_id) {
+
+                        if let Some(parent) = self.scheduler.iter_mut().find(|p| p.pid == parent_id)
+                        {
                             parent.mailbox.push_back(signal);
                         }
                     }
                     // Child finished, dropped.
                 }
-                VmResult::Suspended { tool_name, arg, continuation: _ } => {
+                VmResult::Suspended {
+                    tool_name,
+                    arg,
+                    continuation: _,
+                } => {
                     // Reconstruct VmState for legacy support
                     let state = VmState {
                         pid: process.pid,
@@ -213,7 +221,7 @@ impl Vm {
 
     fn run_process(&mut self, process: &mut Process, steps: usize) -> VmResult {
         let mut steps_left = steps;
-        
+
         loop {
             if process.gas_remaining == 0 {
                 return VmResult::Complete(Value::Str("Error: Out of gas".to_string()));
@@ -226,12 +234,12 @@ impl Vm {
             steps_left -= 1;
 
             if process.frames.is_empty() {
-                 return VmResult::Complete(process.stack.pop().unwrap_or(Value::Null));
+                return VmResult::Complete(process.stack.pop().unwrap_or(Value::Null));
             }
 
             let frame_idx = process.frames.len() - 1;
             let frame = &mut process.frames[frame_idx];
-            
+
             if frame.ip >= frame.code.len() {
                 if process.frames.len() == 1 {
                     return VmResult::Complete(process.stack.pop().unwrap_or(Value::Null));
@@ -252,27 +260,27 @@ impl Vm {
                 Instr::Spawn => {
                     let target = process.stack.pop().unwrap_or(Value::Null);
                     if let Value::Closure { code, ip, env, .. } = target {
-                         let new_pid = self.next_pid;
-                         self.next_pid += 1;
-                         
-                         let mut new_process = Process {
-                             pid: new_pid,
-                             parent_pid: None, // NO LINK
-                             frames: vec![Frame {
-                                 code,
-                                 ip,
-                                 env: env.clone(),
-                                 handlers: Vec::new(),
-                             }],
-                             stack: Vec::new(),
-                             runtime: Runtime::new(),
-                             mailbox: VecDeque::new(),
-                             gas_remaining: default_gas(),
-                         };
-                         new_process.runtime.env = env;
-                         
-                         self.scheduler.push_back(new_process);
-                         process.stack.push(Value::Pid(new_pid));
+                        let new_pid = self.next_pid;
+                        self.next_pid += 1;
+
+                        let mut new_process = Process {
+                            pid: new_pid,
+                            parent_pid: None, // NO LINK
+                            frames: vec![Frame {
+                                code,
+                                ip,
+                                env: env.clone(),
+                                handlers: Vec::new(),
+                            }],
+                            stack: Vec::new(),
+                            runtime: Runtime::new(),
+                            mailbox: VecDeque::new(),
+                            gas_remaining: default_gas(),
+                        };
+                        new_process.runtime.env = env;
+
+                        self.scheduler.push_back(new_process);
+                        process.stack.push(Value::Pid(new_pid));
                     } else {
                         process.stack.push(Value::Null);
                     }
@@ -280,27 +288,27 @@ impl Vm {
                 Instr::SpawnLink => {
                     let target = process.stack.pop().unwrap_or(Value::Null);
                     if let Value::Closure { code, ip, env, .. } = target {
-                         let new_pid = self.next_pid;
-                         self.next_pid += 1;
-                         
-                         let mut new_process = Process {
-                             pid: new_pid,
-                             parent_pid: Some(process.pid), // LINKED
-                             frames: vec![Frame {
-                                 code,
-                                 ip,
-                                 env: env.clone(),
-                                 handlers: Vec::new(),
-                             }],
-                             stack: Vec::new(),
-                             runtime: Runtime::new(),
-                             mailbox: VecDeque::new(),
-                             gas_remaining: default_gas(),
-                         };
-                         new_process.runtime.env = env;
-                         
-                         self.scheduler.push_back(new_process);
-                         process.stack.push(Value::Pid(new_pid));
+                        let new_pid = self.next_pid;
+                        self.next_pid += 1;
+
+                        let mut new_process = Process {
+                            pid: new_pid,
+                            parent_pid: Some(process.pid), // LINKED
+                            frames: vec![Frame {
+                                code,
+                                ip,
+                                env: env.clone(),
+                                handlers: Vec::new(),
+                            }],
+                            stack: Vec::new(),
+                            runtime: Runtime::new(),
+                            mailbox: VecDeque::new(),
+                            gas_remaining: default_gas(),
+                        };
+                        new_process.runtime.env = env;
+
+                        self.scheduler.push_back(new_process);
+                        process.stack.push(Value::Pid(new_pid));
                     } else {
                         process.stack.push(Value::Null);
                     }
@@ -308,7 +316,7 @@ impl Vm {
                 Instr::Send => {
                     let msg = process.stack.pop().unwrap_or(Value::Null);
                     let pid_val = process.stack.pop().unwrap_or(Value::Null);
-                    
+
                     if let Value::Pid(pid) = pid_val {
                         let mut found = false;
                         for p in &mut self.scheduler {
@@ -324,7 +332,7 @@ impl Vm {
                         }
                         process.stack.push(Value::Bool(found));
                     } else {
-                         process.stack.push(Value::Bool(false));
+                        process.stack.push(Value::Bool(false));
                     }
                 }
                 Instr::Receive => {
@@ -333,7 +341,7 @@ impl Vm {
                     } else {
                         // Yield and retry same instruction later
                         process.frames[frame_idx].ip -= 1;
-                        return VmResult::Yielded; 
+                        return VmResult::Yielded;
                     }
                 }
                 Instr::Confidence => {
@@ -377,12 +385,15 @@ impl Vm {
                         other => other,
                     };
                     let ty_str = format!("{:?}", resolved_ty);
-                    
+
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
                     map.insert("schema".to_string(), Value::Str(ty_str));
-                    map.insert("context".to_string(), Value::List(process.runtime.context.to_flat_vec()));
-                    
+                    map.insert(
+                        "context".to_string(),
+                        Value::List(process.runtime.context.to_flat_vec()),
+                    );
+
                     process.frames[frame_idx].env = process.runtime.env.clone();
                     let state = VmState {
                         pid: process.pid,
@@ -409,13 +420,13 @@ impl Vm {
                 Instr::PushFalse => process.stack.push(Value::Bool(false)),
                 Instr::PushNum(n) => process.stack.push(Value::Num(n)),
                 Instr::PushStr(s) => process.stack.push(Value::Str(s)),
-                Instr::Pop => { process.stack.pop(); },
-                Instr::Load(name) => {
-                    match process.runtime.get_env(&name) {
-                        Some(v) => process.stack.push(v),
-                        None => process.stack.push(Value::Null),
-                    }
+                Instr::Pop => {
+                    process.stack.pop();
                 }
+                Instr::Load(name) => match process.runtime.get_env(&name) {
+                    Some(v) => process.stack.push(v),
+                    None => process.stack.push(Value::Null),
+                },
                 Instr::Store(name) => {
                     let val = process.stack.pop().unwrap_or(Value::Null);
                     process.runtime.push_env(name, val);
@@ -499,11 +510,15 @@ impl Vm {
                 }
                 Instr::JumpIfFalse(target) => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
-                    if v.is_falsy() { process.frames[frame_idx].ip = target as usize; }
+                    if v.is_falsy() {
+                        process.frames[frame_idx].ip = target as usize;
+                    }
                 }
                 Instr::JumpIfTrue(target) => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
-                    if v.is_truthy() { process.frames[frame_idx].ip = target as usize; }
+                    if v.is_truthy() {
+                        process.frames[frame_idx].ip = target as usize;
+                    }
                 }
                 Instr::ContextAppend => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
@@ -553,10 +568,10 @@ impl Vm {
                 Instr::CallMethod(name) => {
                     let arg = process.stack.pop().unwrap_or(Value::Null);
                     let target = process.stack.pop().unwrap_or(Value::Null);
-                    
+
                     let (tool_val, final_arg) = if let Some(func) = match &target {
                         Value::Map(m) | Value::Struct(_, m) => m.get(&name).cloned(),
-                        _ => None
+                        _ => None,
                     } {
                         (func, arg)
                     } else if let Some(func) = process.runtime.get_env(&name) {
@@ -586,7 +601,12 @@ impl Vm {
                                 continuation: state,
                             };
                         }
-                        Value::Closure { code, ip, env, params } => {
+                        Value::Closure {
+                            code,
+                            ip,
+                            env,
+                            params,
+                        } => {
                             let mut new_env = env.clone();
                             let mut mem_inserts = Vec::new();
 
@@ -643,13 +663,13 @@ impl Vm {
                                 mem_inserts.push(("arg".to_string(), final_arg.clone()));
                                 new_env.insert("arg".to_string(), final_arg);
                             }
-                            
+
                             process.frames[frame_idx].env = process.runtime.env.clone();
                             process.runtime.env = new_env;
                             for (k, v) in mem_inserts {
                                 process.runtime.memory.insert(k, v);
                             }
-                            
+
                             process.frames.push(Frame {
                                 code,
                                 ip,
@@ -663,7 +683,7 @@ impl Vm {
                 Instr::CallTool => {
                     let arg = process.stack.pop().unwrap_or(Value::Null);
                     let tool_val = process.stack.pop().unwrap_or(Value::Null);
-                    
+
                     match tool_val {
                         Value::Str(name) => {
                             process.frames[frame_idx].env = process.runtime.env.clone();
@@ -684,7 +704,12 @@ impl Vm {
                                 continuation: state,
                             };
                         }
-                        Value::Closure { code, ip, env, params } => {
+                        Value::Closure {
+                            code,
+                            ip,
+                            env,
+                            params,
+                        } => {
                             let mut new_env = env.clone();
                             let mut mem_inserts = Vec::new();
 
@@ -741,13 +766,13 @@ impl Vm {
                                 mem_inserts.push(("arg".to_string(), arg.clone()));
                                 new_env.insert("arg".to_string(), arg);
                             }
-                            
+
                             process.frames[frame_idx].env = process.runtime.env.clone();
                             process.runtime.env = new_env;
                             for (k, v) in mem_inserts {
                                 process.runtime.memory.insert(k, v);
                             }
-                            
+
                             process.frames.push(Frame {
                                 code,
                                 ip,
@@ -772,7 +797,9 @@ impl Vm {
                 }
                 Instr::MakeList(count) => {
                     let mut items = Vec::new();
-                    for _ in 0..count { items.push(process.stack.pop().unwrap_or(Value::Null)); }
+                    for _ in 0..count {
+                        items.push(process.stack.pop().unwrap_or(Value::Null));
+                    }
                     items.reverse();
                     process.stack.push(Value::List(items));
                 }
@@ -781,7 +808,10 @@ impl Vm {
                     for _ in 0..count {
                         let val = process.stack.pop().unwrap_or(Value::Null);
                         let k_val = process.stack.pop().unwrap_or(Value::Null);
-                        let k = match k_val { Value::Str(s) => s, _ => k_val.to_string() };
+                        let k = match k_val {
+                            Value::Str(s) => s,
+                            _ => k_val.to_string(),
+                        };
                         map.insert(k, val);
                     }
                     process.stack.push(Value::Map(map));
@@ -791,7 +821,10 @@ impl Vm {
                     for _ in 0..count {
                         let val = process.stack.pop().unwrap_or(Value::Null);
                         let k_val = process.stack.pop().unwrap_or(Value::Null);
-                        let k = match k_val { Value::Str(s) => s, _ => k_val.to_string() };
+                        let k = match k_val {
+                            Value::Str(s) => s,
+                            _ => k_val.to_string(),
+                        };
                         map.insert(k, val);
                     }
                     process.stack.push(Value::Struct(name, map));
@@ -823,21 +856,35 @@ impl Vm {
                     let idx = process.stack.pop().unwrap_or(Value::Null);
                     let tgt = process.stack.pop().unwrap_or(Value::Null);
                     let res = match tgt {
-                        Value::List(l) => if let Value::Num(n) = idx { l.get(n as usize).cloned().unwrap_or(Value::Null) } else { Value::Null },
+                        Value::List(l) => {
+                            if let Value::Num(n) = idx {
+                                l.get(n as usize).cloned().unwrap_or(Value::Null)
+                            } else {
+                                Value::Null
+                            }
+                        }
                         Value::Map(m) | Value::Struct(_, m) => {
-                            let k = match idx { Value::Str(s) => s, Value::Num(n) => n.to_string(), _ => "".to_string() };
+                            let k = match idx {
+                                Value::Str(s) => s,
+                                Value::Num(n) => n.to_string(),
+                                _ => "".to_string(),
+                            };
                             m.get(&k).cloned().unwrap_or(Value::Null)
-                        },
+                        }
                         Value::Uncertain(inner, _) => {
-                             // Auto-unwrap uncertain for property access
-                             match inner.as_ref() {
-                                 Value::Map(m) | Value::Struct(_, m) => {
-                                     let k = match idx { Value::Str(s) => s, Value::Num(n) => n.to_string(), _ => "".to_string() };
-                                     m.get(&k).cloned().unwrap_or(Value::Null)
-                                 },
-                                 _ => Value::Null
-                             }
-                        },
+                            // Auto-unwrap uncertain for property access
+                            match inner.as_ref() {
+                                Value::Map(m) | Value::Struct(_, m) => {
+                                    let k = match idx {
+                                        Value::Str(s) => s,
+                                        Value::Num(n) => n.to_string(),
+                                        _ => "".to_string(),
+                                    };
+                                    m.get(&k).cloned().unwrap_or(Value::Null)
+                                }
+                                _ => Value::Null,
+                            }
+                        }
                         _ => Value::Null,
                     };
                     process.stack.push(res);
@@ -845,11 +892,19 @@ impl Vm {
                 Instr::MakeTurn(offset, params) => {
                     let code = process.frames[frame_idx].code.clone();
                     let env = process.runtime.env.clone();
-                    process.stack.push(Value::Closure { code, ip: offset as usize, env, params });
+                    process.stack.push(Value::Closure {
+                        code,
+                        ip: offset as usize,
+                        env,
+                        params,
+                    });
                 }
                 Instr::LoadModule => {
                     let p_val = process.stack.pop().unwrap_or(Value::Null);
-                    let path = match p_val { Value::Str(s) => s, _ => "".to_string() };
+                    let path = match p_val {
+                        Value::Str(s) => s,
+                        _ => "".to_string(),
+                    };
                     process.frames[frame_idx].env = process.runtime.env.clone();
                     let state = VmState {
                         pid: process.pid,
@@ -862,25 +917,36 @@ impl Vm {
                         next_pid: self.next_pid,
                         gas_remaining: process.gas_remaining,
                     };
-                    return VmResult::Suspended { tool_name: "sys_import".to_string(), arg: Value::Str(path), continuation: state };
+                    return VmResult::Suspended {
+                        tool_name: "sys_import".to_string(),
+                        arg: Value::Str(path),
+                        continuation: state,
+                    };
                 }
                 Instr::CheckType(ref ty) => {
                     let val = process.stack.last().unwrap_or(&Value::Null);
                     if !self.check_value_type(ty, val) {
-                        let err = Value::Str(format!("Runtime Type Error: Expected {:?}, got {:?}", ty, val));
-                         // Unwind
-                         loop {
-                             if process.frames.is_empty() { return VmResult::Complete(err); }
-                             let f_idx = process.frames.len() - 1;
-                             if let Some(off) = process.frames[f_idx].handlers.pop() {
-                                 process.frames[f_idx].ip = off as usize;
-                                 process.stack.push(err);
-                                 break;
-                             } else {
-                                 process.frames.pop();
-                                 if let Some(c) = process.frames.last() { process.runtime.env = c.env.clone(); }
-                             }
-                         }
+                        let err = Value::Str(format!(
+                            "Runtime Type Error: Expected {:?}, got {:?}",
+                            ty, val
+                        ));
+                        // Unwind
+                        loop {
+                            if process.frames.is_empty() {
+                                return VmResult::Complete(err);
+                            }
+                            let f_idx = process.frames.len() - 1;
+                            if let Some(off) = process.frames[f_idx].handlers.pop() {
+                                process.frames[f_idx].ip = off as usize;
+                                process.stack.push(err);
+                                break;
+                            } else {
+                                process.frames.pop();
+                                if let Some(c) = process.frames.last() {
+                                    process.runtime.env = c.env.clone();
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -898,30 +964,42 @@ impl Vm {
             (Type::Bool, Value::Bool(_)) => true,
             (Type::Bool, Value::Null) => false,
             (Type::List(inner), Value::List(items)) => {
-                if **inner == Type::Any { return true; }
+                if **inner == Type::Any {
+                    return true;
+                }
                 for item in items {
-                    if !self.check_value_type(inner, item) { return false; }
+                    if !self.check_value_type(inner, item) {
+                        return false;
+                    }
                 }
                 true
-            },
+            }
             (Type::Map(inner), Value::Map(map)) => {
-                if **inner == Type::Any { return true; }
+                if **inner == Type::Any {
+                    return true;
+                }
                 for (_, val) in map {
-                    if !self.check_value_type(inner, val) { return false; }
+                    if !self.check_value_type(inner, val) {
+                        return false;
+                    }
                 }
                 true
-            },
+            }
             (Type::Struct(name, fields), Value::Struct(val_name, val_fields)) => {
-                if name != val_name { return false; }
+                if name != val_name {
+                    return false;
+                }
                 for (field_name, field_ty) in fields {
                     if let Some(val) = val_fields.get(field_name) {
-                        if !self.check_value_type(field_ty, val) { return false; }
+                        if !self.check_value_type(field_ty, val) {
+                            return false;
+                        }
                     } else {
                         return false;
                     }
                 }
                 true
-            },
+            }
             (Type::Function(_arg_ty, _ret_ty), Value::Closure { .. }) => true,
             (Type::Pid, Value::Pid(_)) => true,
             (Type::Any, _) => true,
@@ -961,7 +1039,7 @@ fn add_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), p1 * p2)
             }
-        },
+        }
         (Value::Uncertain(v, p), other) => {
             let res = add_values(v, other);
             if let Value::Uncertain(inner, p2) = res {
@@ -969,7 +1047,7 @@ fn add_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = add_values(other, v);
             if let Value::Uncertain(inner, p2) = res {
@@ -977,32 +1055,34 @@ fn add_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         (Value::Num(x), Value::Num(y)) => Value::Num(x + y),
         (Value::Vec(v1), Value::Vec(v2)) => {
-            if v1.len() != v2.len() { return Value::Null; }
+            if v1.len() != v2.len() {
+                return Value::Null;
+            }
             let sum: Vec<f64> = v1.iter().zip(v2.iter()).map(|(x, y)| x + y).collect();
             Value::Vec(sum)
-        },
+        }
         (Value::List(l1), Value::List(l2)) => {
             let mut new_list = l1.clone();
             new_list.extend(l2.clone());
             Value::List(new_list)
-        },
+        }
         (Value::Map(m1), Value::Map(m2)) => {
             let mut new_map = m1.clone();
             for (k, v) in m2 {
                 new_map.insert(k.clone(), v.clone());
             }
             Value::Map(new_map)
-        },
+        }
         (Value::Struct(name1, m1), Value::Struct(name2, m2)) if name1 == name2 => {
-             let mut new_map = m1.clone();
-             for (k, v) in m2 {
-                 new_map.insert(k.clone(), v.clone());
-             }
-             Value::Struct(name1.clone(), new_map)
-        },
+            let mut new_map = m1.clone();
+            for (k, v) in m2 {
+                new_map.insert(k.clone(), v.clone());
+            }
+            Value::Struct(name1.clone(), new_map)
+        }
         _ => Value::Str(format!("{}{}", a, b)),
     }
 }
@@ -1016,7 +1096,7 @@ fn mul_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), p1 * p2)
             }
-        },
+        }
         (Value::Uncertain(v, p), other) => {
             let res = mul_values(v, other);
             if let Value::Uncertain(inner, p2) = res {
@@ -1024,7 +1104,7 @@ fn mul_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = mul_values(other, v);
             if let Value::Uncertain(inner, p2) = res {
@@ -1032,27 +1112,33 @@ fn mul_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         (Value::Num(x), Value::Num(y)) => Value::Num(x * y),
         (Value::Vec(v), Value::Num(x)) | (Value::Num(x), Value::Vec(v)) => {
             let res: Vec<f64> = v.iter().map(|n| n * x).collect();
             Value::Vec(res)
-        },
+        }
         (Value::Vec(v1), Value::Vec(v2)) => {
-            if v1.len() != v2.len() { return Value::Null; }
+            if v1.len() != v2.len() {
+                return Value::Null;
+            }
             let dot: f64 = v1.iter().zip(v2.iter()).map(|(x, y)| x * y).sum();
             Value::Num(dot)
-        },
+        }
         _ => Value::Null,
     }
 }
 
 fn cosine_similarity(v1: &[f64], v2: &[f64]) -> f64 {
-    if v1.len() != v2.len() { return 0.0; }
+    if v1.len() != v2.len() {
+        return 0.0;
+    }
     let dot: f64 = v1.iter().zip(v2.iter()).map(|(x, y)| x * y).sum();
     let mag1: f64 = v1.iter().map(|x| x * x).sum::<f64>().sqrt();
     let mag2: f64 = v2.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if mag1 == 0.0 || mag2 == 0.0 { return 0.0; }
+    if mag1 == 0.0 || mag2 == 0.0 {
+        return 0.0;
+    }
     dot / (mag1 * mag2)
 }
 
@@ -1065,7 +1151,7 @@ fn eq_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), (*p1).min(*p2))
             }
-        },
+        }
         (Value::Uncertain(v, p), other) => {
             let res = eq_values(v, other);
             if let Value::Uncertain(inner, p2) = res {
@@ -1073,7 +1159,7 @@ fn eq_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = eq_values(other, v);
             if let Value::Uncertain(inner, p2) = res {
@@ -1081,7 +1167,7 @@ fn eq_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         _ => Value::Bool(a == b),
     }
 }
@@ -1099,7 +1185,7 @@ fn not_value(v: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         _ => Value::Bool(v.is_falsy()), // Not Falsy = Truthy
     }
 }
@@ -1113,7 +1199,7 @@ fn and_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), (*p1).min(*p2))
             }
-        },
+        }
         (Value::Uncertain(v, p), other) => {
             let res = and_values(v, other);
             if let Value::Uncertain(inner, p2) = res {
@@ -1121,7 +1207,7 @@ fn and_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = and_values(other, v);
             if let Value::Uncertain(inner, p2) = res {
@@ -1129,7 +1215,7 @@ fn and_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), *p)
             }
-        },
+        }
         _ => Value::Bool(a.is_truthy() && b.is_truthy()),
     }
 }
@@ -1143,15 +1229,15 @@ fn or_values(a: &Value, b: &Value) -> Value {
             } else {
                 Value::Uncertain(Box::new(res), (*p1).max(*p2))
             }
-        },
+        }
         (Value::Uncertain(v, p), other) => {
             let res = or_values(v, other);
             Value::Uncertain(Box::new(res), *p)
-        },
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = or_values(other, v);
             Value::Uncertain(Box::new(res), *p)
-        },
+        }
         _ => Value::Bool(a.is_truthy() || b.is_truthy()),
     }
 }
@@ -1160,22 +1246,36 @@ fn sub_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Uncertain(v1, p1), Value::Uncertain(v2, p2)) => {
             let res = sub_values(v1, v2);
-            if let Value::Uncertain(inner, p3) = res { Value::Uncertain(inner, p1 * p2 * p3) } else { Value::Uncertain(Box::new(res), p1 * p2) }
-        },
+            if let Value::Uncertain(inner, p3) = res {
+                Value::Uncertain(inner, p1 * p2 * p3)
+            } else {
+                Value::Uncertain(Box::new(res), p1 * p2)
+            }
+        }
         (Value::Uncertain(v, p), other) => {
             let res = sub_values(v, other);
-            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
-        },
+            if let Value::Uncertain(inner, p2) = res {
+                Value::Uncertain(inner, p * p2)
+            } else {
+                Value::Uncertain(Box::new(res), *p)
+            }
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = sub_values(other, v);
-            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
-        },
+            if let Value::Uncertain(inner, p2) = res {
+                Value::Uncertain(inner, p * p2)
+            } else {
+                Value::Uncertain(Box::new(res), *p)
+            }
+        }
         (Value::Num(x), Value::Num(y)) => Value::Num(x - y),
         (Value::Vec(v1), Value::Vec(v2)) => {
-            if v1.len() != v2.len() { return Value::Null; }
+            if v1.len() != v2.len() {
+                return Value::Null;
+            }
             let diff: Vec<f64> = v1.iter().zip(v2.iter()).map(|(x, y)| x - y).collect();
             Value::Vec(diff)
-        },
+        }
         _ => Value::Null,
     }
 }
@@ -1184,19 +1284,35 @@ fn div_values(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Uncertain(v1, p1), Value::Uncertain(v2, p2)) => {
             let res = div_values(v1, v2);
-            if let Value::Uncertain(inner, p3) = res { Value::Uncertain(inner, p1 * p2 * p3) } else { Value::Uncertain(Box::new(res), p1 * p2) }
-        },
+            if let Value::Uncertain(inner, p3) = res {
+                Value::Uncertain(inner, p1 * p2 * p3)
+            } else {
+                Value::Uncertain(Box::new(res), p1 * p2)
+            }
+        }
         (Value::Uncertain(v, p), other) => {
             let res = div_values(v, other);
-            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
-        },
+            if let Value::Uncertain(inner, p2) = res {
+                Value::Uncertain(inner, p * p2)
+            } else {
+                Value::Uncertain(Box::new(res), *p)
+            }
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = div_values(other, v);
-            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, p * p2) } else { Value::Uncertain(Box::new(res), *p) }
-        },
+            if let Value::Uncertain(inner, p2) = res {
+                Value::Uncertain(inner, p * p2)
+            } else {
+                Value::Uncertain(Box::new(res), *p)
+            }
+        }
         (Value::Num(x), Value::Num(y)) => {
-            if *y == 0.0 { Value::Null } else { Value::Num(x / y) }
-        },
+            if *y == 0.0 {
+                Value::Null
+            } else {
+                Value::Num(x / y)
+            }
+        }
         _ => Value::Null,
     }
 }
@@ -1217,21 +1333,35 @@ fn ge_values(a: &Value, b: &Value) -> Value {
     compare_values(a, b, |x, y| x >= y)
 }
 
-fn compare_values<F>(a: &Value, b: &Value, op: F) -> Value 
-where F: Fn(f64, f64) -> bool + Copy {
+fn compare_values<F>(a: &Value, b: &Value, op: F) -> Value
+where
+    F: Fn(f64, f64) -> bool + Copy,
+{
     match (a, b) {
         (Value::Uncertain(v1, p1), Value::Uncertain(v2, p2)) => {
             let res = compare_values(v1, v2, op);
-            if let Value::Uncertain(inner, p3) = res { Value::Uncertain(inner, (*p1).min(*p2).min(p3)) } else { Value::Uncertain(Box::new(res), (*p1).min(*p2)) }
-        },
+            if let Value::Uncertain(inner, p3) = res {
+                Value::Uncertain(inner, (*p1).min(*p2).min(p3))
+            } else {
+                Value::Uncertain(Box::new(res), (*p1).min(*p2))
+            }
+        }
         (Value::Uncertain(v, p), other) => {
             let res = compare_values(v, other, op);
-            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, (*p).min(p2)) } else { Value::Uncertain(Box::new(res), *p) }
-        },
+            if let Value::Uncertain(inner, p2) = res {
+                Value::Uncertain(inner, (*p).min(p2))
+            } else {
+                Value::Uncertain(Box::new(res), *p)
+            }
+        }
         (other, Value::Uncertain(v, p)) => {
             let res = compare_values(other, v, op);
-            if let Value::Uncertain(inner, p2) = res { Value::Uncertain(inner, (*p).min(p2)) } else { Value::Uncertain(Box::new(res), *p) }
-        },
+            if let Value::Uncertain(inner, p2) = res {
+                Value::Uncertain(inner, (*p).min(p2))
+            } else {
+                Value::Uncertain(Box::new(res), *p)
+            }
+        }
         (Value::Num(x), Value::Num(y)) => Value::Bool(op(*x, *y)),
         _ => Value::Bool(false), // Only numbers comparable for now
     }

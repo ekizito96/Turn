@@ -2,13 +2,13 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use turn::{FileStore, Runner, ToolRegistry};
-use tower_lsp::{LspService, Server};
 use std::sync::RwLock;
+use tower_lsp::{LspService, Server};
 use turn::analysis::Analysis;
-use std::collections::HashMap;
+use turn::{FileStore, Runner, ToolRegistry};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -27,16 +27,16 @@ enum Commands {
     Run {
         /// Path to .tn file
         file: PathBuf,
-        
+
         /// Agent ID (for persistence)
         #[arg(long, default_value = "default_agent")]
         id: String,
-        
+
         /// Path to store directory
         #[arg(long, default_value = ".turn_store")]
         store: PathBuf,
     },
-    
+
     /// Start Turn server (HTTP API)
     Serve {
         /// Port to listen on
@@ -55,7 +55,7 @@ enum Commands {
     Add {
         /// Package name (e.g. "std")
         name: String,
-        
+
         /// URL to source file (e.g. raw github link)
         url: String,
     },
@@ -68,12 +68,12 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?;
-            
+
             rt.block_on(async {
                 let stdin = tokio::io::stdin();
                 let stdout = tokio::io::stdout();
 
-                let (service, socket) = LspService::new(|client| turn::lsp::Backend { 
+                let (service, socket) = LspService::new(|client| turn::lsp::Backend {
                     client,
                     analysis: RwLock::new(Analysis::new()),
                     documents: RwLock::new(HashMap::new()),
@@ -84,14 +84,14 @@ fn main() -> Result<()> {
         Commands::Run { file, id, store } => {
             let source_content = fs::read_to_string(&file)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {}", file.display(), e))?;
-            
+
             // Setup Store and Tools
             let store = FileStore::new(store);
             let tools = ToolRegistry::new();
-            
+
             // Setup Runner
             let mut runner = Runner::new(store, tools);
-            
+
             // Run
             match runner.run(&id, &source_content, Some(file.clone())) {
                 Ok(result) => println!("{}", result),
@@ -99,11 +99,13 @@ fn main() -> Result<()> {
                     // Try to format error nicely if it's a lex/parse error
                     let msg = e.to_string();
                     let loc = if let Some(lex_err) = e.downcast_ref::<turn::lexer::LexError>() {
-                        lex_err.offset().map(|o| turn::offset_to_line_col(&source_content, o))
-                    } else if let Some(parse_err) = e.downcast_ref::<turn::parser::ParseError>() {
-                        Some(turn::offset_to_line_col(&source_content, parse_err.offset()))
+                        lex_err
+                            .offset()
+                            .map(|o| turn::offset_to_line_col(&source_content, o))
                     } else {
-                        None
+                        e.downcast_ref::<turn::parser::ParseError>().map(|parse_err| {
+                            turn::offset_to_line_col(&source_content, parse_err.offset())
+                        })
                     };
                     match loc {
                         Some((l, c)) => eprintln!("{}:{}:{}: {}", file.display(), l, c, msg),
@@ -118,7 +120,7 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
-            
+
             rt.block_on(async {
                 if let Err(e) = turn::server::serve(port, store).await {
                     eprintln!("Server error: {}", e);
@@ -130,13 +132,13 @@ fn main() -> Result<()> {
             if !modules_dir.exists() {
                 fs::create_dir(&modules_dir)?;
             }
-            
+
             println!("Fetching {} from {}...", name, url);
             let response = reqwest::blocking::get(&url)?.error_for_status()?.text()?;
-            
+
             let file_path = modules_dir.join(format!("{}.tn", name));
             fs::write(&file_path, response)?;
-            
+
             println!("Package '{}' installed to {}", name, file_path.display());
         }
     }

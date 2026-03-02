@@ -1,8 +1,8 @@
-use turn::{Runner, Store, ToolRegistry, Value, VmState};
 use anyhow::Result;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::collections::HashMap;
+use std::rc::Rc;
+use turn::{Runner, Store, ToolRegistry, Value, VmState};
 
 // In-memory store
 #[derive(Clone)]
@@ -41,11 +41,11 @@ fn test_try_catch_basic() {
         return "uncaught";
     }
     "#;
-    
+
     let store = MemoryStore::new();
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(store, tools);
-    
+
     let result = runner.run("test_error", source, None).unwrap();
     assert_eq!(result, Value::Str("caught: oops".to_string()));
 }
@@ -62,11 +62,11 @@ fn test_try_catch_no_error() {
         return "success";
     }
     "#;
-    
+
     let store = MemoryStore::new();
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(store, tools);
-    
+
     let result = runner.run("test_error", source, None).unwrap();
     assert_eq!(result, Value::Str("success".to_string()));
 }
@@ -86,11 +86,11 @@ fn test_nested_try_catch() {
         }
     }
     "#;
-    
+
     let store = MemoryStore::new();
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(store, tools);
-    
+
     let result = runner.run("test_error", source, None).unwrap();
     assert_eq!(result, Value::Str("caught: outer: inner".to_string()));
 }
@@ -110,11 +110,11 @@ fn test_cross_function_throw() {
         }
     }
     "#;
-    
+
     let store = MemoryStore::new();
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(store, tools);
-    
+
     let result = runner.run("test_error", source, None).unwrap();
     assert_eq!(result, Value::Str("caught: fail".to_string()));
 }

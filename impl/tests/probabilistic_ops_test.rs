@@ -1,8 +1,8 @@
-use turn::vm::{Vm, VmResult};
-use turn::value::Value;
 use turn::compiler::Compiler;
-use turn::parser::Parser;
 use turn::lexer::Lexer;
+use turn::parser::Parser;
+use turn::value::Value;
+use turn::vm::{Vm, VmResult};
 
 fn run_code_with_env(source: &str, env_setup: impl FnOnce(&mut Vm)) -> Value {
     let lexer = Lexer::new(source);
@@ -12,9 +12,9 @@ fn run_code_with_env(source: &str, env_setup: impl FnOnce(&mut Vm)) -> Value {
     let mut compiler = Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = Vm::new(&code);
-    
+
     env_setup(&mut vm);
-    
+
     let result = vm.run();
     match result {
         VmResult::Complete(v) => v,
@@ -29,13 +29,16 @@ fn test_uncertainty_not() {
     let x_val = !x;
     return confidence x_val;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Bool(false)), 0.8));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Bool(false)), 0.8),
+            );
         }
     });
-    
+
     if let Value::Num(n) = res {
         assert!((n - 0.8).abs() < 1e-6);
     } else {
@@ -50,14 +53,20 @@ fn test_uncertainty_eq() {
     let res = x == y;
     return confidence res;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(5.0)), 0.9));
-            p.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Num(5.0)), 0.8));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Num(5.0)), 0.9),
+            );
+            p.runtime.env.insert(
+                "y".to_string(),
+                Value::Uncertain(Box::new(Value::Num(5.0)), 0.8),
+            );
         }
     });
-    
+
     if let Value::Num(n) = res {
         // We changed logic to use Zadeh's T-norms (min/max) instead of multiplication!
         // min(0.9, 0.8) = 0.8
@@ -75,14 +84,20 @@ fn test_uncertainty_ne() {
     let res = x != y;
     return confidence res;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(5.0)), 0.9));
-            p.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Num(5.0)), 0.9),
+            );
+            p.runtime.env.insert(
+                "y".to_string(),
+                Value::Uncertain(Box::new(Value::Num(10.0)), 0.8),
+            );
         }
     });
-    
+
     if let Value::Num(n) = res {
         assert!((n - 0.8).abs() < 1e-6);
     } else {

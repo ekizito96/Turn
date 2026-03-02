@@ -1,8 +1,8 @@
-use turn::{Runner, Store, ToolRegistry, Value, VmState};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::collections::HashMap;
+use std::rc::Rc;
+use turn::{Runner, Store, ToolRegistry, Value, VmState};
 
 // In-memory store for testing
 #[derive(Clone)]
@@ -74,7 +74,7 @@ fn test_persistence_crash_recovery() {
 
     // 5. Run again -> Should resume and complete
     let result = runner.run("agent1", source, None).unwrap();
-    
+
     // 6. Verify result
     // "step1" + "step2" = "step1step2"
     // BUT: Since we crashed at Save 2 (before persisting "step1"), we revert to Save 1 state.

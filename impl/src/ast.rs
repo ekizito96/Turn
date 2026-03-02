@@ -1,7 +1,7 @@
 //! AST node definitions per spec/02-grammar.md and spec/01-minimal-core.md.
 
-use indexmap::IndexMap;
 use crate::lexer::Span;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -11,7 +11,7 @@ pub enum Type {
     Bool,
     List(Box<Type>),
     Map(Box<Type>),
-    Function(Box<Type>, Box<Type>), // Arg -> Ret
+    Function(Box<Type>, Box<Type>),         // Arg -> Ret
     Struct(String, IndexMap<String, Type>), // Name, Fields
     Any,
     Void,
@@ -111,29 +111,67 @@ pub struct Block {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Literal { value: Literal, span: Span },
-    Id { name: String, span: Span },
+    Literal {
+        value: Literal,
+        span: Span,
+    },
+    Id {
+        name: String,
+        span: Span,
+    },
     MethodCall {
         target: Box<Expr>,
         name: String,
         arg: Box<Expr>,
         span: Span,
     },
-    Recall { key: Box<Expr>, span: Span },
-    Call { name: Box<Expr>, arg: Box<Expr>, span: Span },
-    Use { module: Box<Expr>, span: Span },
-    Spawn { expr: Box<Expr>, span: Span },
-    SpawnLink { expr: Box<Expr>, span: Span },
-    Send { pid: Box<Expr>, msg: Box<Expr>, span: Span },
-    Receive { span: Span },
-    Vec { items: Vec<Expr>, span: Span },
-    Confidence { expr: Box<Expr>, span: Span },
+    Recall {
+        key: Box<Expr>,
+        span: Span,
+    },
+    Call {
+        name: Box<Expr>,
+        arg: Box<Expr>,
+        span: Span,
+    },
+    Use {
+        module: Box<Expr>,
+        span: Span,
+    },
+    Spawn {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    SpawnLink {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    Send {
+        pid: Box<Expr>,
+        msg: Box<Expr>,
+        span: Span,
+    },
+    Receive {
+        span: Span,
+    },
+    Vec {
+        items: Vec<Expr>,
+        span: Span,
+    },
+    Confidence {
+        expr: Box<Expr>,
+        span: Span,
+    },
     StructInit {
         name: String,
         fields: IndexMap<String, Expr>,
         span: Span,
     },
-    Index { target: Box<Expr>, index: Box<Expr>, span: Span },
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
     Turn {
         params: Vec<(String, Span, Option<Type>)>,
         ret_ty: Option<Type>,
@@ -167,7 +205,7 @@ pub enum Expr {
     Paren(Box<Expr>),
 }
 
-    impl Expr {
+impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Literal { span, .. } => *span,

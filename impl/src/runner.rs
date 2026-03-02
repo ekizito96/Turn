@@ -17,8 +17,8 @@ pub struct Runner<S: Store> {
 
 impl<S: Store> Runner<S> {
     pub fn new(store: S, tools: ToolRegistry) -> Self {
-        Self { 
-            store, 
+        Self {
+            store,
             tools,
             module_cache: HashMap::new(),
         }
@@ -31,27 +31,33 @@ impl<S: Store> Runner<S> {
             if let Some(val) = self.module_cache.get(&key) {
                 return Ok(val.clone());
             }
-            
+
             // Compile std lib module
             let lexer = Lexer::new(source);
-            let tokens = lexer.tokenize()
+            let tokens = lexer
+                .tokenize()
                 .map_err(|e| anyhow::anyhow!("Lexer error in std module {}: {}", path, e))?;
-            
+
             let mut parser = Parser::new(tokens);
-            let program = parser.parse()
-                .map_err(|e| {
-                    let offset = e.offset();
-                    let snippet = if offset < source.len() {
-                        &source[offset..std::cmp::min(offset + 20, source.len())]
-                    } else {
-                        "EOF"
-                    };
-                    anyhow::anyhow!("Parser error in std module {}: {} at offset {} near '{}'", path, e, offset, snippet)
-                })?;
-            
+            let program = parser.parse().map_err(|e| {
+                let offset = e.offset();
+                let snippet = if offset < source.len() {
+                    &source[offset..std::cmp::min(offset + 20, source.len())]
+                } else {
+                    "EOF"
+                };
+                anyhow::anyhow!(
+                    "Parser error in std module {}: {} at offset {} near '{}'",
+                    path,
+                    e,
+                    offset,
+                    snippet
+                )
+            })?;
+
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
-            
+
             // Run in fresh VM
             let mut vm = Vm::new(&code);
             loop {
@@ -60,7 +66,11 @@ impl<S: Store> Runner<S> {
                         self.module_cache.insert(key, v.clone());
                         return Ok(v);
                     }
-                    VmResult::Suspended { tool_name, arg, continuation } => {
+                    VmResult::Suspended {
+                        tool_name,
+                        arg,
+                        continuation,
+                    } => {
                         if tool_name == "sys_import" {
                             let inner_path = match arg {
                                 Value::Str(s) => s.clone(),
@@ -70,7 +80,7 @@ impl<S: Store> Runner<S> {
                             match self.load_module(&inner_path, None) {
                                 Ok(val) => {
                                     vm = Vm::resume_with_result(continuation, val);
-                                },
+                                }
                                 Err(e) => {
                                     vm = Vm::resume_with_error(continuation, e.to_string());
                                 }
@@ -80,12 +90,16 @@ impl<S: Store> Runner<S> {
                                 Ok((val, cost)) => {
                                     let mut state = continuation;
                                     if state.gas_remaining >= cost {
-                                        state.gas_remaining = state.gas_remaining.saturating_sub(cost);
+                                        state.gas_remaining =
+                                            state.gas_remaining.saturating_sub(cost);
                                         vm = Vm::resume_with_result(state, val);
                                     } else {
-                                        vm = Vm::resume_with_error(state, "Token budget exhausted".to_string());
+                                        vm = Vm::resume_with_error(
+                                            state,
+                                            "Token budget exhausted".to_string(),
+                                        );
                                     }
-                                },
+                                }
                                 Err(e) => {
                                     vm = Vm::resume_with_error(continuation, e);
                                 }
@@ -100,85 +114,98 @@ impl<S: Store> Runner<S> {
         // Resolve path relative to current file if provided
         let mut resolved_path = if let Some(base) = current_file {
             let parent = base.parent().unwrap_or(std::path::Path::new("."));
-            parent.join(path) 
+            parent.join(path)
         } else {
             PathBuf::from(path)
         };
-        
+
         // If file doesn't exist, and path looks like a package import (no path separators),
         // try looking in .turn_modules by walking up the directory tree
         if !resolved_path.exists() {
-             let is_package_import = !path.contains('/') && !path.contains('\\') && !path.starts_with('.');
-             if is_package_import {
-                 // Search up from current_file (or CWD if None)
-                 let mut search_dir = if let Some(base) = current_file {
-                     // Start from file's directory
-                     base.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
-                 } else {
-                     std::env::current_dir().unwrap_or(PathBuf::from("."))
-                 };
-                 
-                 // Limit loop to avoid infinite loop on weird filesystems
-                 for _ in 0..20 {
-                     // Try .tn first, then .turn
-                     let pkg_path_tn = search_dir.join(".turn_modules").join(format!("{}.tn", path));
-                     if pkg_path_tn.exists() {
-                         resolved_path = pkg_path_tn;
-                         break;
-                     }
-                     
-                     let pkg_path_turn = search_dir.join(".turn_modules").join(format!("{}.turn", path));
-                     if pkg_path_turn.exists() {
-                         resolved_path = pkg_path_turn;
-                         break;
-                     }
-                     
-                     if !search_dir.pop() {
-                         break;
-                     }
-                 }
-             }
+            let is_package_import =
+                !path.contains('/') && !path.contains('\\') && !path.starts_with('.');
+            if is_package_import {
+                // Search up from current_file (or CWD if None)
+                let mut search_dir = if let Some(base) = current_file {
+                    // Start from file's directory
+                    base.parent()
+                        .unwrap_or(std::path::Path::new("."))
+                        .to_path_buf()
+                } else {
+                    std::env::current_dir().unwrap_or(PathBuf::from("."))
+                };
+
+                // Limit loop to avoid infinite loop on weird filesystems
+                for _ in 0..20 {
+                    // Try .tn first, then .turn
+                    let pkg_path_tn = search_dir
+                        .join(".turn_modules")
+                        .join(format!("{}.tn", path));
+                    if pkg_path_tn.exists() {
+                        resolved_path = pkg_path_tn;
+                        break;
+                    }
+
+                    let pkg_path_turn = search_dir
+                        .join(".turn_modules")
+                        .join(format!("{}.turn", path));
+                    if pkg_path_turn.exists() {
+                        resolved_path = pkg_path_turn;
+                        break;
+                    }
+
+                    if !search_dir.pop() {
+                        break;
+                    }
+                }
+            }
         }
-        
+
         // Canonicalize to absolute path for cache key
         let abs_path = match std::fs::canonicalize(&resolved_path) {
             Ok(p) => p,
             Err(_) => resolved_path.clone(), // Fallback if file doesn't exist (will fail read later)
         };
-        
+
         let key = abs_path.to_string_lossy().to_string();
-        
+
         // Check cache
         if let Some(val) = self.module_cache.get(&key) {
             return Ok(val.clone());
         }
-        
+
         // Read file
         let source = std::fs::read_to_string(&abs_path)
             .map_err(|e| anyhow::anyhow!("Failed to read module {}: {}", key, e))?;
-            
+
         // Compile
         let lexer = Lexer::new(&source);
-        let tokens = lexer.tokenize()
+        let tokens = lexer
+            .tokenize()
             .map_err(|e| anyhow::anyhow!("Lexer error in module {}: {}", key, e))?;
-            
+
         let mut parser = Parser::new(tokens);
-        let program = parser.parse()
+        let program = parser
+            .parse()
             .map_err(|e| anyhow::anyhow!("Parser error in module {}: {}", key, e))?;
-            
+
         let mut compiler = Compiler::new();
         let code = compiler.compile(&program);
-        
+
         // Run module in a fresh VM (recursive)
         let mut vm = Vm::new(&code);
-        
+
         loop {
             match vm.run() {
                 VmResult::Complete(v) => {
                     self.module_cache.insert(key, v.clone());
                     return Ok(v);
                 }
-                VmResult::Suspended { tool_name, arg, continuation } => {
+                VmResult::Suspended {
+                    tool_name,
+                    arg,
+                    continuation,
+                } => {
                     // Recurse for imports inside modules!
                     if tool_name == "sys_import" {
                         let inner_path = match arg {
@@ -188,7 +215,7 @@ impl<S: Store> Runner<S> {
                         match self.load_module(&inner_path, Some(&abs_path)) {
                             Ok(val) => {
                                 vm = Vm::resume_with_result(continuation, val);
-                            },
+                            }
                             Err(e) => {
                                 vm = Vm::resume_with_error(continuation, e.to_string());
                             }
@@ -200,7 +227,7 @@ impl<S: Store> Runner<S> {
                                 let mut state = continuation;
                                 state.gas_remaining = state.gas_remaining.saturating_sub(cost);
                                 vm = Vm::resume_with_result(state, val);
-                            },
+                            }
                             Err(e) => {
                                 vm = Vm::resume_with_error(continuation, e);
                             }
@@ -222,13 +249,15 @@ impl<S: Store> Runner<S> {
             Vm::resume_with_result(state, Value::Null)
         } else {
             let lexer = Lexer::new(source);
-            let tokens = lexer.tokenize()
-                 .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
-                 
+            let tokens = lexer
+                .tokenize()
+                .map_err(|e| anyhow::anyhow!("Lexer error: {}", e))?;
+
             let mut parser = Parser::new(tokens);
-            let program = parser.parse()
-                 .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
-                 
+            let program = parser
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
+
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
             Vm::new(&code)
@@ -239,11 +268,15 @@ impl<S: Store> Runner<S> {
             match vm.run() {
                 VmResult::Complete(v) => {
                     // Clear store on successful completion?
-                    // self.store.delete(id)?; 
+                    // self.store.delete(id)?;
                     // Keeping it allows inspecting final state or re-running?
                     return Ok(v);
                 }
-                VmResult::Suspended { tool_name, arg, continuation } => {
+                VmResult::Suspended {
+                    tool_name,
+                    arg,
+                    continuation,
+                } => {
                     // Handle Suspend
                     if tool_name == "sys_suspend" {
                         self.store.save(id, &continuation)?;
@@ -254,20 +287,20 @@ impl<S: Store> Runner<S> {
                     if tool_name == "sys_import" {
                         // 3a. Save state (checkpoint)
                         self.store.save(id, &continuation)?;
-                        
+
                         // 3b. Load Module
                         let import_path = match arg {
                             Value::Str(s) => s.clone(),
                             _ => "".to_string(),
                         };
-                        
+
                         // Use the provided path as base, or CWD
                         let base_path = path.as_ref();
-                        
+
                         match self.load_module(&import_path, base_path) {
                             Ok(val) => {
                                 vm = Vm::resume_with_result(continuation, val);
-                            },
+                            }
                             Err(e) => {
                                 vm = Vm::resume_with_error(continuation, e.to_string());
                             }
@@ -277,16 +310,16 @@ impl<S: Store> Runner<S> {
 
                     // 3. Save state (checkpoint)
                     self.store.save(id, &continuation)?;
-                    
+
                     // 4. Execute tool
                     match self.tools.call(&tool_name, arg) {
                         Ok((val, cost)) => {
-                             let mut state = continuation;
-                             state.gas_remaining = state.gas_remaining.saturating_sub(cost);
-                             vm = Vm::resume_with_result(state, val);
-                        },
+                            let mut state = continuation;
+                            state.gas_remaining = state.gas_remaining.saturating_sub(cost);
+                            vm = Vm::resume_with_result(state, val);
+                        }
                         Err(e) => {
-                             vm = Vm::resume_with_error(continuation, e);
+                            vm = Vm::resume_with_error(continuation, e);
                         }
                     }
                 }

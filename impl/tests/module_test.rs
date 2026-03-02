@@ -1,9 +1,9 @@
-use turn::{Runner, Store, ToolRegistry, Value, VmState};
 use anyhow::Result;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::collections::HashMap;
 use std::fs;
+use std::rc::Rc;
+use turn::{Runner, Store, ToolRegistry, Value, VmState};
 
 // In-memory store
 #[derive(Clone)]
@@ -31,10 +31,11 @@ impl Store for MemoryStore {
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn test_module_import() {
     let temp_dir = tempfile::tempdir().unwrap();
     let module_path = temp_dir.path().join("math.tn");
-    
+
     // Create a module file
     let module_source = r#"
     let pi = 3.14;
@@ -48,23 +49,26 @@ fn test_module_import() {
     };
     "#;
     fs::write(&module_path, module_source).unwrap();
-    
+
     // Main script using the module
-    let main_source = format!(r#"
+    let main_source = format!(
+        r#"
     turn {{
         let math = use "{}";
         let pi = math["PI"];
         let d = call(math["double"], {{ "x": 10 }});
         return {{ "pi": pi, "d": d }};
     }}
-    "#, module_path.display());
-    
+    "#,
+        module_path.display()
+    );
+
     let store = MemoryStore::new();
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(store, tools);
-    
+
     let result = runner.run("test_agent", &main_source, None).unwrap();
-    
+
     if let Value::Map(m) = result {
         assert_eq!(m.get("pi"), Some(&Value::Num(3.14)));
         assert_eq!(m.get("d"), Some(&Value::Num(20.0)));
@@ -77,28 +81,31 @@ fn test_module_import() {
 fn test_recursive_import() {
     let temp_dir = tempfile::tempdir().unwrap();
     let util_path = temp_dir.path().join("util.tn");
-    
+
     // util.tn
     fs::write(&util_path, r#"return "util";"#).unwrap();
-    
+
     // main.turn imports util
     // We test relative import logic in Runner if we implement it.
     // Currently Runner::load_module handles relative paths if 'current_file' is passed.
     // But 'run' doesn't pass a file path for the source.
     // So imports in the main script are relative to CWD.
     // We'll use absolute paths for simplicity in test.
-    
-    let source = format!(r#"
+
+    let source = format!(
+        r#"
     turn {{
         let u = use "{}";
         return u;
     }}
-    "#, util_path.display());
-    
+    "#,
+        util_path.display()
+    );
+
     let store = MemoryStore::new();
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(store, tools);
-    
+
     let result = runner.run("test_agent", &source, None).unwrap();
     assert_eq!(result, Value::Str("util".to_string()));
 }

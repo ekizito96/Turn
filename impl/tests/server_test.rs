@@ -1,6 +1,6 @@
-use turn::server;
 use std::path::PathBuf;
 use std::time::Duration;
+use turn::server;
 
 #[tokio::test]
 async fn test_server_run() {
@@ -22,7 +22,8 @@ async fn test_server_run() {
 
     // 2. Make request
     let client = reqwest::Client::new();
-    let resp = client.post("http://127.0.0.1:3333/run")
+    let resp = client
+        .post("http://127.0.0.1:3333/run")
         .json(&serde_json::json!({
             "id": "test-agent",
             "source": "turn { return \"Hello from Test!\"; }"

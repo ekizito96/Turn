@@ -13,7 +13,7 @@ pub enum Token {
     Vec,
     Turn,
     Let,
-    Suspend, // NEW
+    Suspend,    // NEW
     Confidence, // NEW
     Use,
     Context,
@@ -56,7 +56,7 @@ pub enum Token {
     Star,
     Slash,
     Similarity, // ~>
-    Eq, // = (assignment)
+    Eq,         // = (assignment)
     EqEq,
     Ne,
     Less,
@@ -64,7 +64,7 @@ pub enum Token {
     LessEq,
     GreaterEq,
     Arrow, // ->
-    Bang, // !
+    Bang,  // !
 
     // Literals
     Num(f64),
@@ -109,7 +109,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
-    ("suspend", Token::Suspend), // NEW
+    ("suspend", Token::Suspend),       // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
     ("try", Token::Try),

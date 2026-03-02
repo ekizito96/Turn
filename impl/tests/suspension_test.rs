@@ -38,8 +38,7 @@ fn test_manual_suspension_resume_cycle() {
 
     // 6. Resume with Result "pong"
     println!("Resuming with result 'pong'...");
-    let mut resumed_vm =
-        Vm::resume_with_result(continuation, Value::Str("pong".to_string()));
+    let mut resumed_vm = Vm::resume_with_result(continuation, Value::Str("pong".to_string()));
 
     // 7. Run -> Complete
     match resumed_vm.run() {

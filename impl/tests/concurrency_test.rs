@@ -1,8 +1,8 @@
+use turn::compiler::Compiler;
 use turn::lexer::Lexer;
 use turn::parser::Parser;
-use turn::compiler::Compiler;
-use turn::vm::{Vm, VmResult};
 use turn::value::Value;
+use turn::vm::{Vm, VmResult};
 
 fn run(source: &str) -> Value {
     let tokens = Lexer::new(source).tokenize().unwrap();
@@ -96,7 +96,7 @@ fn test_send_receive_syntax() {
     let sent = send child, 100;
     return sent; // Should be true (child exists)
     "#;
-    
+
     let val = run(source);
     assert_eq!(val, Value::Bool(true));
 }

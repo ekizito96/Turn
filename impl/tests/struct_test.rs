@@ -1,9 +1,9 @@
 use turn::analysis::Analysis;
+use turn::compiler::Compiler;
 use turn::lexer::Lexer;
 use turn::parser::Parser;
-use turn::compiler::Compiler;
-use turn::vm::{Vm, VmResult};
 use turn::value::Value;
+use turn::vm::{Vm, VmResult};
 
 fn analyze(source: &str) -> Analysis {
     let tokens = Lexer::new(source).tokenize().unwrap();
@@ -54,7 +54,7 @@ fn test_struct_method_runtime() {
     let p = Point { x: 10, y: 20 };
     return p.sum(); 
     "#;
-    
+
     let val = run(source);
     assert_eq!(val, Value::Num(30.0));
 }

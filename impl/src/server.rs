@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::post,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -52,7 +47,7 @@ pub async fn serve(port: u16, store_path: PathBuf) -> Result<(), Box<dyn std::er
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("listening on {}", addr);
-    
+
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
@@ -71,16 +66,18 @@ async fn run_handler(
     let result = tokio::task::spawn_blocking(move || {
         let store = FileStore::new(store_path);
         let tools = ToolRegistry::new();
-                let mut runner = Runner::new(store, tools);
-                runner.run(&id, &source, None)
-            })
+        let mut runner = Runner::new(store, tools);
+        runner.run(&id, &source, None)
+    })
     .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ErrorResponse {
-            error: format!("Task join error: {}", e),
-        }),
-    ))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Task join error: {}", e),
+            }),
+        )
+    })?;
 
     match result {
         Ok(value) => Ok(Json(RunResponse { result: value })),

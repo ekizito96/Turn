@@ -1,9 +1,9 @@
 //! Runtime values for the Turn VM.
 
-use serde::{Deserialize, Serialize};
-use indexmap::IndexMap;
-use std::sync::Arc;
 use crate::bytecode::Instr;
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use std::collections::HashMap;
 
@@ -61,7 +61,9 @@ impl std::fmt::Display for Value {
             Value::List(l) => {
                 write!(f, "[")?;
                 for (i, v) in l.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", v)?;
                 }
                 write!(f, "]")
@@ -69,7 +71,9 @@ impl std::fmt::Display for Value {
             Value::Map(m) => {
                 write!(f, "{{")?;
                 for (i, (k, v)) in m.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", k, v)?;
                 }
                 write!(f, "}}")
@@ -77,7 +81,9 @@ impl std::fmt::Display for Value {
             Value::Struct(name, m) => {
                 write!(f, "{} {{", name)?;
                 for (i, (k, v)) in m.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}: {}", k, v)?;
                 }
                 write!(f, "}}")
@@ -86,7 +92,9 @@ impl std::fmt::Display for Value {
             Value::Vec(v) => {
                 write!(f, "vec[")?;
                 for (i, val) in v.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", val)?;
                 }
                 write!(f, "]")

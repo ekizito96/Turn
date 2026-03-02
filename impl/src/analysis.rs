@@ -1,81 +1,99 @@
-use indexmap::IndexMap;
 use crate::ast::*;
 use crate::lexer::Span;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 // --- Standard Library Signatures ---
 fn get_stdlib_signatures() -> HashMap<String, Type> {
     let mut map = HashMap::new();
     // fs_read: (Str) -> Str
-    map.insert("fs_read".to_string(), Type::Function(
-        Box::new(Type::Str), 
-        Box::new(Type::Str)
-    ));
+    map.insert(
+        "fs_read".to_string(),
+        Type::Function(Box::new(Type::Str), Box::new(Type::Str)),
+    );
     // fs_write: (Map<Str>) -> Void
-    map.insert("fs_write".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
-        Box::new(Type::Void)
-    ));
+    map.insert(
+        "fs_write".to_string(),
+        Type::Function(
+            Box::new(Type::Map(Box::new(Type::Str))),
+            Box::new(Type::Void),
+        ),
+    );
     // echo: (Any) -> Any
-    map.insert("echo".to_string(), Type::Function(
-        Box::new(Type::Any),
-        Box::new(Type::Any)
-    ));
+    map.insert(
+        "echo".to_string(),
+        Type::Function(Box::new(Type::Any), Box::new(Type::Any)),
+    );
     // sleep: (Num) -> Void
-    map.insert("sleep".to_string(), Type::Function(
-        Box::new(Type::Num),
-        Box::new(Type::Void)
-    ));
+    map.insert(
+        "sleep".to_string(),
+        Type::Function(Box::new(Type::Num), Box::new(Type::Void)),
+    );
     // env_get: (Str) -> Str (or Null, essentially Str/Null but we treat as Str)
-    map.insert("env_get".to_string(), Type::Function(
-        Box::new(Type::Str),
-        Box::new(Type::Str)
-    ));
+    map.insert(
+        "env_get".to_string(),
+        Type::Function(Box::new(Type::Str), Box::new(Type::Str)),
+    );
     // env_set: (Map<Str>) -> Void
-    map.insert("env_set".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
-        Box::new(Type::Void)
-    ));
+    map.insert(
+        "env_set".to_string(),
+        Type::Function(
+            Box::new(Type::Map(Box::new(Type::Str))),
+            Box::new(Type::Void),
+        ),
+    );
     // http_get: (Str) -> Str
-    map.insert("http_get".to_string(), Type::Function(
-        Box::new(Type::Str),
-        Box::new(Type::Str)
-    ));
+    map.insert(
+        "http_get".to_string(),
+        Type::Function(Box::new(Type::Str), Box::new(Type::Str)),
+    );
     // http_post: (Map<Any>) -> Str
-    map.insert("http_post".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Any))),
-        Box::new(Type::Str)
-    ));
+    map.insert(
+        "http_post".to_string(),
+        Type::Function(
+            Box::new(Type::Map(Box::new(Type::Any))),
+            Box::new(Type::Str),
+        ),
+    );
     // json_parse: (Str) -> Any
-    map.insert("json_parse".to_string(), Type::Function(
-        Box::new(Type::Str),
-        Box::new(Type::Any)
-    ));
+    map.insert(
+        "json_parse".to_string(),
+        Type::Function(Box::new(Type::Str), Box::new(Type::Any)),
+    );
     // json_stringify: (Any) -> Str
-    map.insert("json_stringify".to_string(), Type::Function(
-        Box::new(Type::Any),
-        Box::new(Type::Str)
-    ));
+    map.insert(
+        "json_stringify".to_string(),
+        Type::Function(Box::new(Type::Any), Box::new(Type::Str)),
+    );
     // fs_list: (Str) -> List<Str>
-    map.insert("fs_list".to_string(), Type::Function(
-        Box::new(Type::Str),
-        Box::new(Type::List(Box::new(Type::Str)))
-    ));
+    map.insert(
+        "fs_list".to_string(),
+        Type::Function(
+            Box::new(Type::Str),
+            Box::new(Type::List(Box::new(Type::Str))),
+        ),
+    );
     // time_now: (Any) -> Num
-    map.insert("time_now".to_string(), Type::Function(
-        Box::new(Type::Any),
-        Box::new(Type::Num)
-    ));
+    map.insert(
+        "time_now".to_string(),
+        Type::Function(Box::new(Type::Any), Box::new(Type::Num)),
+    );
     // regex_match: (Map<Str>) -> Bool
-    map.insert("regex_match".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
-        Box::new(Type::Bool)
-    ));
+    map.insert(
+        "regex_match".to_string(),
+        Type::Function(
+            Box::new(Type::Map(Box::new(Type::Str))),
+            Box::new(Type::Bool),
+        ),
+    );
     // regex_replace: (Map<Str>) -> Str
-    map.insert("regex_replace".to_string(), Type::Function(
-        Box::new(Type::Map(Box::new(Type::Str))),
-        Box::new(Type::Str)
-    ));
+    map.insert(
+        "regex_replace".to_string(),
+        Type::Function(
+            Box::new(Type::Map(Box::new(Type::Str))),
+            Box::new(Type::Str),
+        ),
+    );
     map
 }
 
@@ -83,7 +101,7 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
 pub struct Scope {
     pub definitions: HashMap<String, (Span, Option<Type>)>,
     pub parent: Option<usize>,
-    pub span: Span, // The span covered by this scope
+    pub span: Span,           // The span covered by this scope
     pub ret_ty: Option<Type>, // Return type if this is a function scope
     pub structs: HashMap<String, IndexMap<String, Type>>, // Struct definitions
     pub type_aliases: HashMap<String, Type>, // Type aliases
@@ -99,21 +117,32 @@ pub struct Analysis {
     pub diagnostics: Vec<(Span, String)>,
 }
 
+impl Default for Analysis {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Analysis {
     pub fn new() -> Self {
         let mut global_scope = Scope {
             definitions: HashMap::new(),
             parent: None,
-            span: Span { start: 0, end: usize::MAX },
+            span: Span {
+                start: 0,
+                end: usize::MAX,
+            },
             ret_ty: None,
             structs: HashMap::new(),
             type_aliases: HashMap::new(),
             methods: HashMap::new(),
         };
-        
+
         // Add stdlib signatures
         for (name, ty) in get_stdlib_signatures() {
-            global_scope.definitions.insert(name, (Span { start: 0, end: 0 }, Some(ty)));
+            global_scope
+                .definitions
+                .insert(name, (Span { start: 0, end: 0 }, Some(ty)));
         }
 
         Self {
@@ -151,7 +180,9 @@ impl Analysis {
     }
 
     fn add_definition(&mut self, name: &str, span: Span, ty: Option<Type>) {
-        self.scopes[self.active_scope_idx].definitions.insert(name.to_string(), (span, ty));
+        self.scopes[self.active_scope_idx]
+            .definitions
+            .insert(name.to_string(), (span, ty));
     }
 
     fn record_usage(&mut self, name: &str, span: Span) {
@@ -217,7 +248,7 @@ impl Analysis {
             Type::Map(inner) => Type::Map(Box::new(self.resolve_type(inner))),
             Type::Function(arg, ret) => Type::Function(
                 Box::new(self.resolve_type(arg)),
-                Box::new(self.resolve_type(ret))
+                Box::new(self.resolve_type(ret)),
             ),
             _ => ty.clone(),
         }
@@ -226,15 +257,20 @@ impl Analysis {
     fn check_assignment(&mut self, target_ty: &Option<Type>, expr: &Expr, span: Span) {
         if let Some(target) = target_ty {
             let resolved_target = self.resolve_type(target);
-            if resolved_target == Type::Any { return; }
-            
+            if resolved_target == Type::Any {
+                return;
+            }
+
             if let Some(expr_ty) = self.infer_expr_type(expr) {
                 let resolved_expr = self.resolve_type(&expr_ty);
                 // If either is Any, we allow it.
                 if !self.is_compatible(&resolved_target, &resolved_expr) {
                     self.diagnostics.push((
                         span,
-                        format!("Type mismatch: expected {:?}, got {:?}", resolved_target, resolved_expr)
+                        format!(
+                            "Type mismatch: expected {:?}, got {:?}",
+                            resolved_target, resolved_expr
+                        ),
                     ));
                 }
             }
@@ -297,16 +333,16 @@ impl Analysis {
                 // If empty, List<Any>.
                 if let Some(first) = items.first() {
                     if let Some(inner) = self.infer_expr_type(first) {
-                         return Some(Type::List(Box::new(inner)));
+                        return Some(Type::List(Box::new(inner)));
                     }
                 }
                 Some(Type::List(Box::new(Type::Any)))
             }
             Expr::Map { entries, .. } => {
-                 // Similar logic for Map values
+                // Similar logic for Map values
                 if let Some((_, first_val)) = entries.first() {
                     if let Some(inner) = self.infer_expr_type(first_val) {
-                         return Some(Type::Map(Box::new(inner)));
+                        return Some(Type::Map(Box::new(inner)));
                     }
                 }
                 Some(Type::Map(Box::new(Type::Any)))
@@ -321,10 +357,12 @@ impl Analysis {
                 }
                 None
             }
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 let left_ty = self.infer_expr_type(left);
                 let right_ty = self.infer_expr_type(right);
-                
+
                 match op {
                     BinOp::Add => {
                         if left_ty == Some(Type::Num) && right_ty == Some(Type::Num) {
@@ -366,21 +404,27 @@ impl Analysis {
                     BinOp::Mul => {
                         if left_ty == Some(Type::Num) && right_ty == Some(Type::Num) {
                             Some(Type::Num)
-                        } else if (left_ty == Some(Type::Vec) && right_ty == Some(Type::Num)) ||
-                                  (left_ty == Some(Type::Num) && right_ty == Some(Type::Vec)) {
+                        } else if (left_ty == Some(Type::Vec) && right_ty == Some(Type::Num))
+                            || (left_ty == Some(Type::Num) && right_ty == Some(Type::Vec))
+                        {
                             Some(Type::Vec) // Scalar multiplication
                         } else if left_ty == Some(Type::Vec) && right_ty == Some(Type::Vec) {
                             Some(Type::Num) // Dot product
+                        } else if left_ty == Some(Type::Any) || right_ty == Some(Type::Any) {
+                            Some(Type::Any)
                         } else {
-                            if left_ty == Some(Type::Any) || right_ty == Some(Type::Any) {
-                                Some(Type::Any)
-                            } else {
-                                None
-                            }
+                            None
                         }
                     }
                     BinOp::Similarity => Some(Type::Num),
-                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::And | BinOp::Or => Some(Type::Bool),
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+                    | BinOp::And
+                    | BinOp::Or => Some(Type::Bool),
                 }
             }
             Expr::Turn { params, ret_ty, .. } => {
@@ -392,7 +436,7 @@ impl Analysis {
                 // If 1 param, single value. If >1, Map.
                 // For simplicity, let's say the argument type is Map<Any> if > 1 param.
                 // Or if 1 param `x: Num`, arg type is `Num`.
-                
+
                 let arg_ty = if params.len() == 1 {
                     params[0].2.clone().unwrap_or(Type::Any)
                 } else if params.is_empty() {
@@ -401,7 +445,7 @@ impl Analysis {
                     // Multiple params = Map<Any> (can't specify keys yet)
                     Type::Map(Box::new(Type::Any))
                 };
-                
+
                 let ret = ret_ty.clone().unwrap_or(Type::Any);
                 Some(Type::Function(Box::new(arg_ty), Box::new(ret)))
             }
@@ -409,10 +453,13 @@ impl Analysis {
                 // Try to find the function definition
                 // This requires more complex analysis (looking up the ID, checking if it's a Turn expr)
                 // For now, let's assume Any or try to look up if it's a simple ID.
-                if let Expr::Id { name: func_name, .. } = &**name {
-                     // Look up definition
-                     let mut current_idx = Some(self.active_scope_idx);
-                     while let Some(idx) = current_idx {
+                if let Expr::Id {
+                    name: func_name, ..
+                } = &**name
+                {
+                    // Look up definition
+                    let mut current_idx = Some(self.active_scope_idx);
+                    while let Some(idx) = current_idx {
                         if let Some((_, ty)) = self.scopes[idx].definitions.get(func_name) {
                             // If it's a function type, return return type
                             if let Some(Type::Function(_, ret_ty)) = ty {
@@ -425,20 +472,24 @@ impl Analysis {
                     }
                 }
                 // Also check if name is a literal string (calling tool directly)
-                if let Expr::Literal { value: Literal::Str(tool_name), .. } = &**name {
-                     // We populated global scope with tool names too!
-                     // But global scope has them as IDs, not strings.
-                     // Wait, `get_stdlib_signatures` returns keys as strings.
-                     // And we insert them into `definitions`.
-                     // `definitions` keys are strings.
-                     // But `Expr::Id` name is string.
-                     // `Expr::Literal` value is string.
-                     // We can look up the tool name in global scope!
-                     if let Some((_, ty)) = self.scopes[0].definitions.get(tool_name) {
-                          if let Some(Type::Function(_, ret_ty)) = ty {
-                                return Some(*ret_ty.clone());
-                            }
-                     }
+                if let Expr::Literal {
+                    value: Literal::Str(tool_name),
+                    ..
+                } = &**name
+                {
+                    // We populated global scope with tool names too!
+                    // But global scope has them as IDs, not strings.
+                    // Wait, `get_stdlib_signatures` returns keys as strings.
+                    // And we insert them into `definitions`.
+                    // `definitions` keys are strings.
+                    // But `Expr::Id` name is string.
+                    // `Expr::Literal` value is string.
+                    // We can look up the tool name in global scope!
+                    if let Some((_, Some(Type::Function(_, ret_ty)))) =
+                        self.scopes[0].definitions.get(tool_name)
+                    {
+                        return Some(*ret_ty.clone());
+                    }
                 }
                 Some(Type::Any)
             }
@@ -447,7 +498,9 @@ impl Analysis {
     }
 
     fn is_compatible(&self, target: &Type, source: &Type) -> bool {
-        if *target == Type::Any || *source == Type::Any { return true; }
+        if *target == Type::Any || *source == Type::Any {
+            return true;
+        }
         match (target, source) {
             (Type::Vec, Type::Vec) => true,
             (Type::List(t), Type::List(s)) => self.is_compatible(t, s),
@@ -460,12 +513,24 @@ impl Analysis {
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::TypeAlias { name, ty, span: _ } => {
-                self.scopes[self.active_scope_idx].type_aliases.insert(name.clone(), ty.clone());
+                self.scopes[self.active_scope_idx]
+                    .type_aliases
+                    .insert(name.clone(), ty.clone());
             }
-            Stmt::ImplDef { type_name, methods, span: _ } => {
+            Stmt::ImplDef {
+                type_name,
+                methods,
+                span: _,
+            } => {
                 let mut collected: Vec<(String, Span, Option<Type>)> = Vec::new();
                 for stmt in methods {
-                    if let Stmt::Let { name, ty, init, span } = stmt {
+                    if let Stmt::Let {
+                        name,
+                        ty,
+                        init,
+                        span,
+                    } = stmt
+                    {
                         let method_ty = ty.clone().or_else(|| self.infer_expr_type(init));
                         collected.push((name.clone(), *span, method_ty));
                     }
@@ -483,20 +548,25 @@ impl Analysis {
                     self.visit_stmt(stmt);
                 }
             }
-            Stmt::Let { name, ty, init, span } => {
+            Stmt::Let {
+                name,
+                ty,
+                init,
+                span,
+            } => {
                 self.visit_expr(init);
-                
+
                 // Check type
                 self.check_assignment(ty, init, *span);
-                
+
                 // If explicit type is missing, try to infer from init
                 let stored_ty = ty.clone().or_else(|| self.infer_expr_type(init));
-                
+
                 self.add_definition(name, *span, stored_ty);
             }
             Stmt::Turn { body, .. } => {
                 // Turn is an expression usually, but here it's a statement (expression statement?)
-                // Wait, Stmt::Turn is deprecated/legacy? 
+                // Wait, Stmt::Turn is deprecated/legacy?
                 // In `ast.rs`: `Stmt::Turn { body, span }` exists.
                 // `Expr::Turn` also exists.
                 // Let's handle it.
@@ -504,7 +574,12 @@ impl Analysis {
                 self.visit_block(body);
                 self.exit_scope();
             }
-            Stmt::If { cond, then_block, else_block, .. } => {
+            Stmt::If {
+                cond,
+                then_block,
+                else_block,
+                ..
+            } => {
                 self.visit_expr(cond);
                 // If/Else blocks don't create new scope in current VM, but let's pretend they do for cleaner future?
                 // No, sticking to VM reality: they share scope.
@@ -517,24 +592,38 @@ impl Analysis {
                 self.visit_expr(cond);
                 self.visit_block(body);
             }
-            Stmt::TryCatch { try_block, catch_var, catch_block, span: _ } => {
+            Stmt::TryCatch {
+                try_block,
+                catch_var,
+                catch_block,
+                span: _,
+            } => {
                 self.visit_block(try_block);
-                
+
                 // Catch block definitely needs a new scope for the catch_var
                 self.enter_scope(catch_block.span, None);
                 // We don't have span for catch_var ID. Use block start?
-                let var_span = Span { start: catch_block.span.start, end: catch_block.span.start }; 
+                let var_span = Span {
+                    start: catch_block.span.start,
+                    end: catch_block.span.start,
+                };
                 self.add_definition(catch_var, var_span, Some(Type::Any)); // Catch var is Any (usually Error string)
                 self.visit_block(catch_block);
                 self.exit_scope();
             }
-            Stmt::StructDef { name, fields, span: _ } => {
+            Stmt::StructDef {
+                name,
+                fields,
+                span: _,
+            } => {
                 // Register struct in current scope
-                self.scopes[self.active_scope_idx].structs.insert(name.clone(), fields.clone());
+                self.scopes[self.active_scope_idx]
+                    .structs
+                    .insert(name.clone(), fields.clone());
             }
             Stmt::Return { expr, span } => {
                 self.visit_expr(expr);
-                
+
                 // Check return type
                 let mut expected_ty = None;
                 let mut current_idx = Some(self.active_scope_idx);
@@ -543,10 +632,12 @@ impl Analysis {
                         expected_ty = Some(ty.clone());
                         break;
                     }
-                    if idx == 0 { break; }
+                    if idx == 0 {
+                        break;
+                    }
                     current_idx = self.scopes[idx].parent;
                 }
-                
+
                 if let Some(expected) = expected_ty {
                     self.check_assignment(&Some(expected), expr, *span);
                 }
@@ -563,7 +654,7 @@ impl Analysis {
                 self.visit_expr(arg);
             }
             Stmt::Throw { expr, .. } => self.visit_expr(expr),
-            Stmt::Suspend { .. } => {},
+            Stmt::Suspend { .. } => {}
         }
     }
 
@@ -582,17 +673,24 @@ impl Analysis {
                             self.visit_expr(init_expr);
                             self.check_assignment(&Some(field_ty.clone()), init_expr, *span);
                         } else {
-                            self.diagnostics.push((*span, format!("Missing field '{}' in struct '{}'", field_name, name)));
+                            self.diagnostics.push((
+                                *span,
+                                format!("Missing field '{}' in struct '{}'", field_name, name),
+                            ));
                         }
                     }
                     // Check for extra fields
                     for field_name in fields.keys() {
                         if !def_fields.contains_key(field_name) {
-                            self.diagnostics.push((*span, format!("Unknown field '{}' in struct '{}'", field_name, name)));
+                            self.diagnostics.push((
+                                *span,
+                                format!("Unknown field '{}' in struct '{}'", field_name, name),
+                            ));
                         }
                     }
                 } else {
-                    self.diagnostics.push((*span, format!("Unknown struct '{}'", name)));
+                    self.diagnostics
+                        .push((*span, format!("Unknown struct '{}'", name)));
                 }
             }
             Expr::Spawn { expr, span: _ } | Expr::SpawnLink { expr, span: _ } => {
@@ -623,10 +721,16 @@ impl Analysis {
             Expr::Id { name, span } => {
                 self.record_usage(name, *span);
             }
-            Expr::Turn { params, ret_ty, body, span, .. } => {
+            Expr::Turn {
+                params,
+                ret_ty,
+                body,
+                span,
+                ..
+            } => {
                 self.enter_scope(*span, ret_ty.clone());
                 for (name, param_span, ty) in params {
-                     self.add_definition(name, *param_span, ty.clone());
+                    self.add_definition(name, *param_span, ty.clone());
                 }
                 self.visit_block(body);
                 self.exit_scope();
@@ -641,7 +745,12 @@ impl Analysis {
                 self.visit_expr(name);
                 self.visit_expr(arg);
             }
-            Expr::MethodCall { target, name, arg, span } => {
+            Expr::MethodCall {
+                target,
+                name,
+                arg,
+                span,
+            } => {
                 self.visit_expr(target);
                 self.visit_expr(arg);
                 // Infer target type
@@ -657,7 +766,10 @@ impl Analysis {
                             // We don't return type from visit_expr, but we checked logic
                         }
                     } else {
-                        self.diagnostics.push((*span, format!("Unknown method '{}' for type '{}'", name, type_name)));
+                        self.diagnostics.push((
+                            *span,
+                            format!("Unknown method '{}' for type '{}'", name, type_name),
+                        ));
                     }
                 }
             }
@@ -711,22 +823,25 @@ impl Analysis {
         // Find scope chain
         if let Some(start_scope) = self.find_scope(offset) {
             // Walk up scope chain
-            // We need to find scope by reference or index. 
+            // We need to find scope by reference or index.
             // My find_scope returns reference, but I need to walk up parents which are indices.
             // Let's change find_scope to return index.
-            
+
             // Re-implement logic inline for now or fix helper
             let mut best_idx = 0;
             let mut found = false;
             for (i, scope) in self.scopes.iter().enumerate() {
-                if offset >= scope.span.start && offset <= scope.span.end {
-                     if !found || (scope.span.end - scope.span.start) < (self.scopes[best_idx].span.end - self.scopes[best_idx].span.start) {
-                         best_idx = i;
-                         found = true;
-                     }
+                if offset >= scope.span.start
+                    && offset <= scope.span.end
+                    && (!found
+                        || (scope.span.end - scope.span.start)
+                            < (self.scopes[best_idx].span.end - self.scopes[best_idx].span.start))
+                {
+                    best_idx = i;
+                    found = true;
                 }
             }
-            
+
             if found {
                 let mut curr_idx = Some(best_idx);
                 while let Some(idx) = curr_idx {
@@ -736,12 +851,12 @@ impl Analysis {
                         // For now just name.
                         items.push(name.clone());
                         // TODO: Use ty for better completion icons/details
-                        let _ = ty; 
+                        let _ = ty;
                     }
                     curr_idx = scope.parent;
                 }
             }
-            
+
             // Avoid unused variable warning for start_scope
             let _ = start_scope;
         }

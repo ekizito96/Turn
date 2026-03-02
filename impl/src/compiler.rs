@@ -127,20 +127,20 @@ impl Compiler {
                 ..
             } => {
                 let push_handler_idx = self.emit(Instr::PushHandler(0)); // Placeholder
-                
+
                 self.compile_block(try_block);
                 self.emit(Instr::PopHandler);
                 let jump_after_catch = self.emit(Instr::Jump(0));
-                
+
                 // Catch block starts here
                 let catch_start = self.code.len() as u32;
                 // Patch PushHandler to point here
                 self.patch_jump(push_handler_idx, catch_start);
-                
+
                 // Catch block expects error on stack. Store it in catch_var.
                 self.emit(Instr::Store(catch_var.clone()));
                 self.compile_block(catch_block);
-                
+
                 let after_catch = self.code.len() as u32;
                 self.patch_jump(jump_after_catch, after_catch);
             }
@@ -211,7 +211,12 @@ impl Compiler {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
             }
-            Expr::Turn { params, ret_ty: _, body, .. } => {
+            Expr::Turn {
+                params,
+                ret_ty: _,
+                body,
+                ..
+            } => {
                 let jump_over = self.emit(Instr::Jump(0));
                 let start_addr = self.code.len() as u32;
 
@@ -227,7 +232,10 @@ impl Compiler {
 
                 self.compile_block(body);
                 // Implicit return
-                let has_return = body.stmts.last().map_or(false, |s| matches!(s, Stmt::Return { .. }));
+                let has_return = body
+                    .stmts
+                    .last()
+                    .is_some_and(|s| matches!(s, Stmt::Return { .. }));
                 if !has_return {
                     self.emit(Instr::PushNull);
                     self.emit(Instr::Return);
@@ -237,7 +245,9 @@ impl Compiler {
                 let param_names = params.iter().map(|(n, _, _)| n.clone()).collect();
                 self.emit(Instr::MakeTurn(start_addr, param_names));
             }
-            Expr::Infer { target_ty, body, .. } => {
+            Expr::Infer {
+                target_ty, body, ..
+            } => {
                 // Compile body as an expression (leave result on stack)
                 let len = body.stmts.len();
                 if len == 0 {
@@ -256,7 +266,7 @@ impl Compiler {
                                     // But wait, if stmt was `Let`, stack is empty (Let pops).
                                     // So we must push Null to satisfy `Infer` instruction expectation.
                                     // But `compile_stmt` keeps stack balanced (0 net change usually).
-                                    self.emit(Instr::PushNull); 
+                                    self.emit(Instr::PushNull);
                                 }
                             }
                         } else {
@@ -293,23 +303,51 @@ impl Compiler {
                 }
                 self.emit(Instr::MakeMap(len));
             }
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 self.compile_expr(left);
                 self.compile_expr(right);
                 match op {
-                    BinOp::Add => { self.emit(Instr::Add); }
-                    BinOp::Sub => { self.emit(Instr::Sub); }
-                    BinOp::Mul => { self.emit(Instr::Mul); }
-                    BinOp::Div => { self.emit(Instr::Div); }
-                    BinOp::Eq => { self.emit(Instr::Eq); }
-                    BinOp::Ne => { self.emit(Instr::Ne); }
-                    BinOp::Lt => { self.emit(Instr::Lt); }
-                    BinOp::Gt => { self.emit(Instr::Gt); }
-                    BinOp::Le => { self.emit(Instr::Le); }
-                    BinOp::Ge => { self.emit(Instr::Ge); }
-                    BinOp::And => { self.emit(Instr::And); }
-                    BinOp::Or => { self.emit(Instr::Or); }
-                    BinOp::Similarity => { self.emit(Instr::Similarity); }
+                    BinOp::Add => {
+                        self.emit(Instr::Add);
+                    }
+                    BinOp::Sub => {
+                        self.emit(Instr::Sub);
+                    }
+                    BinOp::Mul => {
+                        self.emit(Instr::Mul);
+                    }
+                    BinOp::Div => {
+                        self.emit(Instr::Div);
+                    }
+                    BinOp::Eq => {
+                        self.emit(Instr::Eq);
+                    }
+                    BinOp::Ne => {
+                        self.emit(Instr::Ne);
+                    }
+                    BinOp::Lt => {
+                        self.emit(Instr::Lt);
+                    }
+                    BinOp::Gt => {
+                        self.emit(Instr::Gt);
+                    }
+                    BinOp::Le => {
+                        self.emit(Instr::Le);
+                    }
+                    BinOp::Ge => {
+                        self.emit(Instr::Ge);
+                    }
+                    BinOp::And => {
+                        self.emit(Instr::And);
+                    }
+                    BinOp::Or => {
+                        self.emit(Instr::Or);
+                    }
+                    BinOp::Similarity => {
+                        self.emit(Instr::Similarity);
+                    }
                 }
             }
             Expr::Unary { op, expr, .. } => {
@@ -356,7 +394,9 @@ impl Compiler {
                 }
                 self.emit(Instr::MakeStruct(name.clone(), len));
             }
-            Expr::MethodCall { target, name, arg, .. } => {
+            Expr::MethodCall {
+                target, name, arg, ..
+            } => {
                 self.compile_expr(target);
                 self.compile_expr(arg);
                 self.emit(Instr::CallMethod(name.clone()));

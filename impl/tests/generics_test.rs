@@ -1,9 +1,9 @@
+use turn::analysis::Analysis;
 use turn::compiler::Compiler;
 use turn::lexer::Lexer;
 use turn::parser::Parser;
-use turn::vm::{Vm, VmResult};
 use turn::value::Value;
-use turn::analysis::Analysis;
+use turn::vm::{Vm, VmResult};
 
 fn analyze(source: &str) -> Analysis {
     let tokens = Lexer::new(source).tokenize().unwrap();
@@ -98,7 +98,7 @@ fn test_nested_generics() {
                 Value::List(inner) => assert_eq!(inner.len(), 2),
                 _ => panic!("Expected inner list"),
             }
-        },
+        }
         _ => panic!("Expected outer list"),
     }
 }

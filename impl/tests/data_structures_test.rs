@@ -1,4 +1,4 @@
-use turn::{Vm, VmResult, compiler, parser, lexer, Value};
+use turn::{compiler, lexer, parser, Value, Vm, VmResult};
 
 #[test]
 fn test_list_creation() {
@@ -8,13 +8,13 @@ fn test_list_creation() {
         return x;
     }
     "#;
-    
+
     let tokens = lexer::Lexer::new(source).tokenize().unwrap();
     let program = parser::Parser::new(tokens).parse().unwrap();
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = Vm::new(&code);
-    
+
     match vm.run() {
         VmResult::Complete(val) => {
             if let Value::List(l) = val {
@@ -38,13 +38,13 @@ fn test_map_creation() {
         return x;
     }
     "#;
-    
+
     let tokens = lexer::Lexer::new(source).tokenize().unwrap();
     let program = parser::Parser::new(tokens).parse().unwrap();
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = Vm::new(&code);
-    
+
     match vm.run() {
         VmResult::Complete(val) => {
             if let Value::Map(m) = val {
@@ -67,13 +67,13 @@ fn test_nested_structures() {
         return x;
     }
     "#;
-    
+
     let tokens = lexer::Lexer::new(source).tokenize().unwrap();
     let program = parser::Parser::new(tokens).parse().unwrap();
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = Vm::new(&code);
-    
+
     match vm.run() {
         VmResult::Complete(val) => {
             if let Value::Map(m) = val {
@@ -83,7 +83,7 @@ fn test_nested_structures() {
                 } else {
                     panic!("Expected list in map");
                 }
-                
+
                 if let Some(Value::Map(inner)) = m.get("map") {
                     assert_eq!(inner.get("a"), Some(&Value::Num(3.0)));
                 } else {

@@ -16,7 +16,7 @@ fn test_type_check_let() {
     let x: Num = "hello";
     "#;
     let analysis = analyze(source);
-    
+
     assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));
@@ -32,7 +32,7 @@ fn test_type_check_return() {
     };
     "#;
     let analysis = analyze(source);
-    
+
     assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));
@@ -47,7 +47,7 @@ fn test_type_inference_propagation() {
     let y: Str = x;
     "#;
     let analysis = analyze(source);
-    
+
     assert_eq!(analysis.diagnostics.len(), 1);
     let (_, msg) = &analysis.diagnostics[0];
     assert!(msg.contains("Type mismatch"));

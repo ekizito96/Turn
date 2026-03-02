@@ -1,29 +1,19 @@
 //! Agent state and runtime per spec/03-runtime-model.md.
 
 use crate::value::Value;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::ast::Type;
 use indexmap::IndexMap;
 
 const MAX_CONTEXT_SIZE: usize = 100;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StructuredContext {
     pub p0_system: Vec<Value>,
     pub p1_working: std::collections::VecDeque<Value>,
     pub p2_episodic: Vec<Value>,
-}
-
-impl Default for StructuredContext {
-    fn default() -> Self {
-        Self {
-            p0_system: Vec::new(),
-            p1_working: std::collections::VecDeque::new(),
-            p2_episodic: Vec::new(),
-        }
-    }
 }
 
 impl StructuredContext {
@@ -37,7 +27,7 @@ impl StructuredContext {
             if let Some(old) = self.p1_working.pop_front() {
                 self.p2_episodic.push(old);
             }
-            
+
             // If episodic memory grows too large, we could compress it here.
             // For now, we will simply limit its size to prevent OOM
             if self.p2_episodic.len() > max_size * 2 {
@@ -46,7 +36,7 @@ impl StructuredContext {
         }
         self.p1_working.push_back(value);
     }
-    
+
     // Renders the context flat, respecting P0 > P1 > P2 priority
     pub fn to_flat_vec(&self) -> Vec<Value> {
         let mut flat = Vec::new();
@@ -125,7 +115,13 @@ fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         Value::Num(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Err(RuntimeError::InvalidMemoryKey),
-        Value::List(_) | Value::Map(_) | Value::Struct(_, _) | Value::Closure { .. } | Value::Pid(_) | Value::Vec(_) | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
+        Value::List(_)
+        | Value::Map(_)
+        | Value::Struct(_, _)
+        | Value::Closure { .. }
+        | Value::Pid(_)
+        | Value::Vec(_)
+        | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
     }
 }
 

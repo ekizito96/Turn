@@ -20,7 +20,7 @@ fn test_std_math_module() {
     "#;
 
     let result = runner.run("test_agent", source, None).expect("Run failed");
-    
+
     if let Value::List(items) = result {
         assert_eq!(items[0], Value::Num(20.0));
         assert_eq!(items[1], Value::Num(10.0));
@@ -47,7 +47,7 @@ fn test_std_fs_module() {
     "#;
 
     let result = runner.run("test_agent", source, None).expect("Run failed");
-    
+
     if let Value::Map(m) = result {
         assert!(m.contains_key("read"));
         assert!(m.contains_key("write"));

@@ -1,8 +1,8 @@
 use turn::compiler::Compiler;
 use turn::lexer::Lexer;
 use turn::parser::Parser;
-use turn::vm::{Vm, VmResult};
 use turn::value::Value;
+use turn::vm::{Vm, VmResult};
 
 fn run(source: &str) -> Value {
     let tokens = Lexer::new(source).tokenize().unwrap();

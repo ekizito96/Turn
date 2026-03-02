@@ -1,8 +1,8 @@
-use turn::vm::{Vm, VmResult};
-use turn::value::Value;
 use turn::compiler::Compiler;
-use turn::parser::Parser;
 use turn::lexer::Lexer;
+use turn::parser::Parser;
+use turn::value::Value;
+use turn::vm::{Vm, VmResult};
 
 fn run_code_with_env(source: &str, env_setup: impl FnOnce(&mut Vm)) -> Value {
     let lexer = Lexer::new(source);
@@ -12,9 +12,9 @@ fn run_code_with_env(source: &str, env_setup: impl FnOnce(&mut Vm)) -> Value {
     let mut compiler = Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = Vm::new(&code);
-    
+
     env_setup(&mut vm);
-    
+
     let result = vm.run();
     match result {
         VmResult::Complete(v) => v,
@@ -28,13 +28,16 @@ fn test_confidence_keyword() {
     let c = confidence x;
     return c;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Num(10.0)), 0.8),
+            );
         }
     });
-    
+
     if let Value::Num(n) = res {
         assert_eq!(n, 0.8);
     } else {
@@ -46,7 +49,7 @@ fn test_confidence_keyword() {
 fn test_confidence_of_certain_value() {
     let source = "let c = confidence 42; return c;";
     let res = run_code_with_env(source, |_| {});
-    
+
     if let Value::Num(n) = res {
         assert_eq!(n, 1.0);
     } else {
@@ -60,14 +63,20 @@ fn test_uncertainty_propagation_add() {
     let z = x + y;
     return confidence z;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
-            p.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Num(5.0)), 0.5));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Num(10.0)), 0.8),
+            );
+            p.runtime.env.insert(
+                "y".to_string(),
+                Value::Uncertain(Box::new(Value::Num(5.0)), 0.5),
+            );
         }
     });
-    
+
     // 0.8 * 0.5 = 0.4
     if let Value::Num(n) = res {
         assert!((n - 0.4).abs() < 1e-6);
@@ -82,13 +91,16 @@ fn test_uncertainty_propagation_add_mixed() {
     let z = x + 5;
     return confidence z;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Num(10.0)), 0.8));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Num(10.0)), 0.8),
+            );
         }
     });
-    
+
     // 0.8 * 1.0 = 0.8
     if let Value::Num(n) = res {
         assert!((n - 0.8).abs() < 1e-6);
@@ -104,19 +116,25 @@ fn test_uncertainty_nested_logic() {
     // y = Uncertain(false, 0.5)
     // true AND false -> false
     // Probability (Zadeh AND): min(0.9, 0.5) = 0.5
-    
+
     let source = r#"
     let res = x and y;
     return confidence res;
     "#;
-    
+
     let res = run_code_with_env(source, |vm| {
         if let Some(p) = vm.scheduler.front_mut() {
-            p.runtime.env.insert("x".to_string(), Value::Uncertain(Box::new(Value::Bool(true)), 0.9));
-            p.runtime.env.insert("y".to_string(), Value::Uncertain(Box::new(Value::Bool(false)), 0.5));
+            p.runtime.env.insert(
+                "x".to_string(),
+                Value::Uncertain(Box::new(Value::Bool(true)), 0.9),
+            );
+            p.runtime.env.insert(
+                "y".to_string(),
+                Value::Uncertain(Box::new(Value::Bool(false)), 0.5),
+            );
         }
     });
-    
+
     if let Value::Num(n) = res {
         assert!((n - 0.5).abs() < 1e-6);
     } else {
