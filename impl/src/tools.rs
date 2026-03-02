@@ -24,7 +24,7 @@ fn call_openai_chat(
 
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    match clien
+    match client
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&payload)
@@ -87,7 +87,7 @@ fn call_anthropic_chat(
         payload["system"] = serde_json::Value::String(system_prompt);
     }
 
-    match clien
+    match client
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
@@ -259,7 +259,7 @@ fn call_azure_chat(
         "messages": messages
     });
 
-    match clien
+    match client
         .post(&url)
         .header("api-key", api_key)
         .json(&payload)
@@ -301,7 +301,7 @@ fn call_azure_responses(
         "max_completion_tokens": 16384
     });
 
-    match clien
+    match client
         .post(responses_url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
@@ -797,7 +797,7 @@ impl ToolRegistry {
                      let user_content = format!("Schema Type: {}\nPrompt: {}", schema, prompt);
                      msgs.push(serde_json::json!({
                          "role": "user",
-                         "content": user_conten
+                         "content": user_content
                      }));
 
                      let messages = serde_json::Value::Array(msgs);
