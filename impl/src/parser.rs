@@ -61,6 +61,7 @@ impl Parser {
         if std::mem::discriminant(&t.token) == std::mem::discriminant(&expected) {
             Ok(t.span)
         } else {
+            eprintln!("Expected {:?} but got {:?}", expected, t.token);
             Err(ParseError::UnexpectedToken(t.span))
         }
     }
@@ -250,38 +251,11 @@ impl Parser {
                 self.expect(Token::Semicolon)?;
                 Ok(Stmt::Remember { key, value, span })
             }
-            Some(Token::Call) => {
-                self.next();
-                self.expect(Token::LParen)?;
-                let tool = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let arg = self.parse_expr()?;
-                self.expect(Token::RParen)?;
-                self.expect(Token::Semicolon)?;
-                Ok(Stmt::CallStmt { tool, arg, span })
-            }
             Some(Token::Return) => {
                 self.next();
                 let expr = self.parse_expr()?;
                 self.expect(Token::Semicolon)?;
                 Ok(Stmt::Return { expr, span })
-            }
-            Some(Token::If) => {
-                self.next();
-                let cond = self.parse_expr()?;
-                let then_block = self.parse_block()?;
-                let else_block = if matches!(self.peek(), Some(Token::Else)) {
-                    self.next();
-                    Some(self.parse_block()?)
-                } else {
-                    None
-                };
-                Ok(Stmt::If {
-                    cond,
-                    then_block,
-                    else_block,
-                    span,
-                })
             }
             Some(Token::While) => {
                 self.next();
@@ -333,7 +307,21 @@ impl Parser {
             }
             _ => {
                 let expr = self.parse_expr()?;
-                self.expect(Token::Semicolon)?;
+                // If it's a block-like expression, semicolon is optional
+                if matches!(expr, Expr::Turn { .. } | Expr::If { .. }) {
+                    if matches!(self.peek(), Some(Token::Semicolon)) {
+                        self.next();
+                    }
+                } else {
+                    if !matches!(self.peek(), Some(Token::RBrace)) {
+                        self.expect(Token::Semicolon)?;
+                    } else {
+                        // Semicolon is optional before closing brace
+                        if matches!(self.peek(), Some(Token::Semicolon)) {
+                            self.next();
+                        }
+                    }
+                }
                 Ok(Stmt::ExprStmt { expr, span })
             }
         }
@@ -502,6 +490,19 @@ impl Parser {
                 let expr = self.parse_unary()?; // High precedence prefix
                 Ok(Expr::SpawnLink {
                     expr: Box::new(expr),
+                    span,
+                })
+            }
+            Some(Token::SpawnEach) => {
+                self.next();
+                self.expect(Token::LParen)?;
+                let list = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let closure = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::SpawnEach {
+                    list: Box::new(list),
+                    closure: Box::new(closure),
                     span,
                 })
             }
@@ -681,7 +682,14 @@ impl Parser {
 
                     self.next(); // consume LBrace
                     let mut fields = IndexMap::new();
+                    let mut spread = None;
                     while !matches!(self.peek(), Some(Token::RBrace) | Some(Token::Eof)) {
+                        if matches!(self.peek(), Some(Token::DotDot)) {
+                            self.next(); // consume ..
+                            spread = Some(Box::new(self.parse_expr()?));
+                            break;
+                        }
+
                         let field_token = self.next().ok_or(ParseError::UnexpectedEof)?;
                         let field_name = match field_token.token {
                             Token::Id(s) => s,
@@ -697,7 +705,7 @@ impl Parser {
                         }
                     }
                     self.expect(Token::RBrace)?;
-                    Ok(Expr::StructInit { name, fields, span })
+                    Ok(Expr::StructInit { name, fields, spread, span })
                 } else {
                     Ok(Expr::Id { name, span })
                 }
@@ -789,6 +797,22 @@ impl Parser {
                     span,
                 })
             }
+            Token::If => {
+                let cond = self.parse_expr()?;
+                let then_block = self.parse_block()?;
+                let else_block = if matches!(self.peek(), Some(Token::Else)) {
+                    self.next();
+                    Some(self.parse_block()?)
+                } else {
+                    None
+                };
+                Ok(Expr::If {
+                    cond: Box::new(cond),
+                    then_block,
+                    else_block,
+                    span,
+                })
+            }
             Token::LParen => {
                 let inner = self.parse_expr()?;
                 self.expect(Token::RParen)?;
@@ -827,7 +851,10 @@ impl Parser {
                 self.expect(Token::RBrace)?;
                 Ok(Expr::Map { entries, span })
             }
-            _ => Err(ParseError::UnexpectedToken(span)),
+            _ => {
+                eprintln!("Unexpected token in parse_primary: {:?}", t.token);
+                Err(ParseError::UnexpectedToken(span))
+            }
         }
     }
 }

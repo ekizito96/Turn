@@ -493,6 +493,14 @@ impl Analysis {
                 }
                 Some(Type::Any)
             }
+            Expr::If {
+                then_block: _,
+                else_block: _,
+                ..
+            } => {
+                // To be precise we should infer type of block. For now Any.
+                Some(Type::Any)
+            }
             _ => Some(Type::Any),
         }
     }
@@ -574,20 +582,6 @@ impl Analysis {
                 self.visit_block(body);
                 self.exit_scope();
             }
-            Stmt::If {
-                cond,
-                then_block,
-                else_block,
-                ..
-            } => {
-                self.visit_expr(cond);
-                // If/Else blocks don't create new scope in current VM, but let's pretend they do for cleaner future?
-                // No, sticking to VM reality: they share scope.
-                self.visit_block(then_block);
-                if let Some(b) = else_block {
-                    self.visit_block(b);
-                }
-            }
             Stmt::While { cond, body, .. } => {
                 self.visit_expr(cond);
                 self.visit_block(body);
@@ -649,10 +643,6 @@ impl Analysis {
                 self.visit_expr(key);
                 self.visit_expr(value);
             }
-            Stmt::CallStmt { tool, arg, .. } => {
-                self.visit_expr(tool);
-                self.visit_expr(arg);
-            }
             Stmt::Throw { expr, .. } => self.visit_expr(expr),
             Stmt::Suspend { .. } => {}
         }
@@ -666,13 +656,13 @@ impl Analysis {
 
     fn visit_expr(&mut self, expr: &Expr) {
         match expr {
-            Expr::StructInit { name, fields, span } => {
+            Expr::StructInit { name, fields, spread, span } => {
                 if let Some(def_fields) = self.find_struct(name) {
                     for (field_name, field_ty) in &def_fields {
                         if let Some(init_expr) = fields.get(field_name) {
                             self.visit_expr(init_expr);
                             self.check_assignment(&Some(field_ty.clone()), init_expr, *span);
-                        } else {
+                        } else if spread.is_none() {
                             self.diagnostics.push((
                                 *span,
                                 format!("Missing field '{}' in struct '{}'", field_name, name),
@@ -687,6 +677,9 @@ impl Analysis {
                                 format!("Unknown field '{}' in struct '{}'", field_name, name),
                             ));
                         }
+                    }
+                    if let Some(spread_expr) = spread {
+                        self.visit_expr(spread_expr);
                     }
                 } else {
                     self.diagnostics
@@ -706,6 +699,10 @@ impl Analysis {
                     }
                 }
             }
+            Expr::SpawnEach { list, closure, span: _ } => {
+                self.visit_expr(list);
+                self.visit_expr(closure);
+            }
             Expr::Send { pid, msg, span } => {
                 self.visit_expr(pid);
                 self.visit_expr(msg);
@@ -717,6 +714,18 @@ impl Analysis {
             }
             Expr::Infer { body, .. } => {
                 self.visit_block(body);
+            }
+            Expr::If {
+                cond,
+                then_block,
+                else_block,
+                ..
+            } => {
+                self.visit_expr(cond);
+                self.visit_block(then_block);
+                if let Some(b) = else_block {
+                    self.visit_block(b);
+                }
             }
             Expr::Id { name, span } => {
                 self.record_usage(name, *span);

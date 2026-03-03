@@ -8,6 +8,7 @@ pub enum Token {
     // Keywords
     Spawn,
     SpawnLink,
+    SpawnEach,
     Send,
     Receive,
     Vec,
@@ -84,6 +85,7 @@ pub enum Token {
     Colon,
     Semicolon,
     Dot,
+    DotDot,
 
     // End of input
     Eof,
@@ -104,6 +106,7 @@ pub struct Span {
 const KEYWORDS: &[(&str, Token)] = &[
     ("spawn", Token::Spawn),
     ("spawn_link", Token::SpawnLink),
+    ("spawn_each", Token::SpawnEach),
     ("send", Token::Send),
     ("receive", Token::Receive),
     ("vec", Token::Vec),
@@ -380,7 +383,12 @@ impl<'a> Lexer<'a> {
             }
             Some('.') => {
                 self.next();
-                Token::Dot
+                if self.peek() == Some('.') {
+                    self.next();
+                    Token::DotDot
+                } else {
+                    Token::Dot
+                }
             }
             Some('<') => {
                 self.next();

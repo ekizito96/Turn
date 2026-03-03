@@ -17,6 +17,7 @@ pub enum Instr {
     MakeList(usize),
     MakeMap(usize),
     MakeStruct(String, usize),
+    MakeStructSpread(String, usize),
     MakeVec(usize),
 
     // Variables
@@ -59,6 +60,7 @@ pub enum Instr {
     // Concurrency
     Spawn,
     SpawnLink,
+    SpawnEach,
     Send,
     Receive,
     Confidence,  // NEW

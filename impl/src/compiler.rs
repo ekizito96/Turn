@@ -80,37 +80,9 @@ impl Compiler {
                 self.compile_expr(value);
                 self.emit(Instr::Remember);
             }
-            Stmt::CallStmt { tool, arg, .. } => {
-                self.compile_expr(tool);
-                self.compile_expr(arg);
-                self.emit(Instr::CallTool);
-                self.emit(Instr::Pop); // discard result
-            }
             Stmt::Return { expr, .. } => {
                 self.compile_expr(expr);
                 self.emit(Instr::Return);
-            }
-            Stmt::If {
-                cond,
-                then_block,
-                else_block,
-                ..
-            } => {
-                self.compile_expr(cond);
-                let jump_false = self.emit(Instr::JumpIfFalse(0));
-                self.compile_block(then_block);
-                let else_jump = if else_block.is_some() {
-                    Some(self.emit(Instr::Jump(0)))
-                } else {
-                    None
-                };
-                self.patch_jump(jump_false, self.code.len() as u32);
-                if let Some(ref block) = else_block {
-                    self.compile_block(block);
-                }
-                if let Some(addr) = else_jump {
-                    self.patch_jump(addr, self.code.len() as u32);
-                }
             }
             Stmt::While { cond, body, .. } => {
                 let loop_start = self.code.len() as u32;
@@ -173,6 +145,29 @@ impl Compiler {
     fn compile_block(&mut self, block: &Block) {
         for stmt in &block.stmts {
             self.compile_stmt(stmt);
+        }
+    }
+
+    fn compile_block_yield(&mut self, block: &Block) {
+        let len = block.stmts.len();
+        if len == 0 {
+            self.emit(Instr::PushNull);
+        } else {
+            for (i, stmt) in block.stmts.iter().enumerate() {
+                if i == len - 1 {
+                    match stmt {
+                        Stmt::ExprStmt { expr, .. } => {
+                            self.compile_expr(expr);
+                        }
+                        _ => {
+                            self.compile_stmt(stmt);
+                            self.emit(Instr::PushNull);
+                        }
+                    }
+                } else {
+                    self.compile_stmt(stmt);
+                }
+            }
         }
     }
 
@@ -248,33 +243,29 @@ impl Compiler {
             Expr::Infer {
                 target_ty, body, ..
             } => {
-                // Compile body as an expression (leave result on stack)
-                let len = body.stmts.len();
-                if len == 0 {
-                    self.emit(Instr::PushNull);
-                } else {
-                    for (i, stmt) in body.stmts.iter().enumerate() {
-                        if i == len - 1 {
-                            match stmt {
-                                Stmt::ExprStmt { expr, .. } => {
-                                    self.compile_expr(expr);
-                                    // Do NOT pop
-                                }
-                                _ => {
-                                    self.compile_stmt(stmt);
-                                    // Result is Null if stmt is not an expression
-                                    // But wait, if stmt was `Let`, stack is empty (Let pops).
-                                    // So we must push Null to satisfy `Infer` instruction expectation.
-                                    // But `compile_stmt` keeps stack balanced (0 net change usually).
-                                    self.emit(Instr::PushNull);
-                                }
-                            }
-                        } else {
-                            self.compile_stmt(stmt);
-                        }
-                    }
-                }
+                self.compile_block_yield(body);
                 self.emit(Instr::Infer(target_ty.clone()));
+            }
+            Expr::If {
+                cond,
+                then_block,
+                else_block,
+                ..
+            } => {
+                self.compile_expr(cond);
+                let jump_false = self.emit(Instr::JumpIfFalse(0));
+                self.compile_block_yield(then_block);
+                
+                let else_jump = self.emit(Instr::Jump(0));
+                self.patch_jump(jump_false, self.code.len() as u32);
+                
+                if let Some(ref block) = else_block {
+                    self.compile_block_yield(block);
+                } else {
+                    self.emit(Instr::PushNull);
+                }
+                
+                self.patch_jump(else_jump, self.code.len() as u32);
             }
             Expr::Index { target, index, .. } => {
                 self.compile_expr(target);
@@ -372,6 +363,11 @@ impl Compiler {
                 self.compile_expr(expr);
                 self.emit(Instr::SpawnLink);
             }
+            Expr::SpawnEach { list, closure, .. } => {
+                self.compile_expr(list);
+                self.compile_expr(closure);
+                self.emit(Instr::SpawnEach);
+            }
             Expr::Send { pid, msg, .. } => {
                 self.compile_expr(pid);
                 self.compile_expr(msg);
@@ -385,14 +381,19 @@ impl Compiler {
                 self.emit(Instr::Confidence);
             }
             Expr::Paren(inner) => self.compile_expr(inner),
-            Expr::StructInit { name, fields, .. } => {
+            Expr::StructInit { name, fields, spread, .. } => {
                 // Compile as Struct creation
                 let len = fields.len();
                 for (key, val) in fields {
                     self.emit(Instr::PushStr(key.clone()));
                     self.compile_expr(val);
                 }
-                self.emit(Instr::MakeStruct(name.clone(), len));
+                if let Some(spread_expr) = spread {
+                    self.compile_expr(spread_expr);
+                    self.emit(Instr::MakeStructSpread(name.clone(), len));
+                } else {
+                    self.emit(Instr::MakeStruct(name.clone(), len));
+                }
             }
             Expr::MethodCall {
                 target, name, arg, ..

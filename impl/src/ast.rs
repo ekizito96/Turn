@@ -49,11 +49,6 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
-    CallStmt {
-        tool: Expr,
-        arg: Expr,
-        span: Span,
-    },
     ImplDef {
         type_name: String,
         methods: Vec<Stmt>, // Stmt::Let (functions)
@@ -71,12 +66,6 @@ pub enum Stmt {
     },
     Return {
         expr: Expr,
-        span: Span,
-    },
-    If {
-        cond: Expr,
-        then_block: Block,
-        else_block: Option<Block>,
         span: Span,
     },
     While {
@@ -146,6 +135,11 @@ pub enum Expr {
         expr: Box<Expr>,
         span: Span,
     },
+    SpawnEach {
+        list: Box<Expr>,
+        closure: Box<Expr>,
+        span: Span,
+    },
     Send {
         pid: Box<Expr>,
         msg: Box<Expr>,
@@ -165,6 +159,7 @@ pub enum Expr {
     StructInit {
         name: String,
         fields: IndexMap<String, Expr>,
+        spread: Option<Box<Expr>>,
         span: Span,
     },
     Index {
@@ -203,6 +198,12 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
+    If {
+        cond: Box<Expr>,
+        then_block: Block,
+        else_block: Option<Block>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -216,6 +217,7 @@ impl Expr {
             Expr::Use { span, .. } => *span,
             Expr::Spawn { span, .. } => *span,
             Expr::SpawnLink { span, .. } => *span,
+            Expr::SpawnEach { span, .. } => *span,
             Expr::Send { span, .. } => *span,
             Expr::Receive { span } => *span,
             Expr::Vec { span, .. } => *span,
@@ -229,6 +231,7 @@ impl Expr {
             Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
             Expr::StructInit { span, .. } => *span,
+            Expr::If { span, .. } => *span,
         }
     }
 }

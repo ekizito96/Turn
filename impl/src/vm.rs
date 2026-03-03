@@ -319,6 +319,52 @@ impl Vm {
                         process.stack.push(Value::Null);
                     }
                 }
+                Instr::SpawnEach => {
+                    let closure_val = process.stack.pop().unwrap_or(Value::Null);
+                    let list_val = process.stack.pop().unwrap_or(Value::Null);
+
+                    if let (Value::Closure { code, ip, env, params }, Value::List(items)) = (closure_val, list_val) {
+                        let mut pids = Vec::new();
+                        for item in items {
+                            let new_pid = self.next_pid;
+                            self.next_pid += 1;
+
+                            let mut new_env = env.clone();
+                            // Inject loop item as the first parameter of the closure
+                            if !params.is_empty() {
+                                new_env.insert(params[0].clone(), item.clone());
+                            } else {
+                                // Fallback: just put it in "arg"
+                                new_env.insert("arg".to_string(), item.clone());
+                            }
+
+                            let mut rt = Runtime::new();
+                            rt.env = new_env;
+                            rt.structs = process.runtime.structs.clone();
+
+                            let new_process = Process {
+                                pid: new_pid,
+                                parent_pid: Some(process.pid), // Linked by default? Sure, for gather logic
+                                frames: vec![Frame {
+                                    code: code.clone(),
+                                    ip,
+                                    env: rt.env.clone(),
+                                    handlers: Vec::new(),
+                                }],
+                                stack: Vec::new(),
+                                runtime: rt,
+                                mailbox: VecDeque::new(),
+                                gas_remaining: default_gas(),
+                            };
+
+                            self.scheduler.push_back(new_process);
+                            pids.push(Value::Pid(new_pid));
+                        }
+                        process.stack.push(Value::List(pids));
+                    } else {
+                        process.stack.push(Value::Null);
+                    }
+                }
                 Instr::Send => {
                     let msg = process.stack.pop().unwrap_or(Value::Null);
                     let pid_val = process.stack.pop().unwrap_or(Value::Null);
@@ -834,6 +880,27 @@ impl Vm {
                         map.insert(k, val);
                     }
                     process.stack.push(Value::Struct(name, map));
+                }
+                Instr::MakeStructSpread(name, count) => {
+                    let base = process.stack.pop().unwrap_or(Value::Null);
+                    let mut map = IndexMap::new();
+                    for _ in 0..count {
+                        let val = process.stack.pop().unwrap_or(Value::Null);
+                        let k_val = process.stack.pop().unwrap_or(Value::Null);
+                        let k = match k_val {
+                            Value::Str(s) => s,
+                            _ => k_val.to_string(),
+                        };
+                        map.insert(k, val);
+                    }
+                    let mut final_map = IndexMap::new();
+                    if let Value::Struct(_, base_map) = base {
+                        final_map = base_map;
+                    }
+                    for (k, v) in map {
+                        final_map.insert(k, v);
+                    }
+                    process.stack.push(Value::Struct(name, final_map));
                 }
                 Instr::MakeVec(count) => {
                     let mut items = Vec::new();

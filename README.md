@@ -14,8 +14,10 @@ Powered by a custom Rust bytecode Virtual Machine, Turn solves the inherent unre
 Current AI frameworks rely on massive layers of Pydantic models, JSON-parsing retry loops, and async spaghetti to coordinate agents. Turn fixes this at the compiler level with three core primitives:
 
 1. **Cognitive Type Safety (`infer Struct`)**: Define a struct and call `infer`. The VM natively intercepts the schema constraints and guarantees the inference provider returns exactly the memory shape you asked for. No manual parsing required.
-2. **Probabilistic Routing (`confidence`)**: LLMs hallucinate. Turn makes uncertainty a first-class citizen. Use the `confidence` operator to build native fail-safes directly into your control flow (e.g., `if confidence decision < 0.85 { return Fallback; }`).
-3. **Erlang-style Actors (`spawn_link` & `receive`)**: Multi-agent orchestration in Python is a race-condition nightmare. Turn uses an Actor model. Agents run in isolated VM threads (`spawn_link`) and communicate safely via deterministic mailboxes (`receive`).
+2. **State as Epochs (`..spread`)**: Turn enforces strict immutability. Instead of modifying objects (which causes race conditions in multi-agent systems), agents naturally evolve their state into immutable "epochs" using structural spread syntax (`let next = State { ..current }`).
+3. **Iteration as Delegation (`spawn_each`)**: Turn intentionally lacks a `for` loop. If you have a list of tasks, you don't loop over them sequentially; you map over them concurrently. `spawn_each` distributes workloads across the VM's Actor model natively.
+4. **Probabilistic Control Flow (`confidence`)**: LLMs hallucinate. Turn makes uncertainty a first-class citizen. Use the `confidence` operator to build native fail-safes directly into your logic (`if confidence decision < 0.85 { return Fallback; }`).
+5. **Erlang-style Actors (`spawn_link` & `receive`)**: Agents run in isolated VM threads and communicate safely via deterministic mailboxes, ensuring perfect OODA-loop isolation.
 
 ## Features
 
