@@ -750,18 +750,22 @@ impl Analysis {
             }
             Expr::Unary { expr, .. } => self.visit_expr(expr),
             Expr::Paren(expr) => self.visit_expr(expr),
-            Expr::Call { name, arg, .. } => {
+            Expr::Call { name, args, .. } => {
                 self.visit_expr(name);
-                self.visit_expr(arg);
+                for arg in args {
+                    self.visit_expr(arg);
+                }
             }
             Expr::MethodCall {
                 target,
                 name,
-                arg,
+                args,
                 span,
             } => {
                 self.visit_expr(target);
-                self.visit_expr(arg);
+                for arg in args {
+                    self.visit_expr(arg);
+                }
                 // Infer target type
                 let target_ty = self.infer_expr_type(target);
                 if let Some(Type::Struct(type_name, _)) = target_ty {
@@ -770,8 +774,10 @@ impl Analysis {
                         // Check arg type
                         // Method signature: Function(Arg, Ret)
                         if let Some(Type::Function(arg_ty, _ret_ty)) = method_ty {
-                            // Check argument
-                            self.check_assignment(&Some(*arg_ty), arg, *span);
+                            // Check arguments (for now, just check the first one if we can)
+                            if let Some(first_arg) = args.first() {
+                                self.check_assignment(&Some(*arg_ty), first_arg, *span);
+                            }
                             // We don't return type from visit_expr, but we checked logic
                         }
                     } else {

@@ -611,7 +611,11 @@ impl Parser {
                         expr = Expr::MethodCall {
                             target: Box::new(expr),
                             name,
-                            arg: Box::new(arg),
+                            args: match arg {
+                                Expr::List { items, .. } => items,
+                                Expr::Literal { value: Literal::Null, .. } => vec![],
+                                _ => vec![arg],
+                            },
                             span,
                         };
                     } else {
@@ -723,11 +727,23 @@ impl Parser {
                 self.expect(Token::LParen)?;
                 let name = self.parse_expr()?;
                 self.expect(Token::Comma)?;
-                let arg = self.parse_expr()?;
+                
+                let mut args = Vec::new();
+                if !matches!(self.peek(), Some(Token::RParen)) {
+                    loop {
+                        args.push(self.parse_expr()?);
+                        if matches!(self.peek(), Some(Token::Comma)) {
+                            self.next(); // consume comma
+                        } else {
+                            break;
+                        }
+                    }
+                }
                 self.expect(Token::RParen)?;
+                
                 Ok(Expr::Call {
                     name: Box::new(name),
-                    arg: Box::new(arg),
+                    args,
                     span,
                 })
             }

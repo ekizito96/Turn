@@ -111,7 +111,7 @@ pub enum Expr {
     MethodCall {
         target: Box<Expr>,
         name: String,
-        arg: Box<Expr>,
+        args: Vec<Expr>,
         span: Span,
     },
     Recall {
@@ -120,7 +120,7 @@ pub enum Expr {
     },
     Call {
         name: Box<Expr>,
-        arg: Box<Expr>,
+        args: Vec<Expr>,
         span: Span,
     },
     Use {

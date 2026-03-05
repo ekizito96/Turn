@@ -197,9 +197,18 @@ impl Compiler {
                 self.compile_expr(key);
                 self.emit(Instr::Recall);
             }
-            Expr::Call { name, arg, .. } => {
+            Expr::Call { name, args, .. } => {
                 self.compile_expr(name);
-                self.compile_expr(arg);
+                if args.is_empty() {
+                    self.emit(Instr::PushNull);
+                } else if args.len() == 1 {
+                    self.compile_expr(&args[0]);
+                } else {
+                    for arg in args {
+                        self.compile_expr(arg);
+                    }
+                    self.emit(Instr::MakeList(args.len()));
+                }
                 self.emit(Instr::CallTool);
             }
             Expr::Use { module, .. } => {
@@ -396,10 +405,19 @@ impl Compiler {
                 }
             }
             Expr::MethodCall {
-                target, name, arg, ..
+                target, name, args, ..
             } => {
                 self.compile_expr(target);
-                self.compile_expr(arg);
+                if args.is_empty() {
+                    self.emit(Instr::PushNull);
+                } else if args.len() == 1 {
+                    self.compile_expr(&args[0]);
+                } else {
+                    for arg in args {
+                        self.compile_expr(arg);
+                    }
+                    self.emit(Instr::MakeList(args.len()));
+                }
                 self.emit(Instr::CallMethod(name.clone()));
             }
         }
