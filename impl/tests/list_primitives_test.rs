@@ -49,34 +49,38 @@ fn test_list_contains() {
 }
 
 #[test]
-fn test_list_map_placeholder() {
+fn test_native_list_map() {
     let source = r#"
     let list = [1, 2, 3];
-    let map_fn = turn(item: Any) -> Any { return item; };
-    return call("list_map", list, map_fn);
+    let map_fn = turn(item: Num) -> Num { return item * 2; };
+    return map(list, map_fn);
     "#;
 
     let result = run_turn_code(source);
     if let Value::List(l) = result {
         assert_eq!(l.len(), 3);
-        assert_eq!(l[0], Value::Num(1.0));
+        assert_eq!(l[0], Value::Num(2.0));
+        assert_eq!(l[1], Value::Num(4.0));
+        assert_eq!(l[2], Value::Num(6.0));
     } else {
         panic!("Expected list");
     }
 }
 
 #[test]
-fn test_list_filter_placeholder() {
+fn test_native_list_filter() {
     let source = r#"
-    let list = [1, 2, 3];
-    let filter_fn = turn(item: Any) -> Bool { return true; };
-    return call("list_filter", list, filter_fn);
+    let list = [1, 2, 3, 4, 5];
+    let filter_fn = turn(item: Num) -> Bool { return item > 2; };
+    return filter(list, filter_fn);
     "#;
 
     let result = run_turn_code(source);
     if let Value::List(l) = result {
         assert_eq!(l.len(), 3);
-        assert_eq!(l[0], Value::Num(1.0));
+        assert_eq!(l[0], Value::Num(3.0));
+        assert_eq!(l[1], Value::Num(4.0));
+        assert_eq!(l[2], Value::Num(5.0));
     } else {
         panic!("Expected list");
     }

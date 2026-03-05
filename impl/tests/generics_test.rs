@@ -29,7 +29,7 @@ fn run(source: &str) -> Value {
 fn test_parse_generics() {
     let source = r#"
     let list: List<Num> = [1, 2, 3];
-    let map: Map<Str> = { "key": "value" };
+    let my_map: Map<Str> = { "key": "value" };
     "#;
     let analysis = analyze(source);
     assert!(analysis.diagnostics.is_empty());

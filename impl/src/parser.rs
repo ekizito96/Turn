@@ -504,6 +504,32 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::Map) => {
+                self.next();
+                self.expect(Token::LParen)?;
+                let list = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let closure = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::ListMap {
+                    list: Box::new(list),
+                    closure: Box::new(closure),
+                    span,
+                })
+            }
+            Some(Token::Filter) => {
+                self.next();
+                self.expect(Token::LParen)?;
+                let list = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let closure = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::ListFilter {
+                    list: Box::new(list),
+                    closure: Box::new(closure),
+                    span,
+                })
+            }
             Some(Token::Infer) => {
                 self.next();
                 let target_ty = self.parse_type()?;

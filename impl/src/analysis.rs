@@ -724,6 +724,16 @@ impl Analysis {
                 list,
                 closure,
                 span: _,
+            }
+            | Expr::ListMap {
+                list,
+                closure,
+                span: _,
+            }
+            | Expr::ListFilter {
+                list,
+                closure,
+                span: _,
             } => {
                 self.visit_expr(list);
                 self.visit_expr(closure);

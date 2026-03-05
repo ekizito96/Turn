@@ -5,6 +5,7 @@ use crate::bytecode::Instr;
 
 pub struct Compiler {
     code: Vec<Instr>,
+    next_id: usize,
 }
 
 impl Default for Compiler {
@@ -15,7 +16,7 @@ impl Default for Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        Self { code: Vec::new() }
+        Self { code: Vec::new(), next_id: 0 }
     }
 
     fn emit(&mut self, instr: Instr) -> u32 {
@@ -376,6 +377,139 @@ impl Compiler {
                 self.compile_expr(list);
                 self.compile_expr(closure);
                 self.emit(Instr::SpawnEach);
+            }
+            Expr::ListMap { list, closure, .. } => {
+                let id = self.next_id;
+                self.next_id += 1;
+                
+                let list_var = format!("__map_list_{}", id);
+                let closure_var = format!("__map_closure_{}", id);
+                let res_var = format!("__map_res_{}", id);
+                let idx_var = format!("__map_idx_{}", id);
+                let len_var = format!("__map_len_{}", id);
+                let item_var = format!("__map_item_{}", id);
+                let mapped_var = format!("__map_mapped_{}", id);
+
+                self.compile_expr(list);
+                self.emit(Instr::Store(list_var.clone()));
+
+                self.compile_expr(closure);
+                self.emit(Instr::Store(closure_var.clone()));
+
+                self.emit(Instr::MakeList(0));
+                self.emit(Instr::Store(res_var.clone()));
+
+                self.emit(Instr::PushNum(0.0));
+                self.emit(Instr::Store(idx_var.clone()));
+
+                self.emit(Instr::PushStr("len".to_string()));
+                self.emit(Instr::Load(list_var.clone()));
+                self.emit(Instr::CallTool);
+                self.emit(Instr::Store(len_var.clone()));
+
+                let loop_start = self.code.len() as u32;
+
+                self.emit(Instr::Load(idx_var.clone()));
+                self.emit(Instr::Load(len_var.clone()));
+                self.emit(Instr::Lt);
+                let exit_jump = self.emit(Instr::JumpIfFalse(0));
+
+                self.emit(Instr::Load(list_var.clone()));
+                self.emit(Instr::Load(idx_var.clone()));
+                self.emit(Instr::Index);
+                self.emit(Instr::Store(item_var.clone()));
+
+                self.emit(Instr::Load(closure_var.clone()));
+                self.emit(Instr::Load(item_var.clone()));
+                self.emit(Instr::CallTool);
+                self.emit(Instr::Store(mapped_var.clone()));
+
+                self.emit(Instr::PushStr("list_push".to_string()));
+                self.emit(Instr::Load(res_var.clone()));
+                self.emit(Instr::Load(mapped_var.clone()));
+                self.emit(Instr::MakeList(2));
+                self.emit(Instr::CallTool);
+                self.emit(Instr::Store(res_var.clone()));
+
+                self.emit(Instr::Load(idx_var.clone()));
+                self.emit(Instr::PushNum(1.0));
+                self.emit(Instr::Add);
+                self.emit(Instr::Store(idx_var.clone()));
+
+                self.emit(Instr::Jump(loop_start));
+                self.patch_jump(exit_jump, self.code.len() as u32);
+
+                // Leave result on stack
+                self.emit(Instr::Load(res_var));
+            }
+            Expr::ListFilter { list, closure, .. } => {
+                let id = self.next_id;
+                self.next_id += 1;
+                
+                let list_var = format!("__filter_list_{}", id);
+                let closure_var = format!("__filter_closure_{}", id);
+                let res_var = format!("__filter_res_{}", id);
+                let idx_var = format!("__filter_idx_{}", id);
+                let len_var = format!("__filter_len_{}", id);
+                let item_var = format!("__filter_item_{}", id);
+                let keep_var = format!("__filter_keep_{}", id);
+
+                self.compile_expr(list);
+                self.emit(Instr::Store(list_var.clone()));
+
+                self.compile_expr(closure);
+                self.emit(Instr::Store(closure_var.clone()));
+
+                self.emit(Instr::MakeList(0));
+                self.emit(Instr::Store(res_var.clone()));
+
+                self.emit(Instr::PushNum(0.0));
+                self.emit(Instr::Store(idx_var.clone()));
+
+                self.emit(Instr::PushStr("len".to_string()));
+                self.emit(Instr::Load(list_var.clone()));
+                self.emit(Instr::CallTool);
+                self.emit(Instr::Store(len_var.clone()));
+
+                let loop_start = self.code.len() as u32;
+
+                self.emit(Instr::Load(idx_var.clone()));
+                self.emit(Instr::Load(len_var.clone()));
+                self.emit(Instr::Lt);
+                let exit_jump = self.emit(Instr::JumpIfFalse(0));
+
+                self.emit(Instr::Load(list_var.clone()));
+                self.emit(Instr::Load(idx_var.clone()));
+                self.emit(Instr::Index);
+                self.emit(Instr::Store(item_var.clone()));
+
+                self.emit(Instr::Load(closure_var.clone()));
+                self.emit(Instr::Load(item_var.clone()));
+                self.emit(Instr::CallTool);
+                self.emit(Instr::Store(keep_var.clone()));
+
+                self.emit(Instr::Load(keep_var.clone()));
+                let skip_push_jump = self.emit(Instr::JumpIfFalse(0));
+
+                self.emit(Instr::PushStr("list_push".to_string()));
+                self.emit(Instr::Load(res_var.clone()));
+                self.emit(Instr::Load(item_var.clone()));
+                self.emit(Instr::MakeList(2));
+                self.emit(Instr::CallTool);
+                self.emit(Instr::Store(res_var.clone()));
+
+                self.patch_jump(skip_push_jump, self.code.len() as u32);
+
+                self.emit(Instr::Load(idx_var.clone()));
+                self.emit(Instr::PushNum(1.0));
+                self.emit(Instr::Add);
+                self.emit(Instr::Store(idx_var.clone()));
+
+                self.emit(Instr::Jump(loop_start));
+                self.patch_jump(exit_jump, self.code.len() as u32);
+
+                // Leave result on stack
+                self.emit(Instr::Load(res_var));
             }
             Expr::Send { pid, msg, .. } => {
                 self.compile_expr(pid);

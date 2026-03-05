@@ -777,53 +777,6 @@ impl Vm {
                     let arg = process.stack.pop().unwrap_or(Value::Null);
                     let tool_val = process.stack.pop().unwrap_or(Value::Null);
 
-                    // Special case for list_map and list_filter since they are native
-                    if let Value::Str(name) = &tool_val {
-                        if name == "list_map" {
-                            if let Value::List(args) = arg {
-                                if args.len() == 2 {
-                                    if let (
-                                        Value::List(items),
-                                        Value::Closure {
-                                            code: _,
-                                            ip: _,
-                                            env: _,
-                                            params: _,
-                                        },
-                                    ) = (&args[0], &args[1])
-                                    {
-                                        // Implementing native map synchronously in the VM is difficult due to stack limitations
-                                        // We will just leave it unimplemented for now, or we can use a native macro.
-                                        process.stack.push(Value::List(items.clone())); // Identity map as placeholder
-                                        continue;
-                                    }
-                                }
-                            }
-                            process.stack.push(Value::Null);
-                            continue;
-                        } else if name == "list_filter" {
-                            if let Value::List(args) = arg {
-                                if args.len() == 2 {
-                                    if let (
-                                        Value::List(items),
-                                        Value::Closure {
-                                            code: _,
-                                            ip: _,
-                                            env: _,
-                                            params: _,
-                                        },
-                                    ) = (&args[0], &args[1])
-                                    {
-                                        process.stack.push(Value::List(items.clone())); // Identity filter as placeholder
-                                        continue;
-                                    }
-                                }
-                            }
-                            process.stack.push(Value::Null);
-                            continue;
-                        }
-                    }
-
                     match tool_val {
                         Value::Str(name) => {
                             process.frames[frame_idx].env = process.runtime.env.clone();

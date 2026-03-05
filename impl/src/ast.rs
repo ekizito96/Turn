@@ -140,6 +140,16 @@ pub enum Expr {
         closure: Box<Expr>,
         span: Span,
     },
+    ListMap {
+        list: Box<Expr>,
+        closure: Box<Expr>,
+        span: Span,
+    },
+    ListFilter {
+        list: Box<Expr>,
+        closure: Box<Expr>,
+        span: Span,
+    },
     Send {
         pid: Box<Expr>,
         msg: Box<Expr>,
@@ -218,6 +228,8 @@ impl Expr {
             Expr::Spawn { span, .. } => *span,
             Expr::SpawnLink { span, .. } => *span,
             Expr::SpawnEach { span, .. } => *span,
+            Expr::ListMap { span, .. } => *span,
+            Expr::ListFilter { span, .. } => *span,
             Expr::Send { span, .. } => *span,
             Expr::Receive { span } => *span,
             Expr::Vec { span, .. } => *span,

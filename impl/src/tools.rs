@@ -341,13 +341,6 @@ impl ToolRegistry {
         );
 
         tools.insert(
-            "list_map".to_string(),
-            Box::new(|_arg| {
-                // ...
-                Ok((Value::Null, 0u64)) // Handled in VM or compiler natively.
-            }) as ToolHandler,
-        );
-        tools.insert(
             "json_stringify".to_string(),
             Box::new(|arg| match serde_json::to_string(&arg) {
                 Ok(s) => Ok((Value::Str(s), 0u64)),

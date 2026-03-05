@@ -34,6 +34,8 @@ pub enum Token {
     If,
     Else,
     While,
+    Map,    // NEW
+    Filter, // NEW
     And,
     Or,
     True,
@@ -132,6 +134,8 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("if", Token::If),
     ("else", Token::Else),
     ("while", Token::While),
+    ("map", Token::Map),       // NEW
+    ("filter", Token::Filter), // NEW
     ("and", Token::And),
     ("or", Token::Or),
     ("true", Token::True),
