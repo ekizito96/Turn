@@ -780,6 +780,29 @@ impl Parser {
                 })
             }
             Token::Use => {
+                // Check if this is a schema import macro: `use schema::openapi("url")`
+                if let Some(Token::Id(id)) = self.peek() {
+                    if id == "schema" {
+                        if matches!(self.peek_at(1), Some(Token::DoubleColon)) {
+                            self.next(); // consume `schema`
+                            self.next(); // consume `::`
+                            let protocol_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                            let protocol = match protocol_token.token {
+                                Token::Id(p) => p,
+                                _ => return Err(ParseError::UnexpectedToken(protocol_token.span)),
+                            };
+                            self.expect(Token::LParen)?;
+                            let url_expr = self.parse_expr()?;
+                            self.expect(Token::RParen)?;
+                            return Ok(Expr::UseSchema {
+                                protocol,
+                                url: Box::new(url_expr),
+                                span,
+                            });
+                        }
+                    }
+                }
+
                 let module = self.parse_expr()?;
                 Ok(Expr::Use {
                     module: Box::new(module),

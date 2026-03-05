@@ -208,6 +208,11 @@ pub enum Expr {
         span: Span,
     },
     Paren(Box<Expr>),
+    UseSchema {
+        protocol: String,
+        url: Box<Expr>,
+        span: Span,
+    },
     If {
         cond: Box<Expr>,
         then_block: Block,
@@ -242,6 +247,7 @@ impl Expr {
             Expr::Binary { span, .. } => *span,
             Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
+            Expr::UseSchema { span, .. } => *span,
             Expr::StructInit { span, .. } => *span,
             Expr::If { span, .. } => *span,
         }

@@ -37,8 +37,9 @@ fn test_infer_suspension_flow() {
                     m.get("prompt").unwrap(),
                     &Value::Str("Calculate 2+2".to_string())
                 );
-                // Type debug format of Num is "Num"
-                assert_eq!(m.get("schema").unwrap(), &Value::Str("Num".to_string()));
+                let mut expected_schema = indexmap::IndexMap::new();
+                expected_schema.insert("type".to_string(), Value::Str("number".to_string()));
+                assert_eq!(m.get("schema").unwrap(), &Value::Map(expected_schema));
             } else {
                 panic!("Expected Map arg, got {:?}", arg);
             }

@@ -434,20 +434,31 @@ impl ToolRegistry {
                         env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
 
                     if provider == "mock" {
-                        match schema {
-                            Value::Str(s) if s.contains("Num") => {
+                        let schema_type = match schema {
+                            Value::Map(m) => {
+                                m.get("type").and_then(|v| match v {
+                                    Value::Str(s) => Some(s.as_str()),
+                                    _ => None,
+                                })
+                            },
+                            Value::Str(s) => Some(s.as_str()),
+                            _ => None,
+                        };
+
+                        match schema_type {
+                            Some("number") | Some("Num") => {
                                 return Ok((
                                     Value::Uncertain(Box::new(Value::Num(42.0)), 0.85),
                                     0u64,
                                 ));
                             }
-                            Value::Str(s) if s.contains("Bool") => {
+                            Some("boolean") | Some("Bool") => {
                                 return Ok((
                                     Value::Uncertain(Box::new(Value::Bool(true)), 0.9),
                                     0u64,
                                 ));
                             }
-                            Value::Str(s) if s.contains("Str") => {
+                            Some("string") | Some("Str") => {
                                 return Ok((
                                     Value::Uncertain(
                                         Box::new(Value::Str("Mock Response".to_string())),

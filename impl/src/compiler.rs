@@ -219,6 +219,15 @@ impl Compiler {
                 self.compile_expr(module);
                 self.emit(Instr::LoadModule);
             }
+            Expr::UseSchema { protocol, url, .. } => {
+                self.emit(Instr::PushStr("sys_schema_adapter".to_string()));
+                self.emit(Instr::PushStr("protocol".to_string()));
+                self.emit(Instr::PushStr(protocol.clone()));
+                self.emit(Instr::PushStr("url".to_string()));
+                self.compile_expr(url);
+                self.emit(Instr::MakeMap(2));
+                self.emit(Instr::CallTool);
+            }
             Expr::Turn {
                 params,
                 ret_ty: _,

@@ -87,6 +87,14 @@ impl<S: Store> Runner<S> {
                                     vm = Vm::resume_with_error(continuation, e.to_string());
                                 }
                             }
+                        } else if tool_name == "sys_schema_adapter" {
+                            let res = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
+                            });
+                            match res {
+                                Ok(module_val) => vm = Vm::resume_with_result(continuation, module_val),
+                                Err(e) => vm = Vm::resume_with_error(continuation, e.to_string()),
+                            }
                         } else {
                             match self.tools.call(&tool_name, arg) {
                                 Ok((val, cost)) => {
@@ -225,6 +233,14 @@ impl<S: Store> Runner<S> {
                                 vm = Vm::resume_with_error(continuation, e.to_string());
                             }
                         }
+                    } else if tool_name == "sys_schema_adapter" {
+                        let res = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
+                        });
+                        match res {
+                            Ok(module_val) => vm = Vm::resume_with_result(continuation, module_val),
+                            Err(e) => vm = Vm::resume_with_error(continuation, e.to_string()),
+                        }
                     } else {
                         // Normal tool call
                         match self.tools.call(&tool_name, arg) {
@@ -312,6 +328,17 @@ impl<S: Store> Runner<S> {
                             Err(e) => {
                                 vm = Vm::resume_with_error(continuation, e.to_string());
                             }
+                        }
+                        continue;
+                    }
+
+                    if tool_name == "sys_schema_adapter" {
+                        let res = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
+                        });
+                        match res {
+                            Ok(module_val) => vm = Vm::resume_with_result(continuation, module_val),
+                            Err(e) => vm = Vm::resume_with_error(continuation, e.to_string()),
                         }
                         continue;
                     }

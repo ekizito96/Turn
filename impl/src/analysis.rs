@@ -825,6 +825,7 @@ impl Analysis {
             }
             Expr::Recall { key, .. } => self.visit_expr(key),
             Expr::Use { module, .. } => self.visit_expr(module),
+            Expr::UseSchema { url, .. } => self.visit_expr(url),
             Expr::Index { target, index, .. } => {
                 self.visit_expr(target);
                 self.visit_expr(index);

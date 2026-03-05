@@ -17,6 +17,7 @@ pub enum Token {
     Suspend,    // NEW
     Confidence, // NEW
     Use,
+    UseWasm,
     Context,
     Try,
     Catch,
@@ -85,6 +86,7 @@ pub enum Token {
     RParen,
     Comma,
     Colon,
+    DoubleColon,
     Semicolon,
     Dot,
     DotDot,
@@ -117,6 +119,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("suspend", Token::Suspend),       // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
+    ("use_wasm", Token::UseWasm),
     ("try", Token::Try),
     ("catch", Token::Catch),
     ("throw", Token::Throw),
@@ -379,7 +382,12 @@ impl<'a> Lexer<'a> {
             }
             Some(':') => {
                 self.next();
-                Token::Colon
+                if self.peek() == Some(':') {
+                    self.next();
+                    Token::DoubleColon
+                } else {
+                    Token::Colon
+                }
             }
             Some(';') => {
                 self.next();
