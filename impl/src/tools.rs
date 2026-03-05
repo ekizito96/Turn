@@ -155,11 +155,23 @@ impl ToolRegistry {
 
                 let mut req = client.get(&url);
                 if let Some(id) = identity {
-                    // SECURE CAPABILITY INJECTION
-                    // Here the Turn VM injects the real token based on the identity handle.
-                    // For the prototype, we mock this by injecting a dummy token.
-                    // In production, this would look up the token from the host vault.
-                    req = req.bearer_auth(format!("turn_mock_token_for_{}", id));
+                    // SECURE CAPABILITY INJECTION (Zero-Trust)
+                    // The Identity handle never carried the raw token. Instead, the Turn
+                    // host looks it up NOW at the HTTP boundary from a secure env-based vault.
+                    // Convention: TURN_IDENTITY_<PROVIDER_UPPERCASED>_TOKEN
+                    // e.g. `grant identity::oauth("google_workspace")` reads
+                    //      the env var TURN_IDENTITY_GOOGLE_WORKSPACE_TOKEN
+                    let env_key = format!(
+                        "TURN_IDENTITY_{}_TOKEN",
+                        id.to_uppercase().replace(['-', ' '], "_")
+                    );
+                    match std::env::var(&env_key) {
+                        Ok(token) => req = req.bearer_auth(token),
+                        Err(_) => return Err(format!(
+                            "Identity '{}' is not configured. Set the {} environment variable.",
+                            id, env_key
+                        )),
+                    }
                 }
 
                 match req.send() {
@@ -206,8 +218,18 @@ impl ToolRegistry {
 
                 let mut req = client.post(&url).json(&json_body);
                 if let Some(id) = identity {
-                    // SECURE CAPABILITY INJECTION
-                    req = req.bearer_auth(format!("turn_mock_token_for_{}", id));
+                    // SECURE CAPABILITY INJECTION (Zero-Trust)
+                    let env_key = format!(
+                        "TURN_IDENTITY_{}_TOKEN",
+                        id.to_uppercase().replace(['-', ' '], "_")
+                    );
+                    match std::env::var(&env_key) {
+                        Ok(token) => req = req.bearer_auth(token),
+                        Err(_) => return Err(format!(
+                            "Identity '{}' is not configured. Set the {} environment variable.",
+                            id, env_key
+                        )),
+                    }
                 }
 
                 match req.send() {

@@ -903,8 +903,7 @@ impl Analysis {
                         // We can return type info too! But signature is Vec<String>.
                         // For now just name.
                         items.push(name.clone());
-                        // TODO: Use ty for better completion icons/details
-                        let _ = ty;
+                        let _ = ty; // type info reserved for future completion detail enrichment
                     }
                     curr_idx = scope.parent;
                 }

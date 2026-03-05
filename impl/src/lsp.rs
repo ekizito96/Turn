@@ -309,7 +309,7 @@ impl Backend {
                         end: Position {
                             line,
                             character: col + 1,
-                        }, // TODO: better span end
+                        }, // span end is approximate; single-token width
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
