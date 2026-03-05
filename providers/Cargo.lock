@@ -87,6 +87,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "turn-provider-anthropic"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "turn-provider-azure-anthropic"
 version = "0.5.0-alpha"
 dependencies = [
@@ -113,6 +121,22 @@ dependencies = [
 [[package]]
 name = "turn-provider-gemini"
 version = "0.5.0-alpha"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "turn-provider-grok"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "turn-provider-ollama"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",

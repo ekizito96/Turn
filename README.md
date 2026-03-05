@@ -39,11 +39,10 @@ let analyst_pid = spawn_link turn(task) {
     return result;
 };
 
-receive msg {
-    if msg.type == "exit" {
-        if msg.reason == "normal" { return msg.result; }
-        return handle_failure(msg.reason);
-    }
+let msg = receive;
+if msg["type"] == "exit" {
+    if msg["reason"] == "normal" { return msg["result"]; }
+    return handle_failure(msg["reason"]);
 }
 ```
 

@@ -2,7 +2,7 @@
 // The Algorithmic Trading Syndicate: Concurrent multi-agent hedge fund.
 // Demonstrates: Actor Model (spawn_link), Struct Inference, Concurrency, and Context memory.
 
-use "std/time";
+let time = use "std/time";
 
 struct MarketData { symbol: Str, price: Num, volume: Num };
 struct TechnicalSignal { ticker: Str, signal: Str, strength: Num, rationale: Str };

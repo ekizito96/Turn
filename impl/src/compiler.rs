@@ -16,7 +16,10 @@ impl Default for Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        Self { code: Vec::new(), next_id: 0 }
+        Self {
+            code: Vec::new(),
+            next_id: 0,
+        }
     }
 
     fn emit(&mut self, instr: Instr) -> u32 {
@@ -381,7 +384,7 @@ impl Compiler {
             Expr::ListMap { list, closure, .. } => {
                 let id = self.next_id;
                 self.next_id += 1;
-                
+
                 let list_var = format!("__map_list_{}", id);
                 let closure_var = format!("__map_closure_{}", id);
                 let res_var = format!("__map_res_{}", id);
@@ -445,7 +448,7 @@ impl Compiler {
             Expr::ListFilter { list, closure, .. } => {
                 let id = self.next_id;
                 self.next_id += 1;
-                
+
                 let list_var = format!("__filter_list_{}", id);
                 let closure_var = format!("__filter_closure_{}", id);
                 let res_var = format!("__filter_res_{}", id);

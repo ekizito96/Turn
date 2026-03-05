@@ -2,8 +2,6 @@
 // Three specialist agents evaluate a live NVDA equity position concurrently.
 // Demonstrates: Actor Model (spawn_link), Struct Inference, Concurrency, and Context memory.
 
-use "std/time";
-
 struct MarketSnapshot { ticker: Str, price: Num, pe_ratio: Num };
 struct FundamentalThesis { valuation_signal: Str, conviction: Num, thesis: Str };
 struct RiskVerdict { breach: Bool, approved_usd: Num, risk_note: Str };

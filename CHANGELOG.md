@@ -33,9 +33,9 @@ All notable changes to the Turn Language will be documented in this file.
 - **Cognitive Type Safety (`infer Struct`)**: Natively intercept struct definitions to ensure exact JSON schema outputs from language models.
 - **Probabilistic Routing (`confidence`)**: First-class `confidence` operator allowing conditional branching logic based on the certainty of probabilistic model outputs (`if confidence x < 0.85 { ... }`).
 - **Actor-Model Concurrency (`spawn_link`, `receive`)**: Multi-agent orchestration through isolated VM execution trees (Actors) and deterministic, zero-shared-state mailboxes.
-- **Semantic Memory Integration (`remember`, `recall`)**: Built-in keywords for managing persistent vector-based institutional memory across long-running autonomous processes.
+- **Working Memory (`remember`, `recall`)**: Built-in keywords for managing persistent key-value memory across long-running autonomous processes. Each actor has its own isolated memory namespace.
 - **WASM Driver Infrastructure**: Core WASM host architecture for provider-agnostic LLM routing. Ships with drivers for OpenAI, Azure OpenAI, Azure Anthropic, and Google Gemini.
-- **Standard Library Core Tools**: Out-of-the-box support for `http_get`, `http_post`, `json_parse`, `json_stringify`, `regex_replace`, `fs_read`, `fs_write`, and `time.sleep`.
+- **Standard Library Core Tools**: Out-of-the-box support for `http_get`, `http_post`, `json_parse`, `json_stringify`, `regex_replace`, `fs_read`, `fs_write`, `sleep`, `len`, `list_push`, `list_contains`, `time_now`, `regex_match`, `env_get`, `env_set`.
 - **Advanced Examples**: Production-grade autonomous templates: `quant_syndicate.tn`, `investment_committee.tn`, and `marketing_agency.tn`.
 
 ### Changed
