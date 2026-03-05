@@ -2,6 +2,7 @@ use turn::value::Value;
 
 #[test]
 fn test_run_helper_infer_mock() {
+    std::env::set_var("TURN_LLM_PROVIDER", "mock");
     let source = r#"
     let x = infer Num { "What is 2+2?"; };
     return x;
@@ -21,6 +22,7 @@ fn test_run_helper_infer_mock() {
 
 #[test]
 fn test_infer_bool_mock() {
+    std::env::set_var("TURN_LLM_PROVIDER", "mock");
     let source = r#"
     let x = infer Bool { "Is water wet?"; };
     return x;
