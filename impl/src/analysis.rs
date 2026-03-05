@@ -672,7 +672,12 @@ impl Analysis {
 
     fn visit_expr(&mut self, expr: &Expr) {
         match expr {
-            Expr::StructInit { name, fields, spread, span } => {
+            Expr::StructInit {
+                name,
+                fields,
+                spread,
+                span,
+            } => {
                 if let Some(def_fields) = self.find_struct(name) {
                     for (field_name, field_ty) in &def_fields {
                         if let Some(init_expr) = fields.get(field_name) {
@@ -715,7 +720,11 @@ impl Analysis {
                     }
                 }
             }
-            Expr::SpawnEach { list, closure, span: _ } => {
+            Expr::SpawnEach {
+                list,
+                closure,
+                span: _,
+            } => {
                 self.visit_expr(list);
                 self.visit_expr(closure);
             }

@@ -218,7 +218,8 @@ impl ToolRegistry {
                 let json_msgs =
                     serde_json::to_value(&messages).unwrap_or(serde_json::Value::Array(vec![]));
 
-                let provider = env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
+                let provider =
+                    env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
                 if provider == "mock" {
                     return Ok((Value::Str("Mock response".to_string()), 10));
                 }
@@ -234,7 +235,9 @@ impl ToolRegistry {
                             wasm_path = check;
                             break;
                         }
-                        if !p.pop() { break; }
+                        if !p.pop() {
+                            break;
+                        }
                     }
                 }
 
@@ -257,18 +260,22 @@ impl ToolRegistry {
                         Ok(wasm_provider) => {
                             match wasm_provider.execute_inference(&req.to_string()) {
                                 Ok(json_res) => {
-                                    let parsed: serde_json::Value = serde_json::from_str(&json_res).unwrap_or(serde_json::Value::Null);
+                                    let parsed: serde_json::Value = serde_json::from_str(&json_res)
+                                        .unwrap_or(serde_json::Value::Null);
                                     if let Some(err) = parsed.get("error") {
                                         return Err(format!("WASM Driver Error: {}", err));
                                     }
-                                    let content = parsed["choices"][0]["message"]["content"].as_str().unwrap_or("{}");
-                                    let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                                    let content = parsed["choices"][0]["message"]["content"]
+                                        .as_str()
+                                        .unwrap_or("{}");
+                                    let tokens =
+                                        parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
                                     return Ok((Value::Str(content.to_string()), tokens));
-                                },
-                                Err(e) => return Err(format!("WASM Execution failed: {}", e))
+                                }
+                                Err(e) => return Err(format!("WASM Execution failed: {}", e)),
                             }
-                        },
-                        Err(e) => return Err(format!("Failed to load WASM provider: {}", e))
+                        }
+                        Err(e) => return Err(format!("Failed to load WASM provider: {}", e)),
                     }
                 }
 
@@ -424,127 +431,177 @@ impl ToolRegistry {
         tools.insert(
             "llm_infer".to_string(),
             Box::new(|arg| {
-                 if let Value::Map(m) = arg {
-                     let schema = m.get("schema").unwrap_or(&Value::Null);
-                     let prompt = m.get("prompt").unwrap_or(&Value::Null);
-                     let context = m.get("context").unwrap_or(&Value::Null);
+                if let Value::Map(m) = arg {
+                    let schema = m.get("schema").unwrap_or(&Value::Null);
+                    let prompt = m.get("prompt").unwrap_or(&Value::Null);
+                    let context = m.get("context").unwrap_or(&Value::Null);
 
-                     // 1. Try WASM Provider first (The Architecturally Correct Way)
-                     let provider = env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
-                     
-                     if provider == "mock" {
-                         match schema {
-                             Value::Str(s) if s.contains("Num") => {
-                                 return Ok((Value::Uncertain(Box::new(Value::Num(42.0)), 0.85), 0u64));
-                             }
-                             Value::Str(s) if s.contains("Bool") => {
-                                 return Ok((Value::Uncertain(Box::new(Value::Bool(true)), 0.9), 0u64));
-                             }
-                             Value::Str(s) if s.contains("Str") => {
-                                 return Ok((Value::Uncertain(Box::new(Value::Str("Mock Response".to_string())), 0.7), 0u64));
-                             }
-                             _ => {
-                                 let map = indexmap::IndexMap::new();
-                                 let mock_val = Value::Struct("Mock".to_string(), map);
-                                 return Ok((Value::Uncertain(Box::new(mock_val), 1.0), 10));
-                             }
-                         }
-                     }
+                    // 1. Try WASM Provider first (The Architecturally Correct Way)
+                    let provider =
+                        env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
 
-                     let wasm_file = format!("{}_provider.wasm", provider);
-                     let mut wasm_path = std::path::Path::new(".turn_modules").join(&wasm_file);
+                    if provider == "mock" {
+                        match schema {
+                            Value::Str(s) if s.contains("Num") => {
+                                return Ok((
+                                    Value::Uncertain(Box::new(Value::Num(42.0)), 0.85),
+                                    0u64,
+                                ));
+                            }
+                            Value::Str(s) if s.contains("Bool") => {
+                                return Ok((
+                                    Value::Uncertain(Box::new(Value::Bool(true)), 0.9),
+                                    0u64,
+                                ));
+                            }
+                            Value::Str(s) if s.contains("Str") => {
+                                return Ok((
+                                    Value::Uncertain(
+                                        Box::new(Value::Str("Mock Response".to_string())),
+                                        0.7,
+                                    ),
+                                    0u64,
+                                ));
+                            }
+                            _ => {
+                                let map = indexmap::IndexMap::new();
+                                let mock_val = Value::Struct("Mock".to_string(), map);
+                                return Ok((Value::Uncertain(Box::new(mock_val), 1.0), 10));
+                            }
+                        }
+                    }
 
-                     if !wasm_path.exists() {
-                         let mut p = std::env::current_dir().unwrap_or_default();
-                         for _ in 0..10 {
-                             let check = p.join(".turn_modules").join(&wasm_file);
-                             if check.exists() {
-                                 wasm_path = check;
-                                 break;
-                             }
-                             if !p.pop() { break; }
-                         }
-                     }
+                    let wasm_file = format!("{}_provider.wasm", provider);
+                    let mut wasm_path = std::path::Path::new(".turn_modules").join(&wasm_file);
 
-                     if wasm_path.exists() {
-                         println!("🔌 Using WASM Inference Driver: {}", wasm_path.display());
-                         
-                         // WASM drivers expect a JSON-RPC TurnInferRequest matching the exact inputs
-                         let mut params = serde_json::Map::new();
-                         params.insert("prompt".to_string(), serde_json::to_value(prompt).unwrap_or(serde_json::Value::Null));
-                         params.insert("schema".to_string(), serde_json::to_value(schema).unwrap_or(serde_json::Value::Null));
-                         params.insert("context".to_string(), serde_json::to_value(context).unwrap_or(serde_json::json!([])));
-                         if let Some(tools_val) = m.get("tools") {
-                             params.insert("tools".to_string(), serde_json::to_value(tools_val).unwrap_or(serde_json::json!([])));
-                         } else {
-                             params.insert("tools".to_string(), serde_json::json!([]));
-                         }
+                    if !wasm_path.exists() {
+                        let mut p = std::env::current_dir().unwrap_or_default();
+                        for _ in 0..10 {
+                            let check = p.join(".turn_modules").join(&wasm_file);
+                            if check.exists() {
+                                wasm_path = check;
+                                break;
+                            }
+                            if !p.pop() {
+                                break;
+                            }
+                        }
+                    }
 
-                         let req = serde_json::json!({
-                             "jsonrpc": "2.0",
-                             "method": "llm_infer",
-                             "params": params,
-                             "id": 1
-                         });
+                    if wasm_path.exists() {
+                        println!("🔌 Using WASM Inference Driver: {}", wasm_path.display());
 
-                         match crate::wasm_host::WasmProvider::new(&wasm_path) {
-                             Ok(wasm_provider) => {
-                                 match wasm_provider.execute_inference(&req.to_string()) {
-                                     Ok(json_res) => {
-                                         let parsed: serde_json::Value = serde_json::from_str(&json_res).unwrap_or(serde_json::Value::Null);
-                                         
-                                         // If it's an error from the driver
-                                         if let Some(err) = parsed.get("error") {
-                                             return Err(format!("WASM Driver Error: {}", err));
-                                         }
-                                         
-                                         // WASM provides standard OpenAI format output
-                                         let content = parsed["choices"][0]["message"]["content"].as_str().unwrap_or("{}");
-                                         let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
-                                         
-                                         let raw_json: serde_json::Value = match serde_json::from_str(content) {
-                                             Ok(v) => v,
-                                             Err(_) => {
-                                                 let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-                                                 serde_json::from_str(cleaned).unwrap_or(serde_json::Value::Null)
-                                             }
-                                         };
-                                         
-                                         let turn_val = if let Value::Str(s) = schema {
-                                             if s.contains("Struct") {
-                                                 match raw_json {
-                                                     serde_json::Value::Object(map) => {
-                                                         let mut fields = indexmap::IndexMap::new();
-                                                         for (k, v) in map {
-                                                             let tv: Value = serde_json::from_value(v.clone()).unwrap_or(Value::Null);
-                                                             fields.insert(k.clone(), tv);
-                                                         }
-                                                         let name = s.split('"').nth(1).unwrap_or("Anon").to_string();
-                                                         Value::Struct(name, fields)
-                                                     },
-                                                     _ => serde_json::from_value(raw_json).unwrap_or(Value::Null)
-                                                 }
-                                             } else {
-                                                 serde_json::from_value(raw_json).unwrap_or(Value::Null)
-                                             }
-                                         } else {
-                                             serde_json::from_value(raw_json).unwrap_or(Value::Null)
-                                         };
-                                         
-                                         return Ok((Value::Uncertain(Box::new(turn_val), 0.95), tokens));
-                                     },
-                                     Err(e) => return Err(format!("WASM Execution failed: {}", e))
-                                 }
-                             },
-                             Err(e) => return Err(format!("Failed to load WASM provider: {}", e))
-                         }
-                     }
+                        // WASM drivers expect a JSON-RPC TurnInferRequest matching the exact inputs
+                        let mut params = serde_json::Map::new();
+                        params.insert(
+                            "prompt".to_string(),
+                            serde_json::to_value(prompt).unwrap_or(serde_json::Value::Null),
+                        );
+                        params.insert(
+                            "schema".to_string(),
+                            serde_json::to_value(schema).unwrap_or(serde_json::Value::Null),
+                        );
+                        params.insert(
+                            "context".to_string(),
+                            serde_json::to_value(context).unwrap_or(serde_json::json!([])),
+                        );
+                        if let Some(tools_val) = m.get("tools") {
+                            params.insert(
+                                "tools".to_string(),
+                                serde_json::to_value(tools_val).unwrap_or(serde_json::json!([])),
+                            );
+                        } else {
+                            params.insert("tools".to_string(), serde_json::json!([]));
+                        }
 
-                     return Err(format!("WASM driver not found at {}", wasm_path.display()));
-                 } else {
-                     Err("Invalid args for llm_infer".to_string())
-                 }
-            }) as ToolHandler
+                        let req = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "llm_infer",
+                            "params": params,
+                            "id": 1
+                        });
+
+                        match crate::wasm_host::WasmProvider::new(&wasm_path) {
+                            Ok(wasm_provider) => {
+                                match wasm_provider.execute_inference(&req.to_string()) {
+                                    Ok(json_res) => {
+                                        let parsed: serde_json::Value =
+                                            serde_json::from_str(&json_res)
+                                                .unwrap_or(serde_json::Value::Null);
+
+                                        // If it's an error from the driver
+                                        if let Some(err) = parsed.get("error") {
+                                            return Err(format!("WASM Driver Error: {}", err));
+                                        }
+
+                                        // WASM provides standard OpenAI format output
+                                        let content = parsed["choices"][0]["message"]["content"]
+                                            .as_str()
+                                            .unwrap_or("{}");
+                                        let tokens =
+                                            parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+
+                                        let raw_json: serde_json::Value =
+                                            match serde_json::from_str(content) {
+                                                Ok(v) => v,
+                                                Err(_) => {
+                                                    let cleaned = content
+                                                        .trim()
+                                                        .trim_start_matches("```json")
+                                                        .trim_start_matches("```")
+                                                        .trim_end_matches("```")
+                                                        .trim();
+                                                    serde_json::from_str(cleaned)
+                                                        .unwrap_or(serde_json::Value::Null)
+                                                }
+                                            };
+
+                                        let turn_val = if let Value::Str(s) = schema {
+                                            if s.contains("Struct") {
+                                                match raw_json {
+                                                    serde_json::Value::Object(map) => {
+                                                        let mut fields = indexmap::IndexMap::new();
+                                                        for (k, v) in map {
+                                                            let tv: Value =
+                                                                serde_json::from_value(v.clone())
+                                                                    .unwrap_or(Value::Null);
+                                                            fields.insert(k.clone(), tv);
+                                                        }
+                                                        let name = s
+                                                            .split('"')
+                                                            .nth(1)
+                                                            .unwrap_or("Anon")
+                                                            .to_string();
+                                                        Value::Struct(name, fields)
+                                                    }
+                                                    _ => serde_json::from_value(raw_json)
+                                                        .unwrap_or(Value::Null),
+                                                }
+                                            } else {
+                                                serde_json::from_value(raw_json)
+                                                    .unwrap_or(Value::Null)
+                                            }
+                                        } else {
+                                            serde_json::from_value(raw_json).unwrap_or(Value::Null)
+                                        };
+
+                                        return Ok((
+                                            Value::Uncertain(Box::new(turn_val), 0.95),
+                                            tokens,
+                                        ));
+                                    }
+                                    Err(e) => return Err(format!("WASM Execution failed: {}", e)),
+                                }
+                            }
+                            Err(e) => return Err(format!("Failed to load WASM provider: {}", e)),
+                        }
+                    }
+
+                    Err(format!("WASM driver not found at {}", wasm_path.display()))
+                } else {
+                    Err("Invalid args for llm_infer".to_string())
+                }
+            }) as ToolHandler,
         );
 
         Self { tools }

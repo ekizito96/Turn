@@ -150,14 +150,22 @@ impl WasmProvider {
         // Extract HTTP status code from the last block of headers (in case of 100 Continue)
         let mut status = 200;
         let mut headers_map = serde_json::Map::new();
-        
+
         // Split by \r\n\r\n to handle multiple header blocks (e.g., 100 Continue)
         let blocks: Vec<&str> = header_part.split("\r\n\r\n").collect();
-        let last_header_block = blocks.iter().rev().find(|b| !b.trim().is_empty()).unwrap_or(&"");
-        
+        let last_header_block = blocks
+            .iter()
+            .rev()
+            .find(|b| !b.trim().is_empty())
+            .unwrap_or(&"");
+
         let mut lines = last_header_block.lines();
         if let Some(status_line) = lines.next() {
-            status = status_line.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(200);
+            status = status_line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(200);
         }
 
         let mut out = serde_json::Map::new();
@@ -168,9 +176,12 @@ impl WasmProvider {
                 headers_map.insert(k.trim().to_lowercase(), serde_json::json!(v.trim()));
             }
         }
-        out.insert("headers".to_string(), serde_json::Value::Object(headers_map));
+        out.insert(
+            "headers".to_string(),
+            serde_json::Value::Object(headers_map),
+        );
         out.insert("body".to_string(), serde_json::json!(body_part.clone()));
-        
+
         println!("[WASM_HOST DEBUG] Raw Azure body:\n{}", body_part);
 
         Ok(serde_json::Value::Object(out).to_string())

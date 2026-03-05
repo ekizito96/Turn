@@ -1,4 +1,4 @@
-use turn::{value::Value, run};
+use turn::{run, value::Value};
 
 fn run_turn_code(source: &str) -> Value {
     run(source).expect("Run failed")
@@ -12,7 +12,7 @@ fn test_struct_spread_syntax() {
     let updated = User { age: 31, city: "Paris", ..base };
     return updated;
     "#;
-    
+
     let result = run_turn_code(source);
     if let Value::Struct(name, fields) = result {
         assert_eq!(name, "User");
@@ -30,7 +30,7 @@ fn test_context_inject_primitive() {
     context.append("This is important");
     return 1;
     "#;
-    
+
     let result = run_turn_code(source);
     assert_eq!(result, Value::Num(1.0));
 }

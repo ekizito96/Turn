@@ -264,16 +264,16 @@ impl Compiler {
                 self.compile_expr(cond);
                 let jump_false = self.emit(Instr::JumpIfFalse(0));
                 self.compile_block_yield(then_block);
-                
+
                 let else_jump = self.emit(Instr::Jump(0));
                 self.patch_jump(jump_false, self.code.len() as u32);
-                
+
                 if let Some(ref block) = else_block {
                     self.compile_block_yield(block);
                 } else {
                     self.emit(Instr::PushNull);
                 }
-                
+
                 self.patch_jump(else_jump, self.code.len() as u32);
             }
             Expr::Index { target, index, .. } => {
@@ -390,7 +390,12 @@ impl Compiler {
                 self.emit(Instr::Confidence);
             }
             Expr::Paren(inner) => self.compile_expr(inner),
-            Expr::StructInit { name, fields, spread, .. } => {
+            Expr::StructInit {
+                name,
+                fields,
+                spread,
+                ..
+            } => {
                 // Compile as Struct creation
                 let len = fields.len();
                 for (key, val) in fields {

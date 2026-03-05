@@ -1,5 +1,6 @@
+#![allow(dead_code, clippy::missing_safety_doc)]
 // turn-provider-openai/src/lib.rs
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 /// Allocate memory in the Wasm guest for the host to write strings into.
@@ -45,7 +46,10 @@ struct InferParams {
 fn turn_to_openai_content(v: &Value) -> Value {
     if let Value::Object(m) = v {
         if m.get("_turn_blob").is_some() {
-            let mime = m.get("mime_type").and_then(|m| m.as_str()).unwrap_or("image/jpeg");
+            let mime = m
+                .get("mime_type")
+                .and_then(|m| m.as_str())
+                .unwrap_or("image/jpeg");
             let data = m.get("data").and_then(|m| m.as_str()).unwrap_or("");
             return json!([{
                 "type": "image_url",
@@ -59,7 +63,10 @@ fn turn_to_openai_content(v: &Value) -> Value {
         for item in arr {
             if let Value::Object(m) = item {
                 if m.get("_turn_blob").is_some() {
-                    let mime = m.get("mime_type").and_then(|m| m.as_str()).unwrap_or("image/jpeg");
+                    let mime = m
+                        .get("mime_type")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("image/jpeg");
                     let data = m.get("data").and_then(|m| m.as_str()).unwrap_or("");
                     content.push(json!({
                         "type": "image_url",
@@ -82,7 +89,7 @@ fn turn_to_openai_content(v: &Value) -> Value {
         }
         return json!(content);
     }
-    
+
     let text = if let Value::String(s) = v {
         s.clone()
     } else {
@@ -95,30 +102,34 @@ fn turn_to_openai_content(v: &Value) -> Value {
 #[no_mangle]
 pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     let req_str = read_string(ptr, len);
-    
+
     // We expect a valid JSON-RPC standard Turn request.
     let req: TurnInferRequest = match serde_json::from_str(&req_str) {
         Ok(r) => r,
-        Err(e) => return pack_string(json!({ "error": format!("Invalid Turn Request: {}", e) }).to_string()),
+        Err(e) => {
+            return pack_string(
+                json!({ "error": format!("Invalid Turn Request: {}", e) }).to_string(),
+            )
+        }
     };
 
     // The host guarantees env vars via some injection mechanism, but for purely Wasm
     // standard, maybe the host evaluates env vars inside `llm_tools` and passes them?
-    // Wait, Wasm doesn't have `std::env::var` by default unless WASI is used. 
+    // Wait, Wasm doesn't have `std::env::var` by default unless WASI is used.
     // We didn't enable WASI. If we don't enable WASI, `std::env::var` will panic.
     // Let's modify Wasm to just tell the Host *which* env vars to inject into headers.
     // E.g. { "url": "...", "headers": { "Authorization": { "$env": "OPENAI_API_KEY" } } }
-    
+
     // Actually, setting WASI is easy (`wasmtime_wasi`), but passing credentials in the request payload is simpler!
     // Let's assume the Host passes `{ "credentials": { ... }, "request": { ... } }` into `transform_request`.
     // But we already defined the payload to just be the `rpc_request` from `llm_tools.rs`.
     // Let's map it safely without env vars inside Wasm:
     // Wasm returns the HTTP Config. The Host *knows* this is OpenAI, so the Host can attach `OPENAI_API_KEY`.
-    // Wait, the WHOLE POINT of the driver is that the Host doesn't know it's OpenAI! 
+    // Wait, the WHOLE POINT of the driver is that the Host doesn't know it's OpenAI!
     // The Driver says: "Host, please make a request to api.openai.com, and please read the OPENAI_API_KEY env var from your secure context and attach it as Bearer."
-    
+
     let sys_msg = "You are a cognitive runtime inference engine mapped to the Turn language. You must return pure JSON matching the user's schema.";
-    
+
     let mut openai_tools = Vec::new();
     for t in req.params.tools {
         openai_tools.push(t);
@@ -176,18 +187,24 @@ struct HostHttpResponse {
 #[no_mangle]
 pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
     let res_str = read_string(ptr, len);
-    
+
     let http_res: HostHttpResponse = match serde_json::from_str(&res_str) {
         Ok(r) => r,
-        Err(_) => return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid HTTP response format from Host"}).to_string()),
+        Err(_) => return pack_string(
+            json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid HTTP response format from Host"})
+                .to_string(),
+        ),
     };
 
     if http_res.status != 200 {
-        return pack_string(json!({
-            "jsonrpc": "2.0", 
-            "id": 1, 
-            "error": format!("HTTP {}: {}", http_res.status, http_res.body)
-        }).to_string());
+        return pack_string(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": format!("HTTP {}: {}", http_res.status, http_res.body)
+            })
+            .to_string(),
+        );
     }
 
     let gpt_json: Value = match serde_json::from_str(&http_res.body) {
@@ -196,43 +213,57 @@ pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
     };
 
     if let Some(err) = gpt_json.get("error") {
-        return pack_string(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": err.to_string()
-        }).to_string());
+        return pack_string(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": err.to_string()
+            })
+            .to_string(),
+        );
     }
 
     if let Some(choices) = gpt_json.get("choices").and_then(|c| c.as_array()) {
         if choices.is_empty() {
-             return pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "No choices in response"}).to_string());
+            return pack_string(
+                json!({"jsonrpc": "2.0", "id": 1, "error": "No choices in response"}).to_string(),
+            );
         }
         let message = &choices[0]["message"];
 
         if let Some(tools) = message.get("tool_calls").and_then(|t| t.as_array()) {
             if !tools.is_empty() {
                 let t = &tools[0];
-                return pack_string(json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tool_call",
-                    "params": {
-                        "name": t["function"]["name"].as_str().unwrap_or(""),
-                        "arguments": t["function"]["arguments"].as_str().unwrap_or("{}")
-                    }
-                }).to_string());
+                return pack_string(
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tool_call",
+                        "params": {
+                            "name": t["function"]["name"].as_str().unwrap_or(""),
+                            "arguments": t["function"]["arguments"].as_str().unwrap_or("{}")
+                        }
+                    })
+                    .to_string(),
+                );
             }
         }
 
         let content = message["content"].as_str().unwrap_or("");
         let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
 
-        pack_string(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": parsed_result
-        }).to_string())
+        pack_string(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": parsed_result
+            })
+            .to_string(),
+        )
     } else {
-        pack_string(json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid structure from OpenAI"}).to_string())
+        pack_string(
+            json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid structure from OpenAI"})
+                .to_string(),
+        )
     }
 }

@@ -1,4 +1,4 @@
-use turn::{value::Value, run};
+use turn::{run, value::Value};
 
 fn run_turn_code(source: &str) -> Value {
     run(source).expect("Run failed")
@@ -12,7 +12,7 @@ fn test_n_ary_function_arguments() {
     };
     return call(add_three, 1, 2, 3);
     "#;
-    
+
     let result = run_turn_code(source);
     assert_eq!(result, Value::Num(6.0));
 }
@@ -25,7 +25,7 @@ fn test_list_push_and_len() {
     let l = call("len", new_list);
     return l;
     "#;
-    
+
     let result = run_turn_code(source);
     assert_eq!(result, Value::Num(4.0));
 }
@@ -38,7 +38,7 @@ fn test_list_contains() {
     let has_grape = call("list_contains", list, "grape");
     return {"has_banana": has_banana, "has_grape": has_grape};
     "#;
-    
+
     let result = run_turn_code(source);
     if let Value::Map(m) = result {
         assert_eq!(m.get("has_banana"), Some(&Value::Bool(true)));
@@ -55,7 +55,7 @@ fn test_list_map_placeholder() {
     let map_fn = turn(item: Any) -> Any { return item; };
     return call("list_map", list, map_fn);
     "#;
-    
+
     let result = run_turn_code(source);
     if let Value::List(l) = result {
         assert_eq!(l.len(), 3);
@@ -72,7 +72,7 @@ fn test_list_filter_placeholder() {
     let filter_fn = turn(item: Any) -> Bool { return true; };
     return call("list_filter", list, filter_fn);
     "#;
-    
+
     let result = run_turn_code(source);
     if let Value::List(l) = result {
         assert_eq!(l.len(), 3);

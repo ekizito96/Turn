@@ -312,14 +312,12 @@ impl Parser {
                     if matches!(self.peek(), Some(Token::Semicolon)) {
                         self.next();
                     }
+                } else if !matches!(self.peek(), Some(Token::RBrace)) {
+                    self.expect(Token::Semicolon)?;
                 } else {
-                    if !matches!(self.peek(), Some(Token::RBrace)) {
-                        self.expect(Token::Semicolon)?;
-                    } else {
-                        // Semicolon is optional before closing brace
-                        if matches!(self.peek(), Some(Token::Semicolon)) {
-                            self.next();
-                        }
+                    // Semicolon is optional before closing brace
+                    if matches!(self.peek(), Some(Token::Semicolon)) {
+                        self.next();
                     }
                 }
                 Ok(Stmt::ExprStmt { expr, span })
@@ -613,7 +611,10 @@ impl Parser {
                             name,
                             args: match arg {
                                 Expr::List { items, .. } => items,
-                                Expr::Literal { value: Literal::Null, .. } => vec![],
+                                Expr::Literal {
+                                    value: Literal::Null,
+                                    ..
+                                } => vec![],
                                 _ => vec![arg],
                             },
                             span,
@@ -709,7 +710,12 @@ impl Parser {
                         }
                     }
                     self.expect(Token::RBrace)?;
-                    Ok(Expr::StructInit { name, fields, spread, span })
+                    Ok(Expr::StructInit {
+                        name,
+                        fields,
+                        spread,
+                        span,
+                    })
                 } else {
                     Ok(Expr::Id { name, span })
                 }
@@ -727,7 +733,7 @@ impl Parser {
                 self.expect(Token::LParen)?;
                 let name = self.parse_expr()?;
                 self.expect(Token::Comma)?;
-                
+
                 let mut args = Vec::new();
                 if !matches!(self.peek(), Some(Token::RParen)) {
                     loop {
@@ -740,7 +746,7 @@ impl Parser {
                     }
                 }
                 self.expect(Token::RParen)?;
-                
+
                 Ok(Expr::Call {
                     name: Box::new(name),
                     args,
