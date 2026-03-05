@@ -11,7 +11,9 @@ Powered by a custom Rust bytecode Virtual Machine, Turn solves the inherent unre
 
 ## Why Turn?
 
-Current AI frameworks rely on massive layers of Pydantic models, JSON-parsing retry loops, and async spaghetti to coordinate agents. Turn fixes this at the compiler level with five core primitives:
+Building agentic software today — whether with a framework or from scratch — means bolting probabilistic systems onto languages built for deterministic compute. The result is the same regardless of your tooling: Pydantic models to coerce LLM output into shape, JSON-parsing retry loops because the model didn't follow instructions, async spaghetti to coordinate agents that share no memory model, and brittle prompt strings scattered across your codebase. None of these are framework problems. They are language problems.
+
+Turn fixes this at the compiler level with five core primitives:
 
 1. **Cognitive Type Safety (`infer Struct`)**: Define a struct and call `infer`. The VM natively intercepts the schema constraints and guarantees the inference provider returns exactly the memory shape you asked for. No manual parsing required.
 2. **State as Epochs (`..spread`)**: Turn enforces strict immutability. Instead of modifying objects (which causes race conditions in multi-agent systems), agents naturally evolve their state into immutable "epochs" using structural spread syntax (`let next = State { ..current }`).
