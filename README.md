@@ -5,7 +5,7 @@
   <a href="https://turn-lang.dev/#playground"><strong>Live Playground</strong></a>
 </p>
 
-Turn is a compiled systems programming language for autonomous, multi-agent AI — built on a custom Rust bytecode VM. It treats LLMs as native computational units, not external API endpoints.
+Turn is the first programming language where autonomous agents are not a pattern you implement — they are the execution model. Actors, belief states, confidence-gated decisions, immutable state epochs, and crash-recoverable OODA loops are not library abstractions. They are how the VM works.
 
 ---
 
