@@ -650,7 +650,55 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // json_stringify
+        // len
+        tools.insert(
+            "len".to_string(),
+            Box::new(|arg| match arg {
+                Value::List(items) => Ok((Value::Num(items.len() as f64), 0u64)),
+                Value::Str(s) => Ok((Value::Num(s.len() as f64), 0u64)),
+                Value::Map(entries) => Ok((Value::Num(entries.len() as f64), 0u64)),
+                Value::Vec(items) => Ok((Value::Num(items.len() as f64), 0u64)),
+                _ => Ok((Value::Num(0.0), 0u64)),
+            }) as ToolHandler,
+        );
+
+        tools.insert(
+            "list_push".to_string(),
+            Box::new(|arg| {
+                if let Value::List(args) = arg {
+                    if args.len() == 2 {
+                        if let Value::List(mut items) = args[0].clone() {
+                            items.push(args[1].clone());
+                            return Ok((Value::List(items), 0u64));
+                        }
+                    }
+                }
+                Ok((Value::Null, 0u64))
+            }) as ToolHandler,
+        );
+
+        tools.insert(
+            "list_contains".to_string(),
+            Box::new(|arg| {
+                if let Value::List(args) = arg {
+                    if args.len() == 2 {
+                        if let Value::List(items) = &args[0] {
+                            let contains = items.contains(&args[1]);
+                            return Ok((Value::Bool(contains), 0u64));
+                        }
+                    }
+                }
+                Ok((Value::Bool(false), 0u64))
+            }) as ToolHandler,
+        );
+
+        tools.insert(
+            "list_map".to_string(),
+            Box::new(|_arg| {
+                // ...
+                Ok((Value::Null, 0u64)) // Handled in VM or compiler natively.
+            }) as ToolHandler,
+        );
         tools.insert(
             "json_stringify".to_string(),
             Box::new(|arg| match serde_json::to_string(&arg) {

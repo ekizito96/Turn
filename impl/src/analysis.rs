@@ -94,6 +94,22 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
             Box::new(Type::Str),
         ),
     );
+    // list_map: (List<Any>, Function) -> List<Any>
+    map.insert(
+        "list_map".to_string(),
+        Type::Function(
+            Box::new(Type::List(Box::new(Type::Any))),
+            Box::new(Type::List(Box::new(Type::Any))), // We will use Any for now as we don't have generics properly
+        ),
+    );
+    // list_filter: (List<Any>, Function) -> List<Any>
+    map.insert(
+        "list_filter".to_string(),
+        Type::Function(
+            Box::new(Type::List(Box::new(Type::Any))),
+            Box::new(Type::List(Box::new(Type::Any))),
+        ),
+    );
     map
 }
 
