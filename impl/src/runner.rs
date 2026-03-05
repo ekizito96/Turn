@@ -87,7 +87,24 @@ impl<S: Store> Runner<S> {
                                     vm = Vm::resume_with_error(continuation, e.to_string());
                                 }
                             }
-                        } else if tool_name == "sys_schema_adapter" {
+                        } else if tool_name == "sys_grant" {
+                            // The VM Host acts as the Broker here.
+                            // In a real production Turn runner, it would check the `.turn_vault`
+                            // or the environment configuration. For now, we securely grant 
+                            // the capability handle back to the agent without exposing the secret.
+                            if let Value::Str(provider) = arg {
+                                vm = Vm::resume_with_result(continuation, Value::Identity(provider));
+                            } else {
+                                vm = Vm::resume_with_error(continuation, "sys_grant expects a provider string".to_string());
+                            }
+                        } else if tool_name == "sys_grant" {
+                        let provider_id = match arg {
+                            Value::Str(s) => s,
+                            _ => "unknown".to_string(),
+                        };
+                        let identity_cap = Value::Identity(provider_id);
+                        vm = Vm::resume_with_result(continuation, identity_cap);
+                    } else if tool_name == "sys_schema_adapter" {
                             let res = tokio::task::block_in_place(|| {
                                 tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
                             });
@@ -233,6 +250,13 @@ impl<S: Store> Runner<S> {
                                 vm = Vm::resume_with_error(continuation, e.to_string());
                             }
                         }
+                    } else if tool_name == "sys_grant" {
+                        let provider_id = match arg {
+                            Value::Str(s) => s,
+                            _ => "unknown".to_string(),
+                        };
+                        let identity_cap = Value::Identity(provider_id);
+                        vm = Vm::resume_with_result(continuation, identity_cap);
                     } else if tool_name == "sys_schema_adapter" {
                         let res = tokio::task::block_in_place(|| {
                             tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
@@ -329,6 +353,25 @@ impl<S: Store> Runner<S> {
                                 vm = Vm::resume_with_error(continuation, e.to_string());
                             }
                         }
+                        continue;
+                    }
+
+                    if tool_name == "sys_grant" {
+                        if let Value::Str(provider) = arg {
+                            vm = Vm::resume_with_result(continuation, Value::Identity(provider));
+                        } else {
+                            vm = Vm::resume_with_error(continuation, "sys_grant expects a provider string".to_string());
+                        }
+                        continue;
+                    }
+
+                    if tool_name == "sys_grant" {
+                        let provider_id = match arg {
+                            Value::Str(s) => s,
+                            _ => "unknown".to_string(),
+                        };
+                        let identity_cap = Value::Identity(provider_id);
+                        vm = Vm::resume_with_result(continuation, identity_cap);
                         continue;
                     }
 

@@ -56,6 +56,7 @@ pub enum Instr {
     LoadModule,
     Index,
     MakeTurn(u32, Vec<String>),
+    GrantIdentity(String), // NEW: Capability acquisition
 
     // Concurrency
     Spawn,

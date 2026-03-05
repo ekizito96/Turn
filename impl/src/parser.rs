@@ -809,6 +809,33 @@ impl Parser {
                     span,
                 })
             }
+            Token::Grant => {
+                // syntax: grant identity::oauth("google")
+                if let Some(Token::Id(id)) = self.peek() {
+                    if id == "identity" {
+                        if matches!(self.peek_at(1), Some(Token::DoubleColon)) {
+                            self.next(); // consume `identity`
+                            self.next(); // consume `::`
+                            
+                            // consume `oauth` or `apikey`
+                            let _auth_type = self.next().ok_or(ParseError::UnexpectedEof)?;
+                            
+                            self.expect(Token::LParen)?;
+                            let provider_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                            let provider = match provider_token.token {
+                                Token::Str(p) => p,
+                                _ => return Err(ParseError::UnexpectedToken(provider_token.span)),
+                            };
+                            self.expect(Token::RParen)?;
+                            return Ok(Expr::Grant {
+                                provider,
+                                span,
+                            });
+                        }
+                    }
+                }
+                return Err(ParseError::UnexpectedToken(span));
+            }
             Token::Receive => Ok(Expr::Receive { span }),
             Token::Vec => {
                 self.expect(Token::LBracket)?;

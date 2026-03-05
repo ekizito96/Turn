@@ -121,6 +121,7 @@ fn value_to_key(v: &Value) -> Result<String, RuntimeError> {
         | Value::Closure { .. }
         | Value::Pid(_)
         | Value::Vec(_)
+        | Value::Identity(_)
         | Value::Uncertain(..) => Err(RuntimeError::InvalidMemoryKey),
     }
 }

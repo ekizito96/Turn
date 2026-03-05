@@ -99,6 +99,27 @@ pub fn run_with_tools(
                 arg,
                 continuation,
             } => {
+                if tool_name == "sys_grant" {
+                    let provider_id = match arg {
+                        value::Value::Str(s) => s,
+                        _ => "unknown".to_string(),
+                    };
+                    let identity_cap = value::Value::Identity(provider_id);
+                    vm = vm::Vm::resume_with_result(continuation, identity_cap);
+                    continue;
+                }
+
+                if tool_name == "sys_schema_adapter" {
+                    let res = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
+                    });
+                    match res {
+                        Ok(module_val) => vm = vm::Vm::resume_with_result(continuation, module_val),
+                        Err(e) => vm = vm::Vm::resume_with_error(continuation, e.to_string()),
+                    }
+                    continue;
+                }
+
                 // Execute tool
                 match tools.call(&tool_name, arg) {
                     Ok((result, cost)) => {

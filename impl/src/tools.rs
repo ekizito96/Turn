@@ -132,9 +132,20 @@ impl ToolRegistry {
         tools.insert(
             "http_get".to_string(),
             Box::new(|arg| {
-                let url = match arg {
-                    Value::Str(s) => s,
-                    _ => return Err("Argument must be a string URL".to_string()),
+                let (url, identity) = match arg {
+                    Value::Str(s) => (s, None),
+                    Value::Map(m) => {
+                        let u = match m.get("url") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Map argument must contain string 'url'".to_string()),
+                        };
+                        let i = match m.get("identity") {
+                            Some(Value::Identity(id)) => Some(id.clone()),
+                            _ => None,
+                        };
+                        (u, i)
+                    }
+                    _ => return Err("Argument must be a string URL or Map {url, identity?}".to_string()),
                 };
 
                 let client = reqwest::blocking::Client::builder()
@@ -142,7 +153,16 @@ impl ToolRegistry {
                     .build()
                     .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-                match client.get(&url).send() {
+                let mut req = client.get(&url);
+                if let Some(id) = identity {
+                    // SECURE CAPABILITY INJECTION
+                    // Here the Turn VM injects the real token based on the identity handle.
+                    // For the prototype, we mock this by injecting a dummy token.
+                    // In production, this would look up the token from the host vault.
+                    req = req.bearer_auth(format!("turn_mock_token_for_{}", id));
+                }
+
+                match req.send() {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {
@@ -165,22 +185,32 @@ impl ToolRegistry {
         tools.insert(
             "http_post".to_string(),
             Box::new(|arg| {
-                let (url, body_val) = match arg {
+                let (url, body_val, identity) = match arg {
                     Value::Map(m) => {
                         let url = match m.get("url") {
                             Some(Value::Str(s)) => s.clone(),
                             _ => return Err("Missing 'url'".to_string()),
                         };
                         let body = m.get("body").cloned().unwrap_or(Value::Null);
-                        (url, body)
+                        let identity = match m.get("identity") {
+                            Some(Value::Identity(id)) => Some(id.clone()),
+                            _ => None,
+                        };
+                        (url, body, identity)
                     }
-                    _ => return Err("Argument must be a map {url, body}".to_string()),
+                    _ => return Err("Argument must be a map {url, body, identity?}".to_string()),
                 };
 
                 let client = reqwest::blocking::Client::new();
                 let json_body = serde_json::to_value(&body_val).unwrap_or(serde_json::Value::Null);
 
-                match client.post(&url).json(&json_body).send() {
+                let mut req = client.post(&url).json(&json_body);
+                if let Some(id) = identity {
+                    // SECURE CAPABILITY INJECTION
+                    req = req.bearer_auth(format!("turn_mock_token_for_{}", id));
+                }
+
+                match req.send() {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text() {

@@ -25,6 +25,7 @@ pub enum Value {
     },
     Pid(u64), // Process ID
     Vec(Vec<f64>),
+    Identity(String), // Cryptographic Capability Handle
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
 }
 
@@ -40,6 +41,7 @@ impl Value {
             Value::Struct(_, m) => m.is_empty(),
             Value::Pid(_) => false,
             Value::Vec(v) => v.is_empty(),
+            Value::Identity(_) => false, // Capabilities are truthy
             Value::Uncertain(v, _) => v.is_falsy(),
             Value::Closure { .. } => false,
         }
@@ -89,6 +91,7 @@ impl std::fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Pid(id) => write!(f, "<pid {}>", id),
+            Value::Identity(id) => write!(f, "<identity {}>", id),
             Value::Vec(v) => {
                 write!(f, "vec[")?;
                 for (i, val) in v.iter().enumerate() {

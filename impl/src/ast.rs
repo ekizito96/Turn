@@ -17,6 +17,7 @@ pub enum Type {
     Void,
     Pid,
     Vec,
+    Identity, // NEW: Cryptographic Capability Type
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +214,10 @@ pub enum Expr {
         url: Box<Expr>,
         span: Span,
     },
+    Grant {
+        provider: String,
+        span: Span,
+    },
     If {
         cond: Box<Expr>,
         then_block: Block,
@@ -248,6 +253,7 @@ impl Expr {
             Expr::Unary { span, .. } => *span,
             Expr::Paren(inner) => inner.span(),
             Expr::UseSchema { span, .. } => *span,
+            Expr::Grant { span, .. } => *span,
             Expr::StructInit { span, .. } => *span,
             Expr::If { span, .. } => *span,
         }

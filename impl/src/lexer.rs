@@ -18,6 +18,7 @@ pub enum Token {
     Confidence, // NEW
     Use,
     UseWasm,
+    Grant,
     Context,
     Try,
     Catch,
@@ -120,6 +121,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
     ("use_wasm", Token::UseWasm),
+    ("grant", Token::Grant),
     ("try", Token::Try),
     ("catch", Token::Catch),
     ("throw", Token::Throw),

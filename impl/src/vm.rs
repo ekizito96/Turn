@@ -1070,6 +1070,25 @@ impl Vm {
                         params,
                     });
                 }
+                Instr::GrantIdentity(ref provider) => {
+                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    let state = VmState {
+                        pid: process.pid,
+                        parent_pid: process.parent_pid,
+                        frames: process.frames.clone(),
+                        stack: process.stack.clone(),
+                        runtime: process.runtime.clone(),
+                        mailbox: process.mailbox.clone(),
+                        scheduler: self.scheduler.clone(),
+                        next_pid: self.next_pid,
+                        gas_remaining: process.gas_remaining,
+                    };
+                    return VmResult::Suspended {
+                        tool_name: "sys_grant".to_string(),
+                        arg: Value::Str(provider.clone()),
+                        continuation: state,
+                    };
+                }
                 Instr::LoadModule => {
                     let p_val = process.stack.pop().unwrap_or(Value::Null);
                     let path = match p_val {

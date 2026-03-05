@@ -299,6 +299,7 @@ impl Analysis {
             Expr::Send { .. } => Some(Type::Bool),
             Expr::Receive { .. } => Some(Type::Any),
             Expr::Confidence { .. } => Some(Type::Num),
+            Expr::Grant { .. } => Some(Type::Identity),
             Expr::Infer { target_ty, .. } => Some(target_ty.clone()),
             Expr::Vec { items, .. } => {
                 // Infer type as Vec.
@@ -826,6 +827,7 @@ impl Analysis {
             Expr::Recall { key, .. } => self.visit_expr(key),
             Expr::Use { module, .. } => self.visit_expr(module),
             Expr::UseSchema { url, .. } => self.visit_expr(url),
+            Expr::Grant { .. } => {}
             Expr::Index { target, index, .. } => {
                 self.visit_expr(target);
                 self.visit_expr(index);

@@ -228,6 +228,9 @@ impl Compiler {
                 self.emit(Instr::MakeMap(2));
                 self.emit(Instr::CallTool);
             }
+            Expr::Grant { provider, .. } => {
+                self.emit(Instr::GrantIdentity(provider.clone()));
+            }
             Expr::Turn {
                 params,
                 ret_ty: _,
