@@ -106,9 +106,12 @@ impl<S: Store> Runner<S> {
                                     vm = Vm::resume_with_error(continuation, e);
                                 }
                             }
-                        }
                     }
-                    VmResult::Yielded => unreachable!("VM should handle yields internally"),
+                }
+                VmResult::Error(err) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, err).into());
+                }
+                VmResult::Yielded => unreachable!("VM should handle yields internally"),
                 }
             }
         }
@@ -236,6 +239,9 @@ impl<S: Store> Runner<S> {
                         }
                     }
                 }
+                VmResult::Error(err) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, err).into());
+                }
                 VmResult::Yielded => unreachable!("VM should handle yields internally"),
             }
         }
@@ -324,6 +330,9 @@ impl<S: Store> Runner<S> {
                             vm = Vm::resume_with_error(continuation, e);
                         }
                     }
+                }
+                VmResult::Error(err) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, err).into());
                 }
                 VmResult::Yielded => unreachable!("VM should handle yields internally"),
             }

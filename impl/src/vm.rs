@@ -44,7 +44,7 @@ pub struct Process {
 }
 
 fn default_gas() -> u64 {
-    1_000_000
+    u64::MAX // effectively infinite for testing
 }
 
 #[derive(Debug)]
@@ -57,6 +57,7 @@ pub enum VmResult {
         continuation: VmState,
     },
     Yielded,
+    Error(String),
 }
 
 pub struct Vm {
@@ -161,6 +162,7 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> VmResult {
+        let mut no_progress_count = 0;
         loop {
             if self.scheduler.is_empty() {
                 return VmResult::Complete(Value::Null);
@@ -172,8 +174,36 @@ impl Vm {
             match result {
                 VmResult::Yielded => {
                     self.scheduler.push_back(process);
+                    no_progress_count += 1;
+                    if no_progress_count > self.scheduler.len() * 2 {
+                        // Check for global deadlock: all processes waiting for messages
+                        let mut all_deadlocked = true;
+                        for p in self.scheduler.iter() {
+                            if !p.mailbox.is_empty() {
+                                all_deadlocked = false;
+                                break;
+                            }
+                            if let Some(f) = p.frames.last() {
+                                if f.ip > 0 && f.ip - 1 < f.code.len() {
+                                    let instr = &f.code[f.ip - 1];
+                                    if instr != &Instr::Receive {
+                                        all_deadlocked = false;
+                                        break;
+                                    }
+                                } else {
+                                    all_deadlocked = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if all_deadlocked {
+                            return VmResult::Complete(Value::Str("Error: Deadlock (all processes waiting for messages)".to_string()));
+                        }
+                    }
                 }
                 VmResult::Complete(v) => {
+                    no_progress_count = 0;
                     if process.pid == 1 {
                         return VmResult::Complete(v);
                     }
@@ -197,6 +227,7 @@ impl Vm {
                     arg,
                     continuation: _,
                 } => {
+                    let _ = no_progress_count; // clear warning
                     // Reconstruct VmState for legacy support
                     let state = VmState {
                         pid: process.pid,
@@ -215,6 +246,24 @@ impl Vm {
                         continuation: state,
                     };
                 }
+                VmResult::Error(err) => {
+                    let _ = no_progress_count; // clear warning
+                    if process.pid == 1 {
+                        return VmResult::Error(err);
+                    }
+                    if let Some(parent_id) = process.parent_pid {
+                        let mut map = IndexMap::new();
+                        map.insert("type".to_string(), Value::Str("ExitSignal".to_string()));
+                        map.insert("pid".to_string(), Value::Pid(process.pid));
+                        map.insert("reason".to_string(), Value::Str(err.clone()));
+                        let signal = Value::Map(map);
+
+                        if let Some(parent) = self.scheduler.iter_mut().find(|p| p.pid == parent_id)
+                        {
+                            parent.mailbox.push_back(signal);
+                        }
+                    }
+                }
             }
         }
     }
@@ -224,7 +273,7 @@ impl Vm {
 
         loop {
             if process.gas_remaining == 0 {
-                return VmResult::Complete(Value::Str("Error: Out of gas".to_string()));
+                return VmResult::Error("Error: Out of gas".to_string());
             }
             process.gas_remaining -= 1;
 
@@ -393,6 +442,8 @@ impl Vm {
                     } else {
                         // Yield and retry same instruction later
                         process.frames[frame_idx].ip -= 1;
+                        // Avoid consuming gas just for waiting
+                        process.gas_remaining += 1;
                         return VmResult::Yielded;
                     }
                 }

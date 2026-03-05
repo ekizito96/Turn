@@ -109,6 +109,7 @@ pub fn run_with_tools(
                 }
             }
             vm::VmResult::Yielded => unreachable!("VM should handle yields internally"),
+            vm::VmResult::Error(err) => return Err(err.into()),
         }
     }
 }
