@@ -1,8 +1,12 @@
 [workspace]
 members = [
     "turn-provider-openai",
+    "turn-provider-anthropic",
+    "turn-provider-grok",
+    "turn-provider-ollama",
     "turn-provider-azure-openai",
     "turn-provider-azure-anthropic",
-    "turn-provider-gemini", "turn-provider-azure-openai-responses",
+    "turn-provider-azure-openai-responses",
+    "turn-provider-gemini",
 ]
 resolver = "2"
