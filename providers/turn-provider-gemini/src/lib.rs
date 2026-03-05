@@ -135,7 +135,6 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
             "parts": [{ "text": sys_msg_text }]
         },
         "generationConfig": {
-            "temperature": 0.0,
             "responseMimeType": "application/json"
         }
     });

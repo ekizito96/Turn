@@ -145,7 +145,6 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     let mut body = json!({
         "model": "$env:OPENAI_MODEL:gpt-4o", // Host resolves this template
         "messages": messages,
-        "temperature": 0.0,
     });
 
     if req.params.schema != json!({"type": "any"}) {

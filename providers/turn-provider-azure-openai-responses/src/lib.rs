@@ -80,7 +80,6 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     let mut body = json!({
         "input": messages,
         "model": "$env:AZURE_OPENAI_DEPLOYMENT",
-        "max_output_tokens": 16384,
     });
 
     if req.params.schema != json!({"type": "any"}) && req.params.schema != json!({"type": "string"})
