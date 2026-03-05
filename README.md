@@ -137,6 +137,40 @@ Compile to `wasm32-unknown-unknown`, drop it in `.turn_modules/`, and Turn picks
 
 ---
 
+## Compile-Time Schema Adapters
+
+When an API publishes a structured specification (OpenAPI, GraphQL, FHIR), Turn absorbs it directly into the compiler. `use schema::openapi` fetches the schema, parses it, and synthesises native bytecode closures at compile time. No SDK dependencies, no boilerplate HTTP wrappers, no "function registry."
+
+```turn
+let gcal = use schema::openapi("https://googleapis.com/.../calendar/v3/rest");
+
+let events = gcal.events.list({
+    "calendarId": "primary",
+    "timeMin": call("time_now")
+});
+```
+
+The API's types become the actual memory layout of the Turn VM. For unstructured or undocumented data, the `infer Struct` primitive coerces raw payloads into typed memory using the LLM as a native type coercer.
+
+---
+
+## Zero-Trust Authentication
+
+API keys and OAuth tokens in traditional frameworks are strings in the agent's memory. A prompt injection attack can extract them. Turn introduces `Identity` as a first-class primitive type.
+
+```turn
+let my_google = grant identity::oauth("google_workspace");
+
+let events = call("http_get", {
+    "url": "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+    "identity": my_google
+});
+```
+
+The `grant` keyword requests a cryptographic capability from the Turn VM host. The raw token never enters Turn's bytecode memory. When the agent passes the `Identity` handle to an HTTP tool, the Rust host intercepts the call, looks up the real credential from a secure environment variable (`TURN_IDENTITY_<PROVIDER>_TOKEN`), and injects the `Authorization` header before the request goes over the wire. The LLM cannot print, email, or exfiltrate the token because it only holds an opaque, unforgeable handle.
+
+---
+
 ## Quick Start
 
 ### Installation
