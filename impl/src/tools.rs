@@ -8,6 +8,481 @@ use std::fs;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+// --- LLM Helpers ---
+
+fn call_openai_chat(
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+    messages: &serde_json::Value,
+) -> Result<(String, u64), String> {
+    let client = reqwest::blocking::Client::new();
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages
+    });
+
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    match client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&payload)
+        .send()
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                            let tokens = json["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                            Ok((content.to_string(), tokens))
+                        } else {
+                            Err("Invalid response format from OpenAI-compatible API".to_string())
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to parse response: {}", e)),
+                }
+            } else {
+                Err(format!("API error: {}", resp.status()))
+            }
+        }
+        Err(e) => Err(format!("Request failed: {}", e)),
+    }
+}
+
+fn call_anthropic_chat(
+    api_key: &str,
+    model: &str,
+    messages: &serde_json::Value,
+) -> Result<(String, u64), String> {
+    let client = reqwest::blocking::Client::new();
+
+    let mut system_prompt = String::new();
+    let mut anthropic_msgs = Vec::new();
+
+    if let Some(arr) = messages.as_array() {
+        for msg in arr {
+            let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+
+            if role == "system" {
+                if !system_prompt.is_empty() {
+                    system_prompt.push('\n');
+                }
+                system_prompt.push_str(content);
+            } else {
+                anthropic_msgs.push(msg.clone());
+            }
+        }
+    }
+
+    let mut payload = serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": anthropic_msgs
+    });
+
+    if !system_prompt.is_empty() {
+        payload["system"] = serde_json::Value::String(system_prompt);
+    }
+
+    match client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&payload)
+        .send()
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(content_arr) = json["content"].as_array() {
+                            if let Some(text) =
+                                content_arr.first().and_then(|item| item["text"].as_str())
+                            {
+                                let input_tok = json["usage"]["input_tokens"].as_u64().unwrap_or(0);
+                                let output_tok =
+                                    json["usage"]["output_tokens"].as_u64().unwrap_or(0);
+                                Ok((text.to_string(), input_tok + output_tok))
+                            } else {
+                                Err("Invalid content format from Anthropic".to_string())
+                            }
+                        } else {
+                            Err("Missing content array from Anthropic".to_string())
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to parse Anthropic response: {}", e)),
+                }
+            } else {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                Err(format!("Anthropic API error {}: {}", status, text))
+            }
+        }
+        Err(e) => Err(format!("Anthropic request failed: {}", e)),
+    }
+}
+
+fn call_google_chat(
+    api_key: &str,
+    model: &str,
+    messages: &serde_json::Value,
+) -> Result<(String, u64), String> {
+    let client = reqwest::blocking::Client::new();
+
+    // Google Gemini API: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateConten
+
+    let mut contents = Vec::new();
+    let mut system_instruction = None;
+
+    if let Some(arr) = messages.as_array() {
+        for msg in arr {
+            let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            let text = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+
+            if role == "system" {
+                // Gemini supports system_instruction at top level
+                system_instruction = Some(serde_json::json!({
+                    "parts": [{ "text": text }]
+                }));
+            } else {
+                // Map roles: user -> user, assistant -> model
+                let gemini_role = if role == "assistant" { "model" } else { "user" };
+                contents.push(serde_json::json!({
+                    "role": gemini_role,
+                    "parts": [{ "text": text }]
+                }));
+            }
+        }
+    }
+
+    let mut payload = serde_json::json!({
+        "contents": contents
+    });
+
+    if let Some(sys) = system_instruction {
+        payload["system_instruction"] = sys;
+    }
+
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    );
+
+    match client.post(&url).json(&payload).send() {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        // Response: { candidates: [ { content: { parts: [ { text: "..." } ] } } ] }
+                        if let Some(candidates) = json["candidates"].as_array() {
+                            if let Some(first) = candidates.first() {
+                                if let Some(parts) = first["content"]["parts"].as_array() {
+                                    if let Some(text) =
+                                        parts.first().and_then(|p| p["text"].as_str())
+                                    {
+                                        let tokens = json["usageMetadata"]["totalTokenCount"]
+                                            .as_u64()
+                                            .unwrap_or(0);
+                                        return Ok((text.to_string(), tokens));
+                                    }
+                                }
+                            }
+                        }
+                        Err("Invalid response format from Gemini".to_string())
+                    }
+                    Err(e) => Err(format!("Failed to parse Gemini response: {}", e)),
+                }
+            } else {
+                Err(format!("Gemini API error: {}", resp.status()))
+            }
+        }
+        Err(e) => Err(format!("Gemini request failed: {}", e)),
+    }
+}
+
+fn call_ollama_chat(model: &str, messages: &serde_json::Value) -> Result<(String, u64), String> {
+    let client = reqwest::blocking::Client::new();
+
+    let host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let url = format!("{}/api/chat", host);
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false
+    });
+
+    match client.post(&url).json(&payload).send() {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(content) = json["message"]["content"].as_str() {
+                            let tokens = json["eval_count"].as_u64().unwrap_or(0)
+                                + json["prompt_eval_count"].as_u64().unwrap_or(0);
+                            Ok((content.to_string(), tokens))
+                        } else {
+                            Err("Invalid response format from Ollama".to_string())
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to parse Ollama response: {}", e)),
+                }
+            } else {
+                Err(format!("Ollama API error: {}", resp.status()))
+            }
+        }
+        Err(e) => Err(format!("Ollama request failed: {}", e)),
+    }
+}
+
+fn call_azure_chat(
+    api_key: &str,
+    endpoint: &str,
+    deployment: &str,
+    api_version: &str,
+    messages: &serde_json::Value,
+) -> Result<(String, u64), String> {
+    let client = reqwest::blocking::Client::new();
+    // Azure URL: {endpoint}/openai/deployments/{deployment}/chat/completions?api-version=...
+    // Note: endpoint usually includes https://
+    let base = endpoint.trim_end_matches('/');
+    let url = format!(
+        "{}/openai/deployments/{}/chat/completions?api-version={}",
+        base, deployment, api_version
+    );
+
+    let payload = serde_json::json!({
+        "messages": messages
+    });
+
+    match client
+        .post(&url)
+        .header("api-key", api_key)
+        .json(&payload)
+        .send()
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                            let tokens = json["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                            Ok((content.to_string(), tokens))
+                        } else {
+                            Err("Invalid response format from Azure OpenAI".to_string())
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to parse response: {}", e)),
+                }
+            } else {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                Err(format!("Azure API error {}: {}", status, text))
+            }
+        }
+        Err(e) => Err(format!("Request failed: {}", e)),
+    }
+}
+
+fn call_azure_responses(
+    api_key: &str,
+    responses_url: &str,
+    model: &str,
+    messages: &serde_json::Value,
+) -> Result<(String, u64), String> {
+    let client = reqwest::blocking::Client::new();
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "max_completion_tokens": 16384
+    });
+
+    match client
+        .post(responses_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                match resp.json::<serde_json::Value>() {
+                    Ok(json) => {
+                        let tokens = json["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                        if let Some(text) = json.get("output_text").and_then(|v| v.as_str()) {
+                            return Ok((text.to_string(), tokens));
+                        }
+                        if let Some(text) = json["output"][0]["content"][0]["text"].as_str() {
+                            return Ok((text.to_string(), tokens));
+                        }
+                        if let Some(text) = json["choices"][0]["message"]["content"].as_str() {
+                            return Ok((text.to_string(), tokens));
+                        }
+                        Err("Invalid response format from Azure Responses API".to_string())
+                    }
+                    Err(e) => Err(format!("Failed to parse response: {}", e)),
+                }
+            } else {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                Err(format!("Azure Responses API error {}: {}", status, text))
+            }
+        }
+        Err(e) => Err(format!("Request failed: {}", e)),
+    }
+}
+
+fn call_llm_dispatch(
+    model_hint: Option<&str>,
+    messages: &serde_json::Value,
+) -> Result<(String, u64), String> {
+    let provider = env::var("TURN_LLM_PROVIDER")
+        .unwrap_or_else(|_| "openai".to_string())
+        .to_lowercase();
+    let env_model = env::var("TURN_LLM_MODEL").ok();
+    let model = model_hint.or(env_model.as_deref());
+
+    // 1. Try WASM Provider first
+    let wasm_file = format!("{}_provider.wasm", provider);
+    let mut wasm_path = std::path::Path::new(".turn_modules").join(&wasm_file);
+    if !wasm_path.exists() {
+        let mut p = std::env::current_dir().unwrap_or_default();
+        for _ in 0..10 {
+            let check = p.join(".turn_modules").join(&wasm_file);
+            if check.exists() {
+                wasm_path = check;
+                break;
+            }
+            if !p.pop() {
+                break;
+            }
+        }
+    }
+
+    if wasm_path.exists() {
+        println!("🔌 Using WASM Inference Driver: {}", wasm_path.display());
+        let mut payload = serde_json::json!({
+            "messages": messages
+        });
+        if let Some(m) = model {
+            payload["model"] = serde_json::json!(m);
+        }
+
+        match crate::wasm_host::WasmProvider::new(&wasm_path) {
+            Ok(wasm_provider) => {
+                match wasm_provider.execute_inference(&payload.to_string()) {
+                    Ok(json_res) => {
+                        // WASM provides standard OpenAI format output
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&json_res).unwrap_or(serde_json::Value::Null);
+
+                        // Handle standard OpenAI completion response
+                        if let Some(content) = parsed["choices"][0]["message"]["content"].as_str() {
+                            let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                            return Ok((content.to_string(), tokens));
+                        }
+
+                        // Handle raw string response (some older WASM modules might just return the content)
+                        if let Some(content) = parsed
+                            .get("message")
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                            return Ok((content.to_string(), tokens));
+                        }
+
+                        return Err(format!(
+                            "Invalid response format from WASM provider: {}",
+                            json_res
+                        ));
+                    }
+                    Err(e) => return Err(format!("WASM Execution failed: {}", e)),
+                }
+            }
+            Err(e) => return Err(format!("Failed to load WASM provider: {}", e)),
+        }
+    }
+
+    // 2. Native HTTP Fallback
+    // println!("🔌 Using Native Rust HTTP Driver for {}", provider);
+
+    match provider.as_str() {
+        "azure" => {
+            let api_key = env::var("AZURE_OPENAI_KEY")
+                .or_else(|_| env::var("AZURE_API_KEY"))
+                .or_else(|_| env::var("AZURE_OPENAI_API_KEY"))
+                .map_err(|_| "AZURE_OPENAI_KEY or AZURE_API_KEY not set".to_string())?;
+
+            // If full Responses API URL is provided, use it directly.
+            if let Ok(responses_url) = env::var("AZURE_OPENAI_RESPONSES_URL") {
+                let final_model = model.unwrap_or("gpt-5.2-codex");
+                return call_azure_responses(&api_key, &responses_url, final_model, messages);
+            }
+
+            let endpoint = env::var("AZURE_OPENAI_ENDPOINT")
+                .map_err(|_| "AZURE_OPENAI_ENDPOINT not set".to_string())?;
+            let api_version = env::var("AZURE_OPENAI_API_VERSION")
+                .unwrap_or_else(|_| "2024-12-01-preview".to_string());
+
+            // Allow passing a full responses URL in AZURE_OPENAI_ENDPOINT too.
+            if endpoint.contains("/openai/responses") {
+                let final_model = model.unwrap_or("gpt-5.2-codex");
+                return call_azure_responses(&api_key, &endpoint, final_model, messages);
+            }
+
+            // For deployment path mode, model maps to deployment name.
+            let deployment = model.unwrap_or("gpt-5.2-chat");
+            call_azure_chat(&api_key, &endpoint, deployment, &api_version, messages)
+        }
+        "anthropic" => {
+            let api_key = env::var("ANTHROPIC_API_KEY")
+                .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
+            let final_model = model.unwrap_or("claude-3-opus-20240229");
+            call_anthropic_chat(&api_key, final_model, messages)
+        }
+        "google" | "gemini" => {
+            let api_key = env::var("GEMINI_API_KEY")
+                .or_else(|_| env::var("GOOGLE_API_KEY"))
+                .map_err(|_| "GEMINI_API_KEY or GOOGLE_API_KEY not set".to_string())?;
+            let final_model = model.unwrap_or("gemini-1.5-pro");
+            call_google_chat(&api_key, final_model, messages)
+        }
+        "grok" => {
+            let api_key = env::var("GROK_API_KEY")
+                .or_else(|_| env::var("XAI_API_KEY"))
+                .map_err(|_| "GROK_API_KEY or XAI_API_KEY not set".to_string())?;
+            let final_model = model.unwrap_or("grok-1");
+            call_openai_chat(&api_key, "https://api.x.ai/v1", final_model, messages)
+        }
+        "vllm" | "openrouter" | "deepseek" | "openai-generic" => {
+            let api_key = env::var("LLM_API_KEY")
+                .or_else(|_| env::var("OPENAI_API_KEY"))
+                .map_err(|_| "LLM_API_KEY or OPENAI_API_KEY not set".to_string())?;
+
+            // Default to local vLLM if no base url
+            let base_url = env::var("TURN_LLM_API_BASE")
+                .unwrap_or_else(|_| "http://localhost:8000/v1".to_string());
+            let final_model = model.unwrap_or("default");
+            call_openai_chat(&api_key, &base_url, final_model, messages)
+        }
+        "ollama" => {
+            let final_model = model.unwrap_or("llama3");
+            call_ollama_chat(final_model, messages)
+        }
+        _ => {
+            let api_key =
+                env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
+            let final_model = model.unwrap_or("gpt-4o-mini");
+            call_openai_chat(&api_key, "https://api.openai.com/v1", final_model, messages)
+        }
+    }
+}
+
 // Update ToolHandler to return Result<Value, String>
 pub type ToolHandler = Box<dyn Fn(Value) -> Result<(Value, u64), String> + Send + Sync>;
 
@@ -244,7 +719,7 @@ impl ToolRegistry {
                 if wasm_path.exists() {
                     let mut params = serde_json::Map::new();
                     // for llm_generate we just wrap messages as a prompt
-                    params.insert("prompt".to_string(), json_msgs);
+                    params.insert("prompt".to_string(), json_msgs.clone());
                     params.insert("schema".to_string(), serde_json::json!({"type": "any"}));
                     params.insert("context".to_string(), serde_json::json!([]));
                     params.insert("tools".to_string(), serde_json::json!([]));
@@ -279,7 +754,11 @@ impl ToolRegistry {
                     }
                 }
 
-                Err(format!("WASM driver not found at {}", wasm_path.display()))
+                // 2. Native HTTP Fallback
+                match call_llm_dispatch(_model_opt.as_deref(), &json_msgs) {
+                    Ok((content, tokens)) => Ok((Value::Str(content), tokens)),
+                    Err(e) => Err(e),
+                }
             }) as ToolHandler,
         );
 
@@ -590,7 +1069,99 @@ impl ToolRegistry {
                         }
                     }
 
-                    Err(format!("WASM driver not found at {}", wasm_path.display()))
+                    // 2. Native HTTP Fallback
+                    let mut msgs = Vec::new();
+                    let mut json_hint = String::new();
+                    if let Value::Str(s) = schema {
+                        if s.contains("Struct") {
+                            if let Some(start) = s.find('{') {
+                                if let Some(end) = s.rfind('}') {
+                                    let fields_str = &s[start+1..end];
+                                    let mut field_hints = Vec::new();
+                                    for part in fields_str.split(',') {
+                                        let part = part.trim();
+                                        if let Some(idx) = part.find(':') {
+                                            let key = part[..idx].trim().trim_matches('"');
+                                            let ty_raw = part[idx+1..].trim();
+                                            let example_val = if ty_raw.contains("Num") { "0.8" }
+                                                            else if ty_raw.contains("Str") { "\"example\"" }
+                                                            else if ty_raw.contains("Bool") { "true" }
+                                                            else { "null" };
+                                            field_hints.push(format!("\"{}\": {}", key, example_val));
+                                        }
+                                    }
+                                    if !field_hints.is_empty() {
+                                        json_hint = format!("{{ {} }}", field_hints.join(", "));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let sys_msg = if !json_hint.is_empty() {
+                        format!("You are a Turn Language Runtime. The user wants a value matching the provided schema.\n\nREQUIRED OUTPUT FORMAT:\n{{ \"value\": {}, \"confidence\": <0.0-1.0> }}\n\nEnsure 'value' is a VALID JSON object matching the example structure EXACTLY, filling fields based on the Prompt.", json_hint)
+                    } else {
+                        "You are a Turn Language Runtime. The user wants a value matching the provided schema. \n\nIMPORTANT: If the schema describes a Struct (e.g. Struct(\"Name\", { fields... })), you MUST return a JSON object for the 'value' field that strictly matches those fields.\n\nOutput ONLY JSON object: { \"value\": <value>, \"confidence\": <0.0-1.0> }.".to_string()
+                    };
+
+                    msgs.push(serde_json::json!({
+                        "role": "system",
+                        "content": sys_msg
+                    }));
+
+                    if let Value::List(items) = context {
+                        for item in items {
+                            if let Value::Str(s) = item {
+                                msgs.push(serde_json::json!({
+                                    "role": "system",
+                                    "content": format!("Context: {}", s)
+                                }));
+                            }
+                        }
+                    }
+
+                    let user_content = format!("Schema Type: {}\nPrompt: {}", schema, prompt);
+                    msgs.push(serde_json::json!({
+                        "role": "user",
+                        "content": user_content
+                    }));
+
+                    let messages = serde_json::Value::Array(msgs);
+
+                    match call_llm_dispatch(None, &messages) {
+                        Ok((content, tokens)) => {
+                            let clean = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+                            match serde_json::from_str::<serde_json::Value>(clean) {
+                                Ok(json) => {
+                                    let val_json = json.get("value").unwrap_or(&serde_json::Value::Null);
+                                    let conf = json.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.9);
+                                    let turn_val = if let Value::Str(s) = schema {
+                                        if s.contains("Struct") {
+                                            match val_json {
+                                                serde_json::Value::Object(map) => {
+                                                    let mut fields = indexmap::IndexMap::new();
+                                                    for (k, v) in map {
+                                                        let tv: Value = serde_json::from_value(v.clone()).unwrap_or(Value::Null);
+                                                        fields.insert(k.clone(), tv);
+                                                    }
+                                                    let name = s.split('"').nth(1).unwrap_or("Anon").to_string();
+                                                    Value::Struct(name, fields)
+                                                },
+                                                _ => serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
+                                            }
+                                        } else {
+                                            serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
+                                        }
+                                    } else {
+                                        serde_json::from_value(val_json.clone()).unwrap_or(Value::Null)
+                                    };
+                                    Ok((Value::Uncertain(Box::new(turn_val), conf), tokens))
+                                },
+                                Err(e) => Err(format!("Failed to parse LLM JSON: {} in {}", e, clean)),
+                            }
+                        },
+                        Err(e) => Err(e),
+                    }
                 } else {
                     Err("Invalid args for llm_infer".to_string())
                 }
