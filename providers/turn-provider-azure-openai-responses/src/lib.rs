@@ -100,6 +100,7 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     }
 
     // Azure Serverless Endpoint (GPT-5 series)
+    // Azure Serverless Endpoint (GPT-5 series)
     let http_config = json!({
         "url": "$env:AZURE_OPENAI_ENDPOINT/openai/responses?api-version=2025-04-01-preview",
         "method": "POST",
