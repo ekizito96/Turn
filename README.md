@@ -5,74 +5,177 @@
   <a href="https://turn-lang.dev/#playground"><strong>Live Playground</strong></a>
 </p>
 
-Turn is a compiled systems programming language designed specifically for autonomous, multi-agent AI workflows. It treats Large Language Models (LLMs) as native computational units (ALUs) rather than external API endpoints.
+Turn is a compiled systems programming language for autonomous, multi-agent AI — built on a custom Rust bytecode VM. It treats LLMs as native computational units, not external API endpoints.
 
-Powered by a custom Rust bytecode Virtual Machine, Turn solves the inherent unreliability of bolting probabilistic LLMs onto deterministic languages like Python and TypeScript.
+---
 
-## Why Turn?
+## The Real Problem
 
-Building agentic software today — whether with a framework or from scratch — means bolting probabilistic systems onto languages built for deterministic compute. The result is the same regardless of your tooling: Pydantic models to coerce LLM output into shape, JSON-parsing retry loops because the model didn't follow instructions, async spaghetti to coordinate agents that share no memory model, and brittle prompt strings scattered across your codebase. None of these are framework problems. They are language problems.
+Production agentic software is not hard because parsing JSON is tedious. It is hard because **no general-purpose language has a runtime model that matches how agents actually work**.
 
-Turn fixes this at the compiler level with five core primitives:
+An autonomous agent running a real workflow is:
 
-1. **Cognitive Type Safety (`infer Struct`)**: Define a struct and call `infer`. The VM natively intercepts the schema constraints and guarantees the inference provider returns exactly the memory shape you asked for. No manual parsing required.
-2. **State as Epochs (`..spread`)**: Turn enforces strict immutability. Instead of modifying objects (which causes race conditions in multi-agent systems), agents naturally evolve their state into immutable "epochs" using structural spread syntax (`let next = State { ..current }`).
-3. **Iteration as Delegation (`spawn_each`)**: Turn intentionally lacks a `for` loop. If you have a list of tasks, you don't loop over them sequentially; you map over them concurrently. `spawn_each` distributes workloads across the VM's Actor model natively.
-4. **Probabilistic Control Flow (`confidence`)**: LLMs hallucinate. Turn makes uncertainty a first-class citizen. Use the `confidence` operator to build native fail-safes directly into your logic (`if confidence decision < 0.85 { return Fallback; }`).
-5. **Erlang-style Actors (`spawn_link` & `receive`)**: Agents run in isolated VM threads and communicate safely via deterministic mailboxes, ensuring perfect OODA-loop isolation.
+- A **stateful OODA loop** that must survive crashes, LLM timeouts, and partial failures without corrupting its state
+- A **belief system** — it forms hypotheses, accumulates evidence, retracts false assumptions, and updates its world model across turns
+- A **DAG scheduler** — it receives a dependency graph of tasks, tracks which steps are ready, dispatches sub-agents concurrently, and waits for results before proceeding
+- A **multi-tier memory architecture** — system context that never evicts, a sliding working memory window, and episodic storage for what overflows
+- A **probabilistic decision-maker** — every inference has a confidence attached, and whether to act, retry, or escalate depends on that confidence, not on whether the response parsed
 
-## Features
+Python solves this with 100,000 lines of infrastructure: Redis for state, Kafka for cross-agent communication, Pydantic for schema coercion, asyncio for concurrency, custom retry decorators, distributed tracing, and prompt templates scattered across a dozen modules. Every piece of this stack is external scaffolding compensating for a language that has no concept of any of it.
 
-*   **Custom Rust Bytecode VM**: Fast, sandboxed, stack-based execution.
-*   **Provider Agnostic via WASM Drivers**: LLM providers are isolated as pre-compiled WebAssembly drivers in `.turn_modules/`. Turn ships with drivers for **Anthropic**, **OpenAI**, **Google Gemini**, **xAI Grok**, **Ollama**, **Azure OpenAI**, and **Azure Anthropic** out of the box. Route to any provider via a single environment variable (`TURN_LLM_PROVIDER`). No bloated SDKs. No vendor lock-in.
-*   **Semantic Memory**: Built-in `remember` and `recall` for cross-session vector persistence.
-*   **Native Standard Library**: HTTP, Regex, JSON parsing, and File System operations built directly into the bytecode execution loop.
-*   **Native List Primitives**: `map(list, closure)` and `filter(list, closure)` are compiler-expanded into efficient inline bytecode — no imports, no libraries.
+**Turn solves it at the language and VM level.** These are not libraries. They are how the runtime works.
+
+---
+
+## What the VM Provides Natively
+
+### Actor Isolation with Linked Failure Propagation
+
+Every agent in Turn is an isolated process with its own stack, heap, and LLM context window. There is no shared state. `spawn_link` creates a dependency between two processes: when a child agent completes or fails, the parent receives an `ExitSignal` in its mailbox. The parent decides whether to retry, escalate, or compensate. This is not an async framework. It is the execution model.
+
+```turn
+let analyst_pid = spawn_link turn(task) {
+    let result = infer Analysis { task };
+    return result;
+};
+
+receive msg {
+    if msg.type == "exit" {
+        if msg.reason == "normal" { return msg.result; }
+        return handle_failure(msg.reason);
+    }
+}
+```
+
+### State as Immutable Epochs
+
+Turn enforces strict immutability. An agent's state is never mutated — every OODA cycle produces a new, complete state snapshot called an **epoch**. The struct spread operator (`..base`) makes this concise:
+
+```turn
+let next_state = WorkflowState {
+    processed_steps: updated_processed,
+    failed_steps: updated_failed,
+    ..current_state
+};
+```
+
+Because state is immutable and the VM checkpoints on every suspension, crash recovery is structural. The VM re-loads the last epoch and resumes from exactly where it left off. This is not a retry decorator. The language model makes it impossible for an agent to corrupt its own state.
+
+### Probabilistic Control Flow
+
+Every `infer` call returns an `Uncertain(value, confidence)` — a first-class VM type. Confidence propagates through arithmetic. You gate execution on it directly:
+
+```turn
+let decision = infer AgentDecision {
+    "Given this context, what is the next action?"
+};
+
+if confidence decision < 0.85 {
+    send supervisor_pid, { "type": "low_confidence_escalation", "context": state };
+    return null;
+}
+```
+
+This is not an if-statement around a try/catch. The `confidence` operator is a bytecode instruction. The VM enforces that uncertain values cannot be used as if they were certain without explicitly acknowledging the uncertainty.
+
+### Cognitive Type Safety
+
+Define a struct and call `infer`. The VM passes the schema to the LLM inference driver and guarantees the returned value matches that shape. No manual JSON parsing. No retry loop. If the value doesn't conform, the VM surfaces an error before your code ever touches the result.
+
+```turn
+struct BeliefUpdate {
+    new_facts: List<Str>,
+    retracted_assumptions: List<Str>,
+    confidence: Num
+};
+
+let update = infer BeliefUpdate {
+    "Review this evidence and update the belief state: " + evidence
+};
+```
+
+### Three-Tier Working Memory
+
+Every actor's runtime maintains a structured context window with three tiers: a system tier that never evicts, a working memory tier (sliding window, LRU), and an episodic tier that holds overflow. Context is isolated per actor. You manage it with `context.append()`:
+
+```turn
+context.append("Previous analysis: " + prior_result.summary);
+let next = infer Hypothesis { current_evidence };
+```
+
+This is not a list you pass to an API call. It is the actor's memory state, automatically prepended to every inference that actor makes.
+
+### DAG Scheduling and Sub-Agent Orchestration
+
+`spawn_each` delegates a list of tasks concurrently to independent actor instances. Combined with `spawn_link` and typed mailboxes, you implement full dependency-graph schedulers entirely in Turn:
+
+```turn
+let ready_steps = filter(workflow.steps, turn(step) {
+    return check_deps_met(step.dependencies, state.processed);
+});
+
+spawn_each ready_steps turn(step) {
+    send kernel_pid, { "type": "execute_step", "step": step };
+};
+```
+
+---
+
+## Provider Agnosticism via WASM Drivers
+
+LLM provider APIs change constantly. Turn does not track them. Every provider is an isolated WebAssembly module in `.turn_modules/` — a driver that translates a standard Turn inference request into that provider's HTTP format and normalises the response back.
+
+Turn ships with drivers for **Anthropic**, **OpenAI**, **Google Gemini**, **xAI Grok**, **Ollama**, **Azure OpenAI**, and **Azure Anthropic**. Set `TURN_LLM_PROVIDER` and the VM routes accordingly. If a provider changes their API, you update one `.wasm` file. The Turn compiler and VM are untouched.
+
+You can ship your own driver for any private or emerging model:
+
+```rust
+pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 { ... }
+pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 { ... }
+```
+
+Compile to `wasm32-unknown-unknown`, drop it in `.turn_modules/`, and Turn picks it up. See the `providers/` directory for reference implementations.
+
+---
 
 ## Quick Start
 
 ### Installation
 
-You can install the Turn CLI using Cargo:
-
 ```bash
 cargo install --git https://github.com/ekizito96/Turn turn
 ```
 
-### Writing Your First Agent
-
-Create a file named `hello.tn`:
+### Your First Agent
 
 ```turn
 struct Sentiment { score: Num, reasoning: Str };
 
 turn {
     let input = "I absolutely love building systems in Rust!";
-    
+
     let result = infer Sentiment {
         "Analyze the sentiment of the following text: " + input
     };
-    
+
     if confidence result < 0.8 {
-        call("echo", "Low confidence. Fallback triggered.");
+        call("echo", "Low confidence — escalating.");
         return null;
     }
-    
+
     call("echo", "Score: " + result.score);
     call("echo", "Reasoning: " + result.reasoning);
-    
+
     return result;
 }
 ```
 
-### Running the Agent
-
-Set your preferred provider and API key, then run the script:
+### Running It
 
 ```bash
 # OpenAI
 export TURN_LLM_PROVIDER=openai
-export OPENAI_API_KEY=sk-your-api-key
+export OPENAI_API_KEY=sk-your-key
 
 # Anthropic
 export TURN_LLM_PROVIDER=anthropic
@@ -86,7 +189,7 @@ export GEMINI_API_KEY=your-key
 export TURN_LLM_PROVIDER=grok
 export XAI_API_KEY=your-key
 
-# Ollama (no API key needed)
+# Ollama (local, no key required)
 export TURN_LLM_PROVIDER=ollama
 
 # Azure OpenAI
@@ -98,40 +201,21 @@ export AZURE_OPENAI_DEPLOYMENT=your-deployment-name
 turn run hello.tn
 ```
 
-## How Provider Routing Works
+---
 
-Turn uses a **WASM Driver Model** for all LLM inference. Each provider is a standalone `.wasm` file in `.turn_modules/`. When you call `infer`, the VM:
+## Examples
 
-1. Looks up `{TURN_LLM_PROVIDER}_provider.wasm` in `.turn_modules/`.
-2. Passes the structured Turn request into the WASM driver's `transform_request` function.
-3. The driver returns an HTTP config (URL, headers, body) — the host VM makes the actual HTTP call.
-4. The raw HTTP response is passed back into the driver's `transform_response` function.
-5. The driver normalises it to a standard Turn response.
+The `impl/examples/` directory contains multi-agent demonstrations:
 
-This means **Turn itself never needs to know about any LLM API**. If xAI changes their endpoint tomorrow, you update one 10KB `.wasm` file — the Turn compiler and VM are untouched.
+- [**Algorithmic Trading Syndicate**](impl/examples/quant_syndicate.tn): Three agents (Technical, Sentiment, Risk) run concurrently, debate a trade via mailboxes, and a Chairman agent executes the final decision with confidence gating.
+- [**Investment Committee**](impl/examples/investment_committee.tn): Specialist agents evaluate an equity position concurrently using live Yahoo Finance data.
+- [**Marketing Agency**](impl/examples/marketing_agency.tn): An SEO Specialist, Copywriter, and Creative Director collaborate to produce ad copy using Wikipedia research.
 
-### Writing a Custom Provider
-
-You can ship your own provider (e.g. for a private model or a new public LLM) by implementing two functions in any language that compiles to WASM:
-
-```rust
-// Your driver must export exactly these two functions:
-pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 { ... }
-pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 { ... }
-```
-
-Compile to `wasm32-unknown-unknown`, drop the `.wasm` into `.turn_modules/`, set `TURN_LLM_PROVIDER=your_provider_name`, and Turn will pick it up automatically. See the `providers/` directory for reference implementations.
-
-## Advanced Examples
-
-Check out the `impl/examples/` directory for production-grade multi-agent workflows:
-*   [**Algorithmic Trading Syndicate**](impl/examples/quant_syndicate.tn): Three autonomous agents (Technical, Sentiment, and Risk) debate a trade concurrently, and a Chairman executes the final decision.
-*   [**Investment Committee**](impl/examples/investment_committee.tn): Specialist agents evaluate a live equity position concurrently using Yahoo Finance data.
-*   [**Marketing Agency**](impl/examples/marketing_agency.tn): An SEO Specialist, Copywriter, and Creative Director collaborate to generate high-converting ad copy using Wikipedia research.
+---
 
 ## Documentation
 
-For a comprehensive guide to the language grammar, runtime model, and ecosystem bridges, visit the official documentation at [turn-lang.dev/docs](https://turn-lang.dev/docs).
+Full language reference, runtime model, and architecture guide at [turn-lang.dev/docs](https://turn-lang.dev/docs).
 
 ## License
 
