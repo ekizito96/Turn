@@ -21,7 +21,7 @@ An autonomous agent running a real workflow is:
 - A **multi-tier memory architecture** — system context that never evicts, a sliding working memory window, and episodic storage for what overflows
 - A **probabilistic decision-maker** — every inference has a confidence attached, and whether to act, retry, or escalate depends on that confidence, not on whether the response parsed
 
-Python solves this with 100,000 lines of infrastructure: Redis for state, Kafka for cross-agent communication, Pydantic for schema coercion, asyncio for concurrency, custom retry decorators, distributed tracing, and prompt templates scattered across a dozen modules. Every piece of this stack is external scaffolding compensating for a language that has no concept of any of it.
+The industry solution is to bolt external infrastructure onto a general-purpose language: external stores for state, message queues for agent communication, schema validators for LLM output coercion, async runtimes for concurrency, and retry logic scattered across every layer. The larger the system, the more infrastructure you add — and none of it solves the root problem. It compensates for a language that has no concept of what an agent is.
 
 **Turn solves it at the language and VM level.** These are not libraries. They are how the runtime works.
 
