@@ -4,7 +4,10 @@ use turn::value::Value;
 fn test_identity_capability_primitive() {
     // Configure the real token via the env var convention.
     // TURN_IDENTITY_<PROVIDER_UPPERCASED>_TOKEN
-    std::env::set_var("TURN_IDENTITY_GOOGLE_WORKSPACE_TOKEN", "test_bearer_token_12345");
+    std::env::set_var(
+        "TURN_IDENTITY_GOOGLE_WORKSPACE_TOKEN",
+        "test_bearer_token_12345",
+    );
 
     let source = r#"
     // The agent requests a secure identity capability.
@@ -24,7 +27,7 @@ fn test_identity_capability_primitive() {
 
     let result = turn::run(source).expect("Run failed");
 
-    // httpbin.org/bearer returns {"authenticated": true, "token": "..."} 
+    // httpbin.org/bearer returns {"authenticated": true, "token": "..."}
     // when a valid Bearer token is sent.
     if let Value::Str(s) = result {
         println!("HTTP Response: {}", s);

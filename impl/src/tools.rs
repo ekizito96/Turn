@@ -145,7 +145,11 @@ impl ToolRegistry {
                         };
                         (u, i)
                     }
-                    _ => return Err("Argument must be a string URL or Map {url, identity?}".to_string()),
+                    _ => {
+                        return Err(
+                            "Argument must be a string URL or Map {url, identity?}".to_string()
+                        )
+                    }
                 };
 
                 let client = reqwest::blocking::Client::builder()
@@ -167,10 +171,12 @@ impl ToolRegistry {
                     );
                     match std::env::var(&env_key) {
                         Ok(token) => req = req.bearer_auth(token),
-                        Err(_) => return Err(format!(
-                            "Identity '{}' is not configured. Set the {} environment variable.",
-                            id, env_key
-                        )),
+                        Err(_) => {
+                            return Err(format!(
+                                "Identity '{}' is not configured. Set the {} environment variable.",
+                                id, env_key
+                            ))
+                        }
                     }
                 }
 
@@ -225,10 +231,12 @@ impl ToolRegistry {
                     );
                     match std::env::var(&env_key) {
                         Ok(token) => req = req.bearer_auth(token),
-                        Err(_) => return Err(format!(
-                            "Identity '{}' is not configured. Set the {} environment variable.",
-                            id, env_key
-                        )),
+                        Err(_) => {
+                            return Err(format!(
+                                "Identity '{}' is not configured. Set the {} environment variable.",
+                                id, env_key
+                            ))
+                        }
                     }
                 }
 
@@ -487,12 +495,10 @@ impl ToolRegistry {
 
                     if provider == "mock" {
                         let schema_type = match schema {
-                            Value::Map(m) => {
-                                m.get("type").and_then(|v| match v {
-                                    Value::Str(s) => Some(s.as_str()),
-                                    _ => None,
-                                })
-                            },
+                            Value::Map(m) => m.get("type").and_then(|v| match v {
+                                Value::Str(s) => Some(s.as_str()),
+                                _ => None,
+                            }),
                             Value::Str(s) => Some(s.as_str()),
                             _ => None,
                         };
@@ -619,8 +625,13 @@ impl ToolRegistry {
                                             .unwrap_or(0);
 
                                         let struct_name = if let Value::Map(ref sm) = *schema {
-                                            sm.get("title")
-                                                .and_then(|v| if let Value::Str(s) = v { Some(s.clone()) } else { None })
+                                            sm.get("title").and_then(|v| {
+                                                if let Value::Str(s) = v {
+                                                    Some(s.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
                                         } else {
                                             None
                                         };

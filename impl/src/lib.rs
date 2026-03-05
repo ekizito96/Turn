@@ -7,12 +7,12 @@ pub mod lsp;
 pub mod parser;
 pub mod runner;
 pub mod runtime;
+pub mod schema_compiler;
 pub mod server;
 pub mod std_lib;
 pub mod store;
 pub mod tools;
 pub mod wasm_host;
-pub mod schema_compiler;
 
 pub mod value;
 pub mod vm;
@@ -111,7 +111,8 @@ pub fn run_with_tools(
 
                 if tool_name == "sys_schema_adapter" {
                     let res = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(crate::schema_compiler::expand_schema_macro(arg))
+                        tokio::runtime::Handle::current()
+                            .block_on(crate::schema_compiler::expand_schema_macro(arg))
                     });
                     match res {
                         Ok(module_val) => vm = vm::Vm::resume_with_result(continuation, module_val),

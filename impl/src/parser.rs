@@ -782,24 +782,22 @@ impl Parser {
             Token::Use => {
                 // Check if this is a schema import macro: `use schema::openapi("url")`
                 if let Some(Token::Id(id)) = self.peek() {
-                    if id == "schema" {
-                        if matches!(self.peek_at(1), Some(Token::DoubleColon)) {
-                            self.next(); // consume `schema`
-                            self.next(); // consume `::`
-                            let protocol_token = self.next().ok_or(ParseError::UnexpectedEof)?;
-                            let protocol = match protocol_token.token {
-                                Token::Id(p) => p,
-                                _ => return Err(ParseError::UnexpectedToken(protocol_token.span)),
-                            };
-                            self.expect(Token::LParen)?;
-                            let url_expr = self.parse_expr()?;
-                            self.expect(Token::RParen)?;
-                            return Ok(Expr::UseSchema {
-                                protocol,
-                                url: Box::new(url_expr),
-                                span,
-                            });
-                        }
+                    if id == "schema" && matches!(self.peek_at(1), Some(Token::DoubleColon)) {
+                        self.next(); // consume `schema`
+                        self.next(); // consume `::`
+                        let protocol_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                        let protocol = match protocol_token.token {
+                            Token::Id(p) => p,
+                            _ => return Err(ParseError::UnexpectedToken(protocol_token.span)),
+                        };
+                        self.expect(Token::LParen)?;
+                        let url_expr = self.parse_expr()?;
+                        self.expect(Token::RParen)?;
+                        return Ok(Expr::UseSchema {
+                            protocol,
+                            url: Box::new(url_expr),
+                            span,
+                        });
                     }
                 }
 
@@ -810,31 +808,24 @@ impl Parser {
                 })
             }
             Token::Grant => {
-                // syntax: grant identity::oauth("google")
                 if let Some(Token::Id(id)) = self.peek() {
-                    if id == "identity" {
-                        if matches!(self.peek_at(1), Some(Token::DoubleColon)) {
-                            self.next(); // consume `identity`
-                            self.next(); // consume `::`
-                            
-                            // consume `oauth` or `apikey`
-                            let _auth_type = self.next().ok_or(ParseError::UnexpectedEof)?;
-                            
-                            self.expect(Token::LParen)?;
-                            let provider_token = self.next().ok_or(ParseError::UnexpectedEof)?;
-                            let provider = match provider_token.token {
-                                Token::Str(p) => p,
-                                _ => return Err(ParseError::UnexpectedToken(provider_token.span)),
-                            };
-                            self.expect(Token::RParen)?;
-                            return Ok(Expr::Grant {
-                                provider,
-                                span,
-                            });
-                        }
+                    if id == "identity" && matches!(self.peek_at(1), Some(Token::DoubleColon)) {
+                        self.next(); // consume `identity`
+                        self.next(); // consume `::`
+
+                        let _auth_type = self.next().ok_or(ParseError::UnexpectedEof)?;
+
+                        self.expect(Token::LParen)?;
+                        let provider_token = self.next().ok_or(ParseError::UnexpectedEof)?;
+                        let provider = match provider_token.token {
+                            Token::Str(p) => p,
+                            _ => return Err(ParseError::UnexpectedToken(provider_token.span)),
+                        };
+                        self.expect(Token::RParen)?;
+                        return Ok(Expr::Grant { provider, span });
                     }
                 }
-                return Err(ParseError::UnexpectedToken(span));
+                Err(ParseError::UnexpectedToken(span))
             }
             Token::Receive => Ok(Expr::Receive { span }),
             Token::Vec => {

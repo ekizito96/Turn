@@ -25,7 +25,7 @@ pub enum Value {
     },
     Pid(u64), // Process ID
     Vec(Vec<f64>),
-    Identity(String), // Cryptographic Capability Handle
+    Identity(String),           // Cryptographic Capability Handle
     Uncertain(Box<Value>, f64), // Value, Confidence (0.0 - 1.0)
 }
 
