@@ -522,57 +522,60 @@ impl ToolRegistry {
                                             serde_json::from_str(&json_res)
                                                 .unwrap_or(serde_json::Value::Null);
 
-                                        // If it's an error from the driver
                                         if let Some(err) = parsed.get("error") {
-                                            return Err(format!("WASM Driver Error: {}", err));
+                                            if !err.is_null() {
+                                                return Err(format!("WASM Driver Error: {}", err));
+                                            }
                                         }
 
-                                        // WASM provides standard OpenAI format output
-                                        let content = parsed["choices"][0]["message"]["content"]
-                                            .as_str()
-                                            .unwrap_or("{}");
-                                        let tokens =
-                                            parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                                        // WASM drivers return JSON-RPC: {"result": <value>}
+                                        // Extract the result, falling back to legacy format
+                                        let raw_json = if let Some(result) = parsed.get("result") {
+                                            result.clone()
+                                        } else if let Some(content_str) = parsed
+                                            .pointer("/choices/0/message/content")
+                                            .and_then(|c| c.as_str())
+                                        {
+                                            serde_json::from_str(content_str).unwrap_or_else(|_| {
+                                                let cleaned = content_str
+                                                    .trim()
+                                                    .trim_start_matches("```json")
+                                                    .trim_start_matches("```")
+                                                    .trim_end_matches("```")
+                                                    .trim();
+                                                serde_json::from_str(cleaned)
+                                                    .unwrap_or(serde_json::Value::Null)
+                                            })
+                                        } else {
+                                            serde_json::Value::Null
+                                        };
 
-                                        let raw_json: serde_json::Value =
-                                            match serde_json::from_str(content) {
-                                                Ok(v) => v,
-                                                Err(_) => {
-                                                    let cleaned = content
-                                                        .trim()
-                                                        .trim_start_matches("```json")
-                                                        .trim_start_matches("```")
-                                                        .trim_end_matches("```")
-                                                        .trim();
-                                                    serde_json::from_str(cleaned)
-                                                        .unwrap_or(serde_json::Value::Null)
-                                                }
-                                            };
+                                        let tokens = parsed
+                                            .pointer("/usage/total_tokens")
+                                            .and_then(|t| t.as_u64())
+                                            .unwrap_or(0);
 
-                                        let turn_val = if let Value::Str(s) = schema {
-                                            if s.contains("Struct") {
-                                                match raw_json {
-                                                    serde_json::Value::Object(map) => {
-                                                        let mut fields = indexmap::IndexMap::new();
-                                                        for (k, v) in map {
-                                                            let tv: Value =
-                                                                serde_json::from_value(v.clone())
-                                                                    .unwrap_or(Value::Null);
-                                                            fields.insert(k.clone(), tv);
-                                                        }
-                                                        let name = s
-                                                            .split('"')
-                                                            .nth(1)
-                                                            .unwrap_or("Anon")
-                                                            .to_string();
-                                                        Value::Struct(name, fields)
+                                        let struct_name = if let Value::Map(ref sm) = *schema {
+                                            sm.get("title")
+                                                .and_then(|v| if let Value::Str(s) = v { Some(s.clone()) } else { None })
+                                        } else {
+                                            None
+                                        };
+
+                                        let turn_val = if let Some(name) = struct_name {
+                                            match raw_json {
+                                                serde_json::Value::Object(map) => {
+                                                    let mut fields = indexmap::IndexMap::new();
+                                                    for (k, v) in map {
+                                                        let tv: Value =
+                                                            serde_json::from_value(v.clone())
+                                                                .unwrap_or(Value::Null);
+                                                        fields.insert(k.clone(), tv);
                                                     }
-                                                    _ => serde_json::from_value(raw_json)
-                                                        .unwrap_or(Value::Null),
+                                                    Value::Struct(name, fields)
                                                 }
-                                            } else {
-                                                serde_json::from_value(raw_json)
-                                                    .unwrap_or(Value::Null)
+                                                _ => serde_json::from_value(raw_json)
+                                                    .unwrap_or(Value::Null),
                                             }
                                         } else {
                                             serde_json::from_value(raw_json).unwrap_or(Value::Null)

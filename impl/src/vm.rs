@@ -7,6 +7,63 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+fn type_to_json_schema(ty: &Type) -> Value {
+    match ty {
+        Type::Num => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("number".to_string()));
+            m
+        }),
+        Type::Str => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("string".to_string()));
+            m
+        }),
+        Type::Bool => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("boolean".to_string()));
+            m
+        }),
+        Type::List(_) => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("array".to_string()));
+            m
+        }),
+        Type::Map(_) => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("object".to_string()));
+            m
+        }),
+        Type::Any | Type::Void => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("any".to_string()));
+            m
+        }),
+        Type::Struct(name, fields) => {
+            let mut props = IndexMap::new();
+            let mut required = Vec::new();
+            for (fname, ftype) in fields.iter() {
+                props.insert(fname.clone(), type_to_json_schema(ftype));
+                required.push(Value::Str(fname.clone()));
+            }
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("object".to_string()));
+            m.insert("properties".to_string(), Value::Map(props));
+            m.insert("required".to_string(), Value::List(required));
+            m.insert("additionalProperties".to_string(), Value::Bool(false));
+            if !name.is_empty() {
+                m.insert("title".to_string(), Value::Str(name.clone()));
+            }
+            Value::Map(m)
+        }
+        _ => Value::Map({
+            let mut m = IndexMap::new();
+            m.insert("type".to_string(), Value::Str("any".to_string()));
+            m
+        }),
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Frame {
     pub code: Arc<Vec<Instr>>,
@@ -477,11 +534,11 @@ impl Vm {
                         }
                         other => other,
                     };
-                    let ty_str = format!("{:?}", resolved_ty);
+                    let schema_val = type_to_json_schema(&resolved_ty);
 
                     let mut map = IndexMap::new();
                     map.insert("prompt".to_string(), prompt_val);
-                    map.insert("schema".to_string(), Value::Str(ty_str));
+                    map.insert("schema".to_string(), schema_val);
                     map.insert(
                         "context".to_string(),
                         Value::List(process.runtime.context.to_flat_vec()),
