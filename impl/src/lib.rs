@@ -11,6 +11,8 @@ pub mod server;
 pub mod std_lib;
 pub mod store;
 pub mod tools;
+pub mod wasm_host;
+
 pub mod value;
 pub mod vm;
 

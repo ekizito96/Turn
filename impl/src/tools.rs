@@ -346,6 +346,63 @@ fn call_llm_dispatch(
     let env_model = env::var("TURN_LLM_MODEL").ok();
     let model = model_hint.or(env_model.as_deref());
 
+    // 1. Try WASM Provider first
+    let wasm_file = format!("{}_provider.wasm", provider);
+    let mut wasm_path = std::path::Path::new(".turn_modules").join(&wasm_file);
+    if !wasm_path.exists() {
+        let mut p = std::env::current_dir().unwrap_or_default();
+        for _ in 0..10 {
+            let check = p.join(".turn_modules").join(&wasm_file);
+            if check.exists() {
+                wasm_path = check;
+                break;
+            }
+            if !p.pop() {
+                break;
+            }
+        }
+    }
+
+    if wasm_path.exists() {
+        println!("🔌 Using WASM Inference Driver: {}", wasm_path.display());
+        let mut payload = serde_json::json!({
+            "messages": messages
+        });
+        if let Some(m) = model {
+            payload["model"] = serde_json::json!(m);
+        }
+        
+        match crate::wasm_host::WasmProvider::new(&wasm_path) {
+            Ok(wasm_provider) => {
+                match wasm_provider.execute_inference(&payload.to_string()) {
+                    Ok(json_res) => {
+                        // WASM provides standard OpenAI format output
+                        let parsed: serde_json::Value = serde_json::from_str(&json_res).unwrap_or(serde_json::Value::Null);
+                        
+                        // Handle standard OpenAI completion response
+                        if let Some(content) = parsed["choices"][0]["message"]["content"].as_str() {
+                            let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                            return Ok((content.to_string(), tokens));
+                        }
+                        
+                        // Handle raw string response (some older WASM modules might just return the content)
+                        if let Some(content) = parsed.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                             let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                             return Ok((content.to_string(), tokens));
+                        }
+                        
+                        return Err(format!("Invalid response format from WASM provider: {}", json_res));
+                    },
+                    Err(e) => return Err(format!("WASM Execution failed: {}", e))
+                }
+            },
+            Err(e) => return Err(format!("Failed to load WASM provider: {}", e))
+        }
+    }
+
+    // 2. Native HTTP Fallback (Anti-Pattern)
+    println!("⚠️ Warning: WASM driver '{}' not found. Using native Rust HTTP fallback. This is an anti-pattern!", wasm_file);
+
     match provider.as_str() {
         "azure" => {
             let api_key = env::var("AZURE_OPENAI_KEY")
@@ -787,6 +844,107 @@ impl ToolRegistry {
                      let schema = m.get("schema").unwrap_or(&Value::Null);
                      let prompt = m.get("prompt").unwrap_or(&Value::Null);
                      let context = m.get("context").unwrap_or(&Value::Null);
+
+                     // 1. Try WASM Provider first (The Architecturally Correct Way)
+                     let provider = env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
+                     
+                     if provider == "mock" {
+                         let map = indexmap::IndexMap::new();
+                         let mock_val = Value::Struct("Mock".to_string(), map);
+                         return Ok((Value::Uncertain(Box::new(mock_val), 1.0), 10));
+                     }
+
+                     let wasm_file = format!("{}_provider.wasm", provider);
+                     let mut wasm_path = std::path::Path::new(".turn_modules").join(&wasm_file);
+
+                     if !wasm_path.exists() {
+                         let mut p = std::env::current_dir().unwrap_or_default();
+                         for _ in 0..10 {
+                             let check = p.join(".turn_modules").join(&wasm_file);
+                             if check.exists() {
+                                 wasm_path = check;
+                                 break;
+                             }
+                             if !p.pop() { break; }
+                         }
+                     }
+
+                     if wasm_path.exists() {
+                         println!("🔌 Using WASM Inference Driver: {}", wasm_path.display());
+                         
+                         // WASM drivers expect a JSON-RPC TurnInferRequest matching the exact inputs
+                         let mut params = serde_json::Map::new();
+                         params.insert("prompt".to_string(), serde_json::to_value(prompt).unwrap_or(serde_json::Value::Null));
+                         params.insert("schema".to_string(), serde_json::to_value(schema).unwrap_or(serde_json::Value::Null));
+                         params.insert("context".to_string(), serde_json::to_value(context).unwrap_or(serde_json::json!([])));
+                         if let Some(tools_val) = m.get("tools") {
+                             params.insert("tools".to_string(), serde_json::to_value(tools_val).unwrap_or(serde_json::json!([])));
+                         } else {
+                             params.insert("tools".to_string(), serde_json::json!([]));
+                         }
+
+                         let req = serde_json::json!({
+                             "jsonrpc": "2.0",
+                             "method": "llm_infer",
+                             "params": params,
+                             "id": 1
+                         });
+
+                         match crate::wasm_host::WasmProvider::new(&wasm_path) {
+                             Ok(wasm_provider) => {
+                                 match wasm_provider.execute_inference(&req.to_string()) {
+                                     Ok(json_res) => {
+                                         let parsed: serde_json::Value = serde_json::from_str(&json_res).unwrap_or(serde_json::Value::Null);
+                                         
+                                         // If it's an error from the driver
+                                         if let Some(err) = parsed.get("error") {
+                                             return Err(format!("WASM Driver Error: {}", err));
+                                         }
+                                         
+                                         // WASM provides standard OpenAI format output
+                                         let content = parsed["choices"][0]["message"]["content"].as_str().unwrap_or("{}");
+                                         let tokens = parsed["usage"]["total_tokens"].as_u64().unwrap_or(0);
+                                         
+                                         let raw_json: serde_json::Value = match serde_json::from_str(content) {
+                                             Ok(v) => v,
+                                             Err(_) => {
+                                                 let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+                                                 serde_json::from_str(cleaned).unwrap_or(serde_json::Value::Null)
+                                             }
+                                         };
+                                         
+                                         let turn_val = if let Value::Str(s) = schema {
+                                             if s.contains("Struct") {
+                                                 match raw_json {
+                                                     serde_json::Value::Object(map) => {
+                                                         let mut fields = indexmap::IndexMap::new();
+                                                         for (k, v) in map {
+                                                             let tv: Value = serde_json::from_value(v.clone()).unwrap_or(Value::Null);
+                                                             fields.insert(k.clone(), tv);
+                                                         }
+                                                         let name = s.split('"').nth(1).unwrap_or("Anon").to_string();
+                                                         Value::Struct(name, fields)
+                                                     },
+                                                     _ => serde_json::from_value(raw_json).unwrap_or(Value::Null)
+                                                 }
+                                             } else {
+                                                 serde_json::from_value(raw_json).unwrap_or(Value::Null)
+                                             }
+                                         } else {
+                                             serde_json::from_value(raw_json).unwrap_or(Value::Null)
+                                         };
+                                         
+                                         return Ok((Value::Uncertain(Box::new(turn_val), 0.95), tokens));
+                                     },
+                                     Err(e) => return Err(format!("WASM Execution failed: {}", e))
+                                 }
+                             },
+                             Err(e) => return Err(format!("Failed to load WASM provider: {}", e))
+                         }
+                     }
+
+                     // 2. Native HTTP Fallback (Anti-Pattern)
+                     println!("⚠️ Warning: WASM driver '{}' not found. Using native Rust HTTP fallback. This is an anti-pattern!", wasm_file);
 
                      let mut msgs = Vec::new();
 
