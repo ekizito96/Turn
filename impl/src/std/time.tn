@@ -1,0 +1,14 @@
+// Turn Standard Library: Time
+
+let now = turn() {
+    return call("__sys_time_now", null);
+};
+
+let sleep = turn(seconds: Num) {
+    return call("__sys_sleep", seconds);
+};
+
+return {
+    "now": now,
+    "sleep": sleep
+};

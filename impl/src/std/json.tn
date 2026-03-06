@@ -1,0 +1,14 @@
+// Turn Standard Library: JSON
+
+let parse = turn(text: Str) {
+    return call("__sys_json_parse", text);
+};
+
+let stringify = turn(data: Any) {
+    return call("__sys_json_stringify", data);
+};
+
+return {
+    "parse": parse,
+    "stringify": stringify
+};

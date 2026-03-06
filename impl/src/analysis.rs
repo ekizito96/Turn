@@ -6,14 +6,14 @@ use std::collections::HashMap;
 // --- Standard Library Signatures ---
 fn get_stdlib_signatures() -> HashMap<String, Type> {
     let mut map = HashMap::new();
-    // fs_read: (Str) -> Str
+    // __sys_fs_read: (Str) -> Str
     map.insert(
-        "fs_read".to_string(),
+        "__sys_fs_read".to_string(),
         Type::Function(Box::new(Type::Str), Box::new(Type::Str)),
     );
-    // fs_write: (Map<Str>) -> Void
+    // __sys_fs_write: (Map<Str>) -> Void
     map.insert(
-        "fs_write".to_string(),
+        "__sys_fs_write".to_string(),
         Type::Function(
             Box::new(Type::Map(Box::new(Type::Str))),
             Box::new(Type::Void),
@@ -24,45 +24,45 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
         "echo".to_string(),
         Type::Function(Box::new(Type::Any), Box::new(Type::Any)),
     );
-    // sleep: (Num) -> Void
+    // __sys_sleep: (Num) -> Void
     map.insert(
-        "sleep".to_string(),
+        "__sys_sleep".to_string(),
         Type::Function(Box::new(Type::Num), Box::new(Type::Void)),
     );
-    // env_get: (Str) -> Str (or Null, essentially Str/Null but we treat as Str)
+    // __sys_env_get: (Str) -> Str (or Null, essentially Str/Null but we treat as Str)
     map.insert(
-        "env_get".to_string(),
+        "__sys_env_get".to_string(),
         Type::Function(Box::new(Type::Str), Box::new(Type::Str)),
     );
-    // env_set: (Map<Str>) -> Void
+    // __sys_env_set: (Map<Str>) -> Void
     map.insert(
-        "env_set".to_string(),
+        "__sys_env_set".to_string(),
         Type::Function(
             Box::new(Type::Map(Box::new(Type::Str))),
             Box::new(Type::Void),
         ),
     );
-    // http_get: (Str) -> Str
+    // __sys_http_get: (Str) -> Str
     map.insert(
-        "http_get".to_string(),
+        "__sys_http_get".to_string(),
         Type::Function(Box::new(Type::Str), Box::new(Type::Str)),
     );
-    // http_post: (Map<Any>) -> Str
+    // __sys_http_post: (Map<Any>) -> Str
     map.insert(
-        "http_post".to_string(),
+        "__sys_http_post".to_string(),
         Type::Function(
             Box::new(Type::Map(Box::new(Type::Any))),
             Box::new(Type::Str),
         ),
     );
-    // json_parse: (Str) -> Any
+    // __sys_json_parse: (Str) -> Any
     map.insert(
-        "json_parse".to_string(),
+        "__sys_json_parse".to_string(),
         Type::Function(Box::new(Type::Str), Box::new(Type::Any)),
     );
-    // json_stringify: (Any) -> Str
+    // __sys_json_stringify: (Any) -> Str
     map.insert(
-        "json_stringify".to_string(),
+        "__sys_json_stringify".to_string(),
         Type::Function(Box::new(Type::Any), Box::new(Type::Str)),
     );
     // fs_list: (Str) -> List<Str>
@@ -73,22 +73,22 @@ fn get_stdlib_signatures() -> HashMap<String, Type> {
             Box::new(Type::List(Box::new(Type::Str))),
         ),
     );
-    // time_now: (Any) -> Num
+    // __sys_time_now: (Any) -> Num
     map.insert(
-        "time_now".to_string(),
+        "__sys_time_now".to_string(),
         Type::Function(Box::new(Type::Any), Box::new(Type::Num)),
     );
-    // regex_match: (Map<Str>) -> Bool
+    // __sys_regex_match: (Map<Str>) -> Bool
     map.insert(
-        "regex_match".to_string(),
+        "__sys_regex_match".to_string(),
         Type::Function(
             Box::new(Type::Map(Box::new(Type::Str))),
             Box::new(Type::Bool),
         ),
     );
-    // regex_replace: (Map<Str>) -> Str
+    // __sys_regex_replace: (Map<Str>) -> Str
     map.insert(
-        "regex_replace".to_string(),
+        "__sys_regex_replace".to_string(),
         Type::Function(
             Box::new(Type::Map(Box::new(Type::Str))),
             Box::new(Type::Str),

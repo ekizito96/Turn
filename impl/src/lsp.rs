@@ -292,7 +292,7 @@ impl Backend {
         };
 
         // 2. Parsing
-        let program = match Parser::new(tokens).parse() {
+        let mut program = match Parser::new(tokens).parse() {
             Ok(p) => p,
             Err(e) => {
                 let offset = e.offset();
@@ -327,6 +327,35 @@ impl Backend {
                 return;
             }
         };
+
+        // 2.5 Macro Expansion (for schemas)
+        if let Err(e) = crate::schema_compiler::expand_ast(&mut program) {
+            let diagnostic = Diagnostic {
+                range: Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 1,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("turn-macro".to_string()),
+                message: format!("Macro expansion failed: {}", e),
+                related_information: None,
+                tags: None,
+                data: None,
+            };
+            diagnostics.push(diagnostic);
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
+            return;
+        }
 
         // 3. Analysis
         let mut analysis = Analysis::new();

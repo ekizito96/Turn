@@ -1,0 +1,25 @@
+// Turn Standard Library: FS (File System)
+// Provides secure, capability-gated file system access.
+
+let read = turn(params: Map) {
+    let identity = params["identity"];
+    if identity == null {
+        throw "Security Error: Missing filesystem identity grant.";
+    }
+    
+    return call("__sys_fs_read", params);
+};
+
+let write = turn(params: Map) {
+    let identity = params["identity"];
+    if identity == null {
+        throw "Security Error: Missing filesystem identity grant.";
+    }
+    
+    return call("__sys_fs_write", params);
+};
+
+return {
+    "read": read,
+    "write": write
+};

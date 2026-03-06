@@ -13,8 +13,8 @@ fn analyze(source: &str) -> Analysis {
 #[test]
 fn test_stdlib_return_types() {
     let source = r#"
-    let content: Str = call("fs_read", "file.txt");
-    let json: Any = call("json_parse", content);
+    let content: Str = call("__sys_fs_read", "file.txt");
+    let json: Any = call("__sys_json_parse", content);
     "#;
     let analysis = analyze(source);
     assert!(analysis.diagnostics.is_empty());
@@ -23,7 +23,7 @@ fn test_stdlib_return_types() {
 #[test]
 fn test_stdlib_type_mismatch() {
     let source = r#"
-    let content: Num = call("fs_read", "file.txt");
+    let content: Num = call("__sys_fs_read", "file.txt");
     "#;
     let analysis = analyze(source);
     assert!(!analysis.diagnostics.is_empty());

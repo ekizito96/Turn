@@ -1,0 +1,18 @@
+// Turn Standard Library: Regex
+
+let matches = turn(pattern: Str, text: Str) {
+    return call("__sys_regex_match", { "pattern": pattern, "text": text });
+};
+
+let replace = turn(pattern: Str, text: Str, replacement: Str) {
+    return call("__sys_regex_replace", { 
+        "pattern": pattern, 
+        "text": text,
+        "replacement": replacement 
+    });
+};
+
+return {
+    "matches": matches,
+    "replace": replace
+};

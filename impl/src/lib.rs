@@ -87,7 +87,12 @@ pub fn run_with_tools(
     tools: &tools::ToolRegistry,
 ) -> Result<value::Value, Box<dyn std::error::Error>> {
     let tokens = lexer::Lexer::new(source).tokenize()?;
-    let program = parser::Parser::new(tokens).parse()?;
+    let mut program = parser::Parser::new(tokens).parse()?;
+
+    // Pass 1: Macro Expansion (Zero-Context deep static analysis for schemas)
+    crate::schema_compiler::expand_ast(&mut program)?;
+
+    // Pass 2: Compilation
     let mut compiler = compiler::Compiler::new();
     let code = compiler.compile(&program);
     let mut vm = vm::Vm::new(&code);
@@ -99,6 +104,31 @@ pub fn run_with_tools(
                 arg,
                 continuation,
             } => {
+                if tool_name == "sys_import" {
+                    if let value::Value::Str(path) = arg {
+                        if let Some(source) = crate::std_lib::get_module_source(&path) {
+                            match run_with_tools(source, tools) {
+                                Ok(module_val) => {
+                                    vm = vm::Vm::resume_with_result(continuation, module_val);
+                                }
+                                Err(e) => {
+                                    vm = vm::Vm::resume_with_error(
+                                        continuation,
+                                        format!("Failed to load std module {}: {}", path, e),
+                                    );
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    vm = vm::Vm::resume_with_error(
+                        continuation,
+                        "Module import only supported for std lib in standalone run_with_tools"
+                            .to_string(),
+                    );
+                    continue;
+                }
+
                 if tool_name == "sys_grant" {
                     let provider_id = match arg {
                         value::Value::Str(s) => s,
@@ -106,18 +136,6 @@ pub fn run_with_tools(
                     };
                     let identity_cap = value::Value::Identity(provider_id);
                     vm = vm::Vm::resume_with_result(continuation, identity_cap);
-                    continue;
-                }
-
-                if tool_name == "sys_schema_adapter" {
-                    let res = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current()
-                            .block_on(crate::schema_compiler::expand_schema_macro(arg))
-                    });
-                    match res {
-                        Ok(module_val) => vm = vm::Vm::resume_with_result(continuation, module_val),
-                        Err(e) => vm = vm::Vm::resume_with_error(continuation, e.to_string()),
-                    }
                     continue;
                 }
 

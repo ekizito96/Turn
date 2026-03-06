@@ -1,0 +1,19 @@
+// Turn Standard Library: Math
+
+let max = turn(a: Num, b: Num) {
+    if a > b { return a; } else { return b; }
+};
+
+let min = turn(a: Num, b: Num) {
+    if a < b { return a; } else { return b; }
+};
+
+let abs = turn(n: Num) {
+    if n < 0 { return -n; } else { return n; }
+};
+
+return {
+    "max": max,
+    "min": min,
+    "abs": abs
+};

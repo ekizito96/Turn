@@ -34,9 +34,9 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // sleep
+        // __sys_sleep
         tools.insert(
-            "sleep".to_string(),
+            "__sys_sleep".to_string(),
             Box::new(|arg| {
                 let seconds = match arg {
                     Value::Num(n) => n,
@@ -49,13 +49,23 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // fs_read
+        // __sys_fs_read (Kernel Trap)
         tools.insert(
-            "fs_read".to_string(),
+            "__sys_fs_read".to_string(),
             Box::new(|arg| {
                 let path = match arg {
-                    Value::Str(s) => s,
-                    _ => return Err("Argument must be a string path".to_string()),
+                    Value::Map(m) => {
+                        // Kernel-level capability check
+                        match m.get("identity") {
+                            Some(Value::Identity(id)) if id == "filesystem" => {}
+                            _ => return Err("Security Error: Kernel requires 'filesystem' identity grant for fs_read".to_string()),
+                        }
+                        match m.get("path") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'path' in argument map".to_string()),
+                        }
+                    }
+                    _ => return Err("Argument must be a map {path, identity}".to_string()),
                 };
                 match fs::read_to_string(&path) {
                     Ok(content) => Ok((Value::Str(content), 0u64)),
@@ -64,12 +74,17 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // fs_write
+        // __sys_fs_write (Kernel Trap)
         tools.insert(
-            "fs_write".to_string(),
+            "__sys_fs_write".to_string(),
             Box::new(|arg| {
                 let (path, content) = match arg {
                     Value::Map(m) => {
+                        // Kernel-level capability check
+                        match m.get("identity") {
+                            Some(Value::Identity(id)) if id == "filesystem" => {}
+                            _ => return Err("Security Error: Kernel requires 'filesystem' identity grant for fs_write".to_string()),
+                        }
                         let path = match m.get("path") {
                             Some(Value::Str(s)) => s.clone(),
                             _ => return Err("Missing 'path' in argument map".to_string()),
@@ -80,7 +95,7 @@ impl ToolRegistry {
                         };
                         (path, content)
                     }
-                    _ => return Err("Argument must be a map {path, content}".to_string()),
+                    _ => return Err("Argument must be a map {path, content, identity}".to_string()),
                 };
 
                 match fs::write(&path, &content) {
@@ -92,11 +107,21 @@ impl ToolRegistry {
 
         // env_ge
         tools.insert(
-            "env_get".to_string(),
+            "__sys_env_get".to_string(),
             Box::new(|arg| {
                 let key = match arg {
-                    Value::Str(s) => s,
-                    _ => return Err("Argument must be a string key".to_string()),
+                    Value::Map(m) => {
+                        // Kernel-level capability check
+                        match m.get("identity") {
+                            Some(Value::Identity(id)) if id == "environment" => {}
+                            _ => return Err("Security Error: Kernel requires 'environment' identity grant for env_get".to_string()),
+                        }
+                        match m.get("key") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err("Missing 'key' in argument map".to_string()),
+                        }
+                    }
+                    _ => return Err("Argument must be a map {key, identity}".to_string()),
                 };
                 match env::var(&key) {
                     Ok(val) => Ok((Value::Str(val), 0u64)),
@@ -107,10 +132,15 @@ impl ToolRegistry {
 
         // env_se
         tools.insert(
-            "env_set".to_string(),
+            "__sys_env_set".to_string(),
             Box::new(|arg| {
                 let (key, val) = match arg {
                     Value::Map(m) => {
+                        // Kernel-level capability check
+                        match m.get("identity") {
+                            Some(Value::Identity(id)) if id == "environment" => {}
+                            _ => return Err("Security Error: Kernel requires 'environment' identity grant for env_set".to_string()),
+                        }
                         let k = match m.get("key") {
                             Some(Value::Str(s)) => s.clone(),
                             _ => return Err("Missing 'key' in argument map".to_string()),
@@ -121,7 +151,7 @@ impl ToolRegistry {
                         };
                         (k, v)
                     }
-                    _ => return Err("Argument must be a map {key, value}".to_string()),
+                    _ => return Err("Argument must be a map {key, value, identity}".to_string()),
                 };
                 env::set_var(key, val);
                 Ok((Value::Null, 0u64))
@@ -130,26 +160,21 @@ impl ToolRegistry {
 
         // http_ge
         tools.insert(
-            "http_get".to_string(),
+            "__sys_http_get".to_string(),
             Box::new(|arg| {
                 let (url, identity) = match arg {
-                    Value::Str(s) => (s, None),
                     Value::Map(m) => {
+                        let i = match m.get("identity") {
+                            Some(Value::Identity(id)) => id.clone(),
+                            _ => return Err("Security Error: Kernel requires an identity grant for __sys_http_get".to_string()),
+                        };
                         let u = match m.get("url") {
                             Some(Value::Str(s)) => s.clone(),
                             _ => return Err("Map argument must contain string 'url'".to_string()),
                         };
-                        let i = match m.get("identity") {
-                            Some(Value::Identity(id)) => Some(id.clone()),
-                            _ => None,
-                        };
                         (u, i)
                     }
-                    _ => {
-                        return Err(
-                            "Argument must be a string URL or Map {url, identity?}".to_string()
-                        )
-                    }
+                    _ => return Err("Argument must be a Map {url, identity}".to_string())
                 };
 
                 let client = reqwest::blocking::Client::builder()
@@ -158,23 +183,21 @@ impl ToolRegistry {
                     .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
                 let mut req = client.get(&url);
-                if let Some(id) = identity {
+
+                // If it's a specific OAuth or API key identity, inject it.
+                // If it's just "public", we do nothing.
+                if identity != "public" {
                     // SECURE CAPABILITY INJECTION (Zero-Trust)
-                    // The Identity handle never carried the raw token. Instead, the Turn
-                    // host looks it up NOW at the HTTP boundary from a secure env-based vault.
-                    // Convention: TURN_IDENTITY_<PROVIDER_UPPERCASED>_TOKEN
-                    // e.g. `grant identity::oauth("google_workspace")` reads
-                    //      the env var TURN_IDENTITY_GOOGLE_WORKSPACE_TOKEN
                     let env_key = format!(
                         "TURN_IDENTITY_{}_TOKEN",
-                        id.to_uppercase().replace(['-', ' '], "_")
+                        identity.to_uppercase().replace(['-', ' '], "_")
                     );
                     match std::env::var(&env_key) {
                         Ok(token) => req = req.bearer_auth(token),
                         Err(_) => {
                             return Err(format!(
                                 "Identity '{}' is not configured. Set the {} environment variable.",
-                                id, env_key
+                                identity, env_key
                             ))
                         }
                     }
@@ -201,40 +224,40 @@ impl ToolRegistry {
 
         // http_pos
         tools.insert(
-            "http_post".to_string(),
+            "__sys_http_post".to_string(),
             Box::new(|arg| {
                 let (url, body_val, identity) = match arg {
                     Value::Map(m) => {
+                        let identity = match m.get("identity") {
+                            Some(Value::Identity(id)) => id.clone(),
+                            _ => return Err("Security Error: Kernel requires an identity grant for __sys_http_post".to_string()),
+                        };
                         let url = match m.get("url") {
                             Some(Value::Str(s)) => s.clone(),
                             _ => return Err("Missing 'url'".to_string()),
                         };
                         let body = m.get("body").cloned().unwrap_or(Value::Null);
-                        let identity = match m.get("identity") {
-                            Some(Value::Identity(id)) => Some(id.clone()),
-                            _ => None,
-                        };
                         (url, body, identity)
                     }
-                    _ => return Err("Argument must be a map {url, body, identity?}".to_string()),
+                    _ => return Err("Argument must be a map {url, body, identity}".to_string()),
                 };
 
                 let client = reqwest::blocking::Client::new();
                 let json_body = serde_json::to_value(&body_val).unwrap_or(serde_json::Value::Null);
 
                 let mut req = client.post(&url).json(&json_body);
-                if let Some(id) = identity {
+                if identity != "public" {
                     // SECURE CAPABILITY INJECTION (Zero-Trust)
                     let env_key = format!(
                         "TURN_IDENTITY_{}_TOKEN",
-                        id.to_uppercase().replace(['-', ' '], "_")
+                        identity.to_uppercase().replace(['-', ' '], "_")
                     );
                     match std::env::var(&env_key) {
                         Ok(token) => req = req.bearer_auth(token),
                         Err(_) => {
                             return Err(format!(
                                 "Identity '{}' is not configured. Set the {} environment variable.",
-                                id, env_key
+                                identity, env_key
                             ))
                         }
                     }
@@ -345,7 +368,7 @@ impl ToolRegistry {
 
         // json_parse
         tools.insert(
-            "json_parse".to_string(),
+            "__sys_json_parse".to_string(),
             Box::new(|arg| {
                 if let Value::Str(s) = arg {
                     match serde_json::from_str(&s) {
@@ -401,16 +424,16 @@ impl ToolRegistry {
         );
 
         tools.insert(
-            "json_stringify".to_string(),
+            "__sys_json_stringify".to_string(),
             Box::new(|arg| match serde_json::to_string(&arg) {
                 Ok(s) => Ok((Value::Str(s), 0u64)),
                 Err(e) => Err(format!("JSON stringify error: {}", e)),
             }) as ToolHandler,
         );
 
-        // time_now
+        // __sys_time_now (Kernel Trap)
         tools.insert(
-            "time_now".to_string(),
+            "__sys_time_now".to_string(),
             Box::new(|_arg| {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -419,9 +442,9 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // regex_match
+        // __sys_regex_match (Kernel Trap)
         tools.insert(
-            "regex_match".to_string(),
+            "__sys_regex_match".to_string(),
             Box::new(|arg| {
                 let (pattern, text) = match arg {
                     Value::Map(m) => {
@@ -444,9 +467,9 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        // regex_replace
+        // __sys_regex_replace (Kernel Trap)
         tools.insert(
-            "regex_replace".to_string(),
+            "__sys_regex_replace".to_string(),
             Box::new(|arg| {
                 let (pattern, text, replacement) = match arg {
                     Value::Map(m) => {

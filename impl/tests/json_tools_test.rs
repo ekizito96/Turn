@@ -5,7 +5,7 @@ fn test_json_parse() {
     let source = r#"
     turn {
         let s = "{\"a\": 1, \"b\": [2, 3]}";
-        let x = call("json_parse", s);
+        let x = call("__sys_json_parse", s);
         return x;
     }
     "#;
@@ -31,7 +31,7 @@ fn test_json_stringify() {
     let source = r#"
     turn {
         let x = { "a": 1 };
-        let s = call("json_stringify", x);
+        let s = call("__sys_json_stringify", x);
         return s;
     }
     "#;

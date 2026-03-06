@@ -16,7 +16,9 @@ fn test_http_get() {
         r#"
     turn {{
         let url = "{}";
-        let res = call("http_get", url);
+        let net = use "std/net";
+        let id = grant identity::network("public");
+        let res = net.get({{ "url": url, "identity": id }});
         return res;
     }}
     "#,
@@ -49,8 +51,10 @@ fn test_http_post() {
     let source = format!(
         r#"
     turn {{
-        let payload = {{ "url": "{}", "body": {{ "msg": "hello" }} }};
-        let res = call("http_post", payload);
+        let net = use "std/net";
+        let id = grant identity::network("public");
+        let payload = {{ "url": "{}", "body": {{ "msg": "hello" }}, "identity": id }};
+        let res = net.post(payload);
         return res;
     }}
     "#,
@@ -77,7 +81,9 @@ fn test_http_get_error() {
         r#"
     turn {{
         let url = "{}";
-        let res = call("http_get", url);
+        let net = use "std/net";
+        let id = grant identity::network("public");
+        let res = net.get({{ "url": url, "identity": id }});
         return res;
     }}
     "#,

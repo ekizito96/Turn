@@ -1,8 +1,15 @@
+let net   = use "std/net";
+let regex = use "std/regex";
+
 turn {
-    let product = "Electric bicycle";
-    let url_topic = call("regex_replace", {"pattern": " ", "replacement": "_", "text": product});
+    let product   = "Electric bicycle";
+    let url_topic = regex.replace(" ", product, "_");
     call("echo", url_topic);
-    let raw = call("http_get", "https://en.wikipedia.org/api/rest_v1/page/summary/" + url_topic);
+    let id  = grant identity::network("public");
+    let raw = net.get({
+        "url":      "https://en.wikipedia.org/api/rest_v1/page/summary/" + url_topic,
+        "identity": id
+    });
     call("echo", raw);
     return raw;
 }

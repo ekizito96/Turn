@@ -1,0 +1,25 @@
+// Turn Standard Library: Net (Network)
+// Provides secure, capability-gated network access.
+
+let get = turn(params: Map) {
+    let identity = params["identity"];
+    if identity == null {
+        throw "Security Error: Missing network identity grant. Use `grant identity` and pass it to net.get()";
+    }
+
+    return call("__sys_http_get", params);
+};
+
+let post = turn(params: Map) {
+    let identity = params["identity"];
+    if identity == null {
+        throw "Security Error: Missing network identity grant. Use `grant identity` and pass it to net.post()";
+    }
+
+    return call("__sys_http_post", params);
+};
+
+return {
+    "get": get,
+    "post": post
+};

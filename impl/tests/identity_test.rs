@@ -14,10 +14,12 @@ fn test_identity_capability_primitive() {
     // The raw token never touches Turn memory.
     let my_google_auth = grant identity::oauth("google_workspace");
 
+    let net = use "std/net";
+
     // Pass the Identity capability into the HTTP tool.
     // The Turn VM intercepts this, looks up TURN_IDENTITY_GOOGLE_WORKSPACE_TOKEN 
     // from the host environment, and injects it as a Bearer header.
-    let result = call("http_get", {
+    let result = net.get({
         "url": "https://httpbin.org/bearer",
         "identity": my_google_auth
     });
