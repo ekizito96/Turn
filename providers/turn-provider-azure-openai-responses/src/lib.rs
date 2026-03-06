@@ -31,10 +31,43 @@ struct TurnInferRequest {
 
 #[derive(Deserialize)]
 struct InferParams {
-    prompt: String,
+    prompt: Value,
     schema: Value,
-    context: Vec<String>,
+    context: Vec<Value>,
     tools: Vec<Value>,
+}
+
+fn turn_to_content(v: &Value) -> Value {
+    if let Value::Object(m) = v {
+        if m.get("_turn_blob").is_some() {
+            let mime = m.get("mime_type").and_then(|x| x.as_str()).unwrap_or("image/jpeg");
+            let data = m.get("data").and_then(|x| x.as_str()).unwrap_or("");
+            return json!([{
+                "type": "image_url",
+                "image_url": { "url": format!("data:{};base64,{}", mime, data) }
+            }]);
+        }
+    } else if let Value::Array(arr) = v {
+        let mut parts = Vec::new();
+        for item in arr {
+            if let Value::Object(m) = item {
+                if m.get("_turn_blob").is_some() {
+                    let mime = m.get("mime_type").and_then(|x| x.as_str()).unwrap_or("image/jpeg");
+                    let data = m.get("data").and_then(|x| x.as_str()).unwrap_or("");
+                    parts.push(json!({
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:{};base64,{}", mime, data) }
+                    }));
+                    continue;
+                }
+            }
+            let text = if let Value::String(s) = item { s.clone() } else { item.to_string() };
+            parts.push(json!({ "type": "text", "text": text }));
+        }
+        return json!(parts);
+    }
+    let text = if let Value::String(s) = v { s.clone() } else { v.to_string() };
+    json!(text)
 }
 
 #[no_mangle]
@@ -54,7 +87,7 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
 
     let mut openai_tools = Vec::new();
     for mut t in req.params.tools {
-        // The /responses preview API expects a flattened tool object structure
+        // The Responses API expects a flattened tool object structure (no nested "function" key)
         if let Some(func_obj) = t
             .get_mut("function")
             .and_then(|f| f.as_object_mut())
@@ -73,9 +106,9 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     let mut messages = Vec::new();
     messages.push(json!({"role": "system", "content": sys_msg}));
     for ctx in req.params.context {
-        messages.push(json!({"role": "system", "content": ctx}));
+        messages.push(json!({"role": "system", "content": turn_to_content(&ctx)}));
     }
-    messages.push(json!({"role": "user", "content": req.params.prompt}));
+    messages.push(json!({"role": "user", "content": turn_to_content(&req.params.prompt)}));
 
     let mut body = json!({
         "input": messages,

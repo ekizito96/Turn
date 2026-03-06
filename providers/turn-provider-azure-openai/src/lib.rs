@@ -142,7 +142,7 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     }
 
     let http_config = json!({
-        "url": "$env:AZURE_OPENAI_ENDPOINT/openai/deployments/$env:AZURE_OPENAI_DEPLOYMENT/chat/completions?api-version=2024-08-01-preview",
+        "url": "$env:AZURE_OPENAI_ENDPOINT/openai/deployments/$env:AZURE_OPENAI_DEPLOYMENT/chat/completions?api-version=2025-04-01-preview",
         "method": "POST",
         "headers": {
             "Content-Type": "application/json",
