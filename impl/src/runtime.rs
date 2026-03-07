@@ -56,6 +56,8 @@ pub struct Runtime {
     pub context: StructuredContext,
     pub memory: HashMap<String, Value>,
     pub structs: HashMap<String, IndexMap<String, Type>>,
+    #[serde(default)]
+    pub last_confidence: Option<f64>,
 }
 
 impl Runtime {
@@ -65,6 +67,7 @@ impl Runtime {
             context: StructuredContext::default(),
             memory: HashMap::new(),
             structs: HashMap::new(),
+            last_confidence: None,
         }
     }
 

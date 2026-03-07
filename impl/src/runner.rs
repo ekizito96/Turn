@@ -248,6 +248,12 @@ impl<S: Store> Runner<S> {
                             Ok((val, cost)) => {
                                 let mut state = continuation;
                                 state.gas_remaining = state.gas_remaining.saturating_sub(cost);
+
+                                // Capture inference confidence for telemetry
+                                if let Value::Uncertain(_, p) = &val {
+                                    state.runtime.last_confidence = Some(*p);
+                                }
+
                                 vm = Vm::resume_with_result(state, val);
                             }
                             Err(e) => {
@@ -363,6 +369,12 @@ impl<S: Store> Runner<S> {
                         Ok((val, cost)) => {
                             let mut state = continuation;
                             state.gas_remaining = state.gas_remaining.saturating_sub(cost);
+                            
+                            // Capture inference confidence for telemetry
+                            if let Value::Uncertain(_, p) = &val {
+                                state.runtime.last_confidence = Some(*p);
+                            }
+                            
                             vm = Vm::resume_with_result(state, val);
                         }
                         Err(e) => {
