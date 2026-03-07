@@ -106,17 +106,47 @@ This is not a list you pass to an API call. It is the actor's memory state, auto
 
 ### DAG Scheduling and Sub-Agent Orchestration
 
-`spawn_each` delegates a list of tasks concurrently to independent actor instances. Combined with `spawn_link` and typed mailboxes, you implement full dependency-graph schedulers entirely in Turn:
+`spawn_each` delegates a list of tasks concurrently to independent actor instances. `gather` collects all their results back in input order once every agent completes, with `allSettled` semantics: a failed agent returns its error as a value rather than aborting the entire batch.
 
 ```turn
-let ready_steps = filter(workflow.steps, turn(step) {
-    return check_deps_met(step.dependencies, state.processed);
+let invoice_ids = [1001, 1002, 1003, 1004, 1005];
+
+// Scatter: one agent per invoice
+let agents = spawn_each(invoice_ids, turn(id: Num) {
+    return infer Invoice { "Reconcile invoice " + id; };
 });
 
-spawn_each ready_steps turn(step) {
-    send kernel_pid, { "type": "execute_step", "step": step };
-};
+// Gather: block until all complete, in order
+let results = gather agents;
 ```
+
+This is the native mass concurrency model in Turn. No Kubernetes. No message queues. No distributed systems infrastructure. The VM scheduler handles the parallelism; `gather` handles the collection.
+
+### Compile-Time Type Enforcement
+
+Turn's semantic analyzer runs before execution. Every function call is type-checked against its parameter declarations. If data flowing from `infer` into a downstream function does not match the expected schema, the program is rejected at compile time with a precise field-level error.
+
+```turn
+struct StripePayload { amount: Num, currency: Str };
+
+let charge = turn(payload: StripePayload) { ... };
+let bad    = infer WrongPayload { "charge 100 usd" };
+
+call(charge, bad); // Compile-time error: type mismatch
+```
+
+Turn uses gradual typing. Full enforcement requires explicit parameter annotations.
+
+### VM Observability with `turn inspect`
+
+Suspended agents can be inspected from the command line. `turn inspect` reads the serialized `VmState` and prints a structured snapshot of the agent's context window, durable memory, actor mailbox, cognitive belief state (last inference confidence score), and supervisor tree.
+
+```bash
+turn run reconciliation_agent.tn --id recon_agent
+turn inspect recon_agent
+```
+
+No instrumentation required. No code changes needed.
 
 ---
 
@@ -245,6 +275,16 @@ The `impl/examples/` directory contains multi-agent demonstrations:
 - [**Algorithmic Trading Syndicate**](impl/examples/quant_syndicate.tn): Three agents (Technical, Sentiment, Risk) run concurrently, debate a trade via mailboxes, and a Chairman agent executes the final decision with confidence gating.
 - [**Investment Committee**](impl/examples/investment_committee.tn): Specialist agents evaluate an equity position concurrently using live Yahoo Finance data.
 - [**Marketing Agency**](impl/examples/marketing_agency.tn): An SEO Specialist, Copywriter, and Creative Director collaborate to produce ad copy using Wikipedia research.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `turn run <file> [--id <id>] [--store <path>]` | Compile and run a Turn program |
+| `turn inspect <id> [--store <path>]` | X-ray a suspended agent's full VM state |
+| `turn serve [--port <n>] [--store <path>]` | Start the HTTP server for remote agent execution |
+| `turn lsp` | Start the Language Server Protocol server (stdio) |
+| `turn add <name> <url>` | Add a package dependency |
 
 ---
 
