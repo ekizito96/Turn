@@ -150,17 +150,30 @@ fn main() -> Result<()> {
                     let dim = "\x1b[2;37m";
                     let reset = "\x1b[0m";
 
-                    println!("{cyan}========================================================={reset}");
-                    println!("⚡ {}TURN VM INSPECTOR: {}{reset} (PID: {})", yellow, id, state.pid);
-                    println!("{cyan}========================================================={reset}");
-                    
-                    let ip = state.frames.last().map(|f| f.ip.to_string()).unwrap_or_else(|| "none".to_string());
+                    println!(
+                        "{cyan}========================================================={reset}"
+                    );
+                    println!(
+                        "⚡ {}TURN VM INSPECTOR: {}{reset} (PID: {})",
+                        yellow, id, state.pid
+                    );
+                    println!(
+                        "{cyan}========================================================={reset}"
+                    );
+
+                    let ip = state
+                        .frames
+                        .last()
+                        .map(|f| f.ip.to_string())
+                        .unwrap_or_else(|| "none".to_string());
                     println!("STATUS: Suspended (Instruction Pointer: {})", ip);
                     println!("GAS REMAINING: {} ops", state.gas_remaining);
-                    
+
                     println!("\n{cyan}[1] 🧠 THE TRIPARTITE CONTEXT{reset}");
-                    println!("{dim}---------------------------------------------------------{reset}");
-                    
+                    println!(
+                        "{dim}---------------------------------------------------------{reset}"
+                    );
+
                     let ctx = &state.runtime.context;
                     println!("{green}[P0: SYSTEM / PRIMACY] (Locked){reset}");
                     if ctx.p0_system.is_empty() {
@@ -170,8 +183,10 @@ fn main() -> Result<()> {
                             println!("  - {}", item);
                         }
                     }
-                    
-                    println!("\n{dim}[P2: EPISODIC / MIDDLE] (Demoted - Low Attention Zone){reset}");
+
+                    println!(
+                        "\n{dim}[P2: EPISODIC / MIDDLE] (Demoted - Low Attention Zone){reset}"
+                    );
                     if ctx.p2_episodic.is_empty() {
                         println!("  {dim}- (Empty){reset}");
                     } else {
@@ -179,7 +194,7 @@ fn main() -> Result<()> {
                             println!("  {dim}- {}{reset}", item);
                         }
                     }
-                    
+
                     println!("\n{magenta}[P1: WORKING / RECENCY] (High Attention Zone){reset}");
                     if ctx.p1_working.is_empty() {
                         println!("  {dim}- (Empty){reset}");
@@ -188,9 +203,11 @@ fn main() -> Result<()> {
                             println!("  - {}", item);
                         }
                     }
-                    
+
                     println!("\n{cyan}[2] 💾 DURABLE MEMORY (remember / recall){reset}");
-                    println!("{dim}---------------------------------------------------------{reset}");
+                    println!(
+                        "{dim}---------------------------------------------------------{reset}"
+                    );
                     if state.runtime.memory.is_empty() {
                         println!("  {dim}(Empty){reset}");
                     } else {
@@ -198,9 +215,11 @@ fn main() -> Result<()> {
                             println!("  {} => {}", k, v);
                         }
                     }
-                    
+
                     println!("\n{cyan}[3] 📬 ACTOR MAILBOX{reset}");
-                    println!("{dim}---------------------------------------------------------{reset}");
+                    println!(
+                        "{dim}---------------------------------------------------------{reset}"
+                    );
                     if state.mailbox.is_empty() {
                         println!("  {dim}(Empty){reset}");
                     } else {
@@ -211,25 +230,48 @@ fn main() -> Result<()> {
                     }
 
                     println!("\n{cyan}[4] 📊 COGNITIVE BELIEF STATE{reset}");
-                    println!("{dim}---------------------------------------------------------{reset}");
+                    println!(
+                        "{dim}---------------------------------------------------------{reset}"
+                    );
                     if let Some(conf) = state.runtime.last_confidence {
-                        let color = if conf >= 0.85 { green } else if conf >= 0.70 { yellow } else { "\x1b[1;31m" };
+                        let color = if conf >= 0.85 {
+                            green
+                        } else if conf >= 0.70 {
+                            yellow
+                        } else {
+                            "\x1b[1;31m"
+                        };
                         println!("  Last Inference Confidence: {}{:.2}{reset}", color, conf);
                     } else {
                         println!("  {dim}No inference executed yet.{reset}");
                     }
-                    
+
                     println!("\n{cyan}[5] 🧬 SUPERVISOR TREE{reset}");
-                    println!("{dim}---------------------------------------------------------{reset}");
-                    println!("  [PID {}] {yellow}{}{reset} (Status: Suspended)", state.pid, id);
+                    println!(
+                        "{dim}---------------------------------------------------------{reset}"
+                    );
+                    println!(
+                        "  [PID {}] {yellow}{}{reset} (Status: Suspended)",
+                        state.pid, id
+                    );
                     for p in &state.scheduler {
-                        let status = if p.frames.is_empty() { "Complete" } else { "Running/Yielded" };
+                        let status = if p.frames.is_empty() {
+                            "Complete"
+                        } else {
+                            "Running/Yielded"
+                        };
                         println!("   ├── [PID {}] child_process (Status: {})", p.pid, status);
                     }
-                    println!("{cyan}========================================================={reset}");
+                    println!(
+                        "{cyan}========================================================={reset}"
+                    );
                 }
                 Ok(None) => {
-                    eprintln!("Error: No saved state found for agent '{}' in {}", id, store.display());
+                    eprintln!(
+                        "Error: No saved state found for agent '{}' in {}",
+                        id,
+                        store.display()
+                    );
                 }
                 Err(e) => {
                     eprintln!("Error loading state: {}", e);

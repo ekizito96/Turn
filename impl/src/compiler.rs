@@ -387,6 +387,10 @@ impl Compiler {
                 self.compile_expr(closure);
                 self.emit(Instr::SpawnEach);
             }
+            Expr::Gather { expr, .. } => {
+                self.compile_expr(expr);
+                self.emit(Instr::Gather);
+            }
             Expr::ListMap { list, closure, .. } => {
                 let id = self.next_id;
                 self.next_id += 1;

@@ -555,6 +555,14 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::Gather) => {
+                self.next();
+                let expr = self.parse_unary()?;
+                Ok(Expr::Gather {
+                    expr: Box::new(expr),
+                    span,
+                })
+            }
             Some(Token::Confidence) => {
                 self.next();
                 let expr = self.parse_unary()?;
@@ -828,6 +836,13 @@ impl Parser {
                 Err(ParseError::UnexpectedToken(span))
             }
             Token::Receive => Ok(Expr::Receive { span }),
+            Token::Gather => {
+                let expr = self.parse_primary()?;
+                Ok(Expr::Gather {
+                    expr: Box::new(expr),
+                    span,
+                })
+            }
             Token::Vec => {
                 self.expect(Token::LBracket)?;
                 let mut items = Vec::new();

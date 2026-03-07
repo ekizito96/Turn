@@ -58,9 +58,6 @@ impl<S: Store> Runner<S> {
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
 
-            println!("DEBUG RUNNER CODE SIZE: {}", code.len());
-
-            // Run in fresh VM
             let mut vm = Vm::new(&code);
             loop {
                 match vm.run() {
@@ -289,6 +286,18 @@ impl<S: Store> Runner<S> {
                 .parse()
                 .map_err(|e| anyhow::anyhow!("Parser error: {}", e))?;
 
+            // Deep Static Analysis (Gap #1)
+            let mut analyzer = crate::analysis::Analysis::new();
+            analyzer.analyze(&program);
+            if !analyzer.diagnostics.is_empty() {
+                let mut err_msg = String::from("Type Analysis Errors:\n");
+                for (span, msg) in &analyzer.diagnostics {
+                    let loc = crate::offset_to_line_col(source, span.start);
+                    err_msg.push_str(&format!("  [{}:{}] {}\n", loc.0, loc.1, msg));
+                }
+                return Err(anyhow::anyhow!(err_msg));
+            }
+
             let mut compiler = Compiler::new();
             let code = compiler.compile(&program);
             Vm::new(&code)
@@ -369,12 +378,12 @@ impl<S: Store> Runner<S> {
                         Ok((val, cost)) => {
                             let mut state = continuation;
                             state.gas_remaining = state.gas_remaining.saturating_sub(cost);
-                            
+
                             // Capture inference confidence for telemetry
                             if let Value::Uncertain(_, p) = &val {
                                 state.runtime.last_confidence = Some(*p);
                             }
-                            
+
                             vm = Vm::resume_with_result(state, val);
                         }
                         Err(e) => {

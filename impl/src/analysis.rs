@@ -298,6 +298,7 @@ impl Analysis {
             Expr::SpawnLink { .. } => Some(Type::Pid),
             Expr::Send { .. } => Some(Type::Bool),
             Expr::Receive { .. } => Some(Type::Any),
+            Expr::Gather { .. } => Some(Type::List(Box::new(Type::Any))),
             Expr::Confidence { .. } => Some(Type::Num),
             Expr::Grant { .. } => Some(Type::Identity),
             Expr::Infer { target_ty, .. } => Some(target_ty.clone()),
@@ -526,6 +527,10 @@ impl Analysis {
         if *target == Type::Any || *source == Type::Any {
             return true;
         }
+        // Void target accepts any argument (Turn's calling convention: call(fn, {}) for no-arg)
+        if *target == Type::Void {
+            return true;
+        }
         match (target, source) {
             (Type::Vec, Type::Vec) => true,
             (Type::List(t), Type::List(s)) => self.is_compatible(t, s),
@@ -745,6 +750,10 @@ impl Analysis {
                 self.check_assignment(&Some(Type::Pid), pid, *span);
             }
             Expr::Receive { .. } => {}
+            Expr::Gather { expr, .. } => {
+                self.visit_expr(expr);
+                self.check_assignment(&Some(Type::List(Box::new(Type::Pid))), expr, expr.span());
+            }
             Expr::Confidence { expr, .. } => {
                 self.visit_expr(expr);
             }
@@ -786,10 +795,17 @@ impl Analysis {
             }
             Expr::Unary { expr, .. } => self.visit_expr(expr),
             Expr::Paren(expr) => self.visit_expr(expr),
-            Expr::Call { name, args, .. } => {
+            Expr::Call { name, args, span } => {
                 self.visit_expr(name);
                 for arg in args {
                     self.visit_expr(arg);
+                }
+
+                // Deep Static Analysis (Gap #1)
+                if let Some(Type::Function(arg_ty, _)) = self.infer_expr_type(name) {
+                    if let Some(first_arg) = args.first() {
+                        self.check_assignment(&Some(*arg_ty), first_arg, *span);
+                    }
                 }
             }
             Expr::MethodCall {

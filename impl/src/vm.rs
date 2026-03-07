@@ -494,6 +494,95 @@ impl Vm {
                         return VmResult::Yielded;
                     }
                 }
+                Instr::Gather => {
+                    let pid_list = process.stack.pop().unwrap_or(Value::Null);
+                    if let Value::List(pids) = pid_list {
+                        let mut target_pids = Vec::new();
+                        for p in &pids {
+                            if let Value::Pid(id) = p {
+                                target_pids.push(*id);
+                            }
+                        }
+
+                        // Collect ExitSignals from mailbox that match our PIDs
+                        let mut collected_results = HashMap::new();
+
+                        // We will iterate through mailbox, extract ExitSignals for our target PIDs
+                        let mut remaining_mailbox = VecDeque::new();
+                        while let Some(msg) = process.mailbox.pop_front() {
+                            if let Value::Map(m) = &msg {
+                                if let Some(Value::Str(t)) = m.get("type") {
+                                    if t == "ExitSignal" {
+                                        if let Some(Value::Pid(pid)) = m.get("pid") {
+                                            if target_pids.contains(pid) {
+                                                // It's a match, collect the result or error
+                                                if let Some(res) = m.get("result") {
+                                                    collected_results.insert(*pid, res.clone());
+                                                } else if let Some(err) = m.get("reason") {
+                                                    // Wrap error in a map to differentiate
+                                                    let mut err_map = IndexMap::new();
+                                                    err_map
+                                                        .insert("error".to_string(), err.clone());
+                                                    collected_results
+                                                        .insert(*pid, Value::Map(err_map));
+                                                }
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            remaining_mailbox.push_back(msg);
+                        }
+
+                        // Restore remaining messages
+                        process.mailbox = remaining_mailbox;
+
+                        if collected_results.len() == target_pids.len() {
+                            // We have all results! Assemble them in original order
+                            let mut final_list = Vec::new();
+                            for pid in &target_pids {
+                                if let Some(res) = collected_results.remove(pid) {
+                                    final_list.push(res);
+                                }
+                            }
+                            process.stack.push(Value::List(final_list));
+                        } else {
+                            // We don't have all results yet.
+                            // Put the target list back on stack for next try
+                            process.stack.push(Value::List(pids));
+
+                            // Put the collected ones BACK in the mailbox so we don't lose them
+                            for (pid, res) in collected_results {
+                                let mut map = IndexMap::new();
+                                map.insert(
+                                    "type".to_string(),
+                                    Value::Str("ExitSignal".to_string()),
+                                );
+                                map.insert("pid".to_string(), Value::Pid(pid));
+                                // Check if it was an error map
+                                if let Value::Map(m) = &res {
+                                    if let Some(err) = m.get("error") {
+                                        map.insert("reason".to_string(), err.clone());
+                                    } else {
+                                        map.insert("result".to_string(), res);
+                                    }
+                                } else {
+                                    map.insert("result".to_string(), res);
+                                }
+                                process.mailbox.push_front(Value::Map(map));
+                            }
+
+                            // Yield and retry later
+                            process.frames[frame_idx].ip -= 1;
+                            process.gas_remaining += 1;
+                            return VmResult::Yielded;
+                        }
+                    } else {
+                        // Gather called on non-list
+                        process.stack.push(Value::Null);
+                    }
+                }
                 Instr::Confidence => {
                     let v = process.stack.pop().unwrap_or(Value::Null);
                     match v {

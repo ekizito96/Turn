@@ -9,6 +9,7 @@ pub enum Token {
     Spawn,
     SpawnLink,
     SpawnEach,
+    Gather,
     Send,
     Receive,
     Vec,
@@ -112,11 +113,13 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("spawn", Token::Spawn),
     ("spawn_link", Token::SpawnLink),
     ("spawn_each", Token::SpawnEach),
+    ("gather", Token::Gather),
     ("send", Token::Send),
     ("receive", Token::Receive),
     ("vec", Token::Vec),
     ("turn", Token::Turn),
     ("let", Token::Let),
+    ("gather", Token::Gather),
     ("suspend", Token::Suspend),       // NEW
     ("confidence", Token::Confidence), // NEW
     ("use", Token::Use),
@@ -132,6 +135,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("recall", Token::Recall),
     ("call", Token::Call),
     ("return", Token::Return),
+    ("gather", Token::Gather),
     ("infer", Token::Infer), // NEW
     ("struct", Token::Struct),
     ("impl", Token::Impl),

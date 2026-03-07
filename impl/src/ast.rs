@@ -159,6 +159,10 @@ pub enum Expr {
     Receive {
         span: Span,
     },
+    Gather {
+        expr: Box<Expr>,
+        span: Span,
+    },
     Vec {
         items: Vec<Expr>,
         span: Span,
@@ -242,6 +246,7 @@ impl Expr {
             Expr::ListFilter { span, .. } => *span,
             Expr::Send { span, .. } => *span,
             Expr::Receive { span } => *span,
+            Expr::Gather { span, .. } => *span,
             Expr::Vec { span, .. } => *span,
             Expr::Confidence { span, .. } => *span,
             Expr::Index { span, .. } => *span,

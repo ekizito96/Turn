@@ -64,6 +64,7 @@ pub enum Instr {
     SpawnEach,
     Send,
     Receive,
+    Gather,      // NEW
     Confidence,  // NEW
     Infer(Type), // NEW
     Suspend,     // NEW
