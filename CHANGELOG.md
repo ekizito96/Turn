@@ -6,6 +6,15 @@ This project follows [Semantic Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### Added
+- **Durable Effect Journal**: External tool and model effects receive execution-scoped IDs; completed outcomes are atomically persisted and reused after restart.
+- **`turn effects`**: Query an agent's effect history as a redacted table or opt-in JSON payloads.
+- **Effect-Aware Tools**: Integrations can opt into `EffectContext` and forward Turn's stable effect ID to external idempotency APIs without breaking existing tool handlers.
+- **Software Factory Reference**: A no-key LLM + decision-model workflow proves crash recovery without opening a duplicate pull request.
+
+### Changed
+- **Atomic FileStore Checkpoints**: VM state and effect records are written through temporary files and atomically renamed into place.
+
 ## [2.0.0] - 2026-09-17
 
 ### Added

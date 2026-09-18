@@ -45,11 +45,18 @@ fn load_wasm_provider(
         .map_err(|error| format!("Failed to load bundled WASM provider: {error}"))
 }
 
-// Update ToolHandler to return Result<Value, String>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectContext {
+    pub effect_id: String,
+}
+
 pub type ToolHandler = Box<dyn Fn(Value) -> Result<(Value, u64), String> + Send + Sync>;
+pub type EffectToolHandler =
+    Box<dyn Fn(&EffectContext, Value) -> Result<(Value, u64), String> + Send + Sync>;
 
 pub struct ToolRegistry {
     tools: HashMap<String, ToolHandler>,
+    effect_tools: HashMap<String, EffectToolHandler>,
 }
 
 impl Default for ToolRegistry {
@@ -61,6 +68,7 @@ impl Default for ToolRegistry {
 impl ToolRegistry {
     pub fn new() -> Self {
         let mut tools = HashMap::new();
+        let effect_tools = HashMap::new();
 
         // echo
         tools.insert(
@@ -929,7 +937,10 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
-        Self { tools }
+        Self {
+            tools,
+            effect_tools,
+        }
     }
 
     pub fn playground() -> Self {
@@ -955,7 +966,15 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, name: impl Into<String>, handler: ToolHandler) {
-        self.tools.insert(name.into(), handler);
+        let name = name.into();
+        self.effect_tools.remove(&name);
+        self.tools.insert(name, handler);
+    }
+
+    pub fn register_effectful(&mut self, name: impl Into<String>, handler: EffectToolHandler) {
+        let name = name.into();
+        self.tools.remove(&name);
+        self.effect_tools.insert(name, handler);
     }
 
     pub fn call(&self, name: &str, arg: Value) -> Result<(Value, u64), String> {
@@ -965,8 +984,25 @@ impl ToolRegistry {
         }
     }
 
+    pub fn call_with_effect(
+        &self,
+        name: &str,
+        effect_id: &str,
+        arg: Value,
+    ) -> Result<(Value, u64), String> {
+        if let Some(handler) = self.effect_tools.get(name) {
+            return handler(
+                &EffectContext {
+                    effect_id: effect_id.to_string(),
+                },
+                arg,
+            );
+        }
+        self.call(name, arg)
+    }
+
     pub fn has(&self, name: &str) -> bool {
-        self.tools.contains_key(name)
+        self.tools.contains_key(name) || self.effect_tools.contains_key(name)
     }
 }
 

@@ -277,7 +277,18 @@ impl Vm {
                 } => {
                     let _ = no_progress_count; // clear warning
                                                // Reconstruct VmState for legacy support
+                    let execution_id = if process.runtime.execution_id.is_empty() {
+                        "legacy"
+                    } else {
+                        &process.runtime.execution_id
+                    };
+                    let effect_id = format!(
+                        "{}:{}:{}",
+                        execution_id, process.pid, process.runtime.next_effect_sequence
+                    );
+                    process.runtime.next_effect_sequence += 1;
                     process.runtime.pending_effect = Some(PendingEffect {
+                        effect_id,
                         tool_name: tool_name.clone(),
                         arg: arg.clone(),
                     });

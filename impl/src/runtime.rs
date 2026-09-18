@@ -3,14 +3,28 @@
 use crate::value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ast::Type;
 use indexmap::IndexMap;
 
 const MAX_CONTEXT_SIZE: usize = 100;
+static EXECUTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn new_execution_id() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = EXECUTION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{timestamp:x}-{:x}-{sequence:x}", std::process::id())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingEffect {
+    #[serde(default)]
+    pub effect_id: String,
     pub tool_name: String,
     pub arg: Value,
 }
@@ -58,6 +72,8 @@ impl StructuredContext {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Runtime {
+    #[serde(default)]
+    pub execution_id: String,
     pub env: HashMap<String, Value>,
     pub context: StructuredContext,
     pub memory: HashMap<String, Value>,
@@ -66,17 +82,21 @@ pub struct Runtime {
     pub last_confidence: Option<f64>,
     #[serde(default)]
     pub pending_effect: Option<PendingEffect>,
+    #[serde(default)]
+    pub next_effect_sequence: u64,
 }
 
 impl Runtime {
     pub fn new() -> Self {
         Self {
+            execution_id: new_execution_id(),
             env: HashMap::new(),
             context: StructuredContext::default(),
             memory: HashMap::new(),
             structs: HashMap::new(),
             last_confidence: None,
             pending_effect: None,
+            next_effect_sequence: 0,
         }
     }
 

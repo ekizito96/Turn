@@ -1,0 +1,94 @@
+let issue = {
+    "id": "ISSUE-42",
+    "title": "Add confidence-gated release approval",
+    "acceptance": [
+        "Low-confidence changes require human review",
+        "Approved changes open exactly one pull request",
+        "Every external effect remains auditable"
+    ]
+};
+
+let intake = decide(issue, {
+    "requirements": {
+        "type": "choice",
+        "instructions": "Are the requirements complete enough to implement?",
+        "criteria": {
+            "complete": "The behavior and acceptance criteria are actionable",
+            "needs_clarification": "Important behavior or acceptance criteria are missing"
+        }
+    },
+    "security_risk": {
+        "type": "score",
+        "instructions": "How much security review does this change require?",
+        "criteria": [
+            "No security-sensitive behavior",
+            "Touches authorization or external effects",
+            "Changes credential or trust boundaries"
+        ]
+    }
+});
+
+if intake["answers"]["requirements"]["choice"] != "complete" {
+    return { "status": "needs_clarification", "issue": issue["id"] };
+}
+
+let plan = infer Str {
+    "Create a minimal implementation plan for: " + issue["title"]
+};
+
+let branch = call("create_branch", {
+    "issue": issue["id"],
+    "name": "factory/issue-42"
+});
+
+let patch = call("apply_patch", {
+    "branch": branch,
+    "plan": plan,
+    "acceptance": issue["acceptance"]
+});
+
+let tests = call("run_tests", {
+    "branch": branch,
+    "patch": patch
+});
+
+let review = decide({
+    "issue": issue,
+    "plan": plan,
+    "test_result": tests
+}, {
+    "merge_readiness": {
+        "type": "choice",
+        "instructions": "Is this change ready for a pull request?",
+        "criteria": {
+            "approved": "The implementation satisfies the acceptance criteria and tests pass",
+            "changes_required": "The implementation or tests are incomplete"
+        }
+    },
+    "needs_human_review": {
+        "type": "noul",
+        "instructions": "Does this change need human review before a pull request is opened?"
+    }
+});
+
+let gate = review["answers"]["merge_readiness"];
+if gate["confidence"] < 0.8 or gate["choice"] != "approved" {
+    return {
+        "status": "human_review",
+        "issue": issue["id"],
+        "review": review
+    };
+}
+
+let pull_request = call("open_pull_request", {
+    "branch": branch,
+    "issue": issue["id"],
+    "test_result": tests
+});
+
+return {
+    "status": "pull_request_opened",
+    "issue": issue["id"],
+    "branch": branch,
+    "pull_request": pull_request
+};

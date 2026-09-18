@@ -84,6 +84,10 @@ We define a **small-step** transition: one step takes the configuration to a new
 
 Before invoking an external effect, the runner persists the continuation together with `tool_name` and `arg`. If the process restarts while that checkpoint exists, the runner replays the pending effect and resumes with its result. Delivery is **at-least-once**: a crash after an external system accepts an effect but before Turn persists later progress may cause that effect to run again. Non-idempotent tools must accept or derive an idempotency key.
 
+Each pending effect also carries an ID scoped to one execution and process. After an effect completes, the runner atomically stores its result or error under that ID. A restart that finds both a pending continuation and its completed journal record injects the recorded outcome without executing the tool again. Journal records are retained after workflow completion for auditing.
+
+The journal provides duplicate suppression only after its outcome commit. The interval between an external system accepting a request and the journal commit remains at-least-once; integrations with non-idempotent effects must use the effect ID or an application idempotency key at the external boundary.
+
 **Big-step (optional):** We can also define a **big-step** relation for a whole turn: `(config, turn_body) ⇓ (config', result)` or `(config, turn_body) ⇓ Suspension(...)`. The small-step relation defines the same behavior; big-step is a convenient abstraction for "run this turn to completion or suspension."
 
 ### Deterministic Semantics

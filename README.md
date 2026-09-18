@@ -89,6 +89,20 @@ let next_state = WorkflowState {
 
 Because values are immutable and the VM checkpoints at suspension boundaries, recovery restores the last persisted continuation and replays its pending effect instead of injecting a placeholder result. Effect delivery is at-least-once, so non-idempotent tools should use idempotency keys.
 
+### Durable Effect Journal
+
+Every external tool, inference, and decision suspension receives an execution-scoped effect ID. Turn checkpoints the pending request before execution and atomically records its outcome afterward. If the process crashes after that outcome is committed, restart resumes from the journal instead of invoking the effect again.
+
+```bash
+turn effects factory-run
+turn effects factory-run --json
+turn effects factory-run --json --show-payloads
+```
+
+Payloads are hidden by default because effect arguments and results may contain source code, prompts, or customer data. Journal records remain after successful completion for audit and replay diagnostics.
+
+This closes the duplicate-execution window **after journal commit**. It does not make an external service transactional with Turn: if a service accepts an operation and the process dies before Turn commits the result, the request may still be repeated. Non-idempotent integrations must accept the Turn effect ID or another idempotency key.
+
 ### Probabilistic Control Flow
 
 Inference providers that expose measured confidence return `Uncertain(value, confidence)`, a first-class VM value. Confidence propagates through arithmetic and can gate execution directly:
@@ -336,6 +350,7 @@ The `impl/examples/` directory contains multi-agent demonstrations:
 - [**Investment Committee**](impl/examples/investment_committee.tn): Specialist agents evaluate an equity position concurrently using live Yahoo Finance data.
 - [**Marketing Agency**](impl/examples/marketing_agency.tn): An SEO Specialist, Copywriter, and Creative Director collaborate to produce ad copy using Wikipedia research.
 - [**Jev Support Triage**](examples/jev_triage.tn): A TypeSafe decision model classifies a support ticket and Turn gates autonomous routing on confidence.
+- [**Software Factory**](examples/software_factory.tn): Decision gates, LLM planning, repository tools, tests, and crash-safe pull-request creation in one durable workflow.
 
 ## CLI Reference
 
@@ -344,6 +359,7 @@ The `impl/examples/` directory contains multi-agent demonstrations:
 | `turn run <file> [--id <id>] [--store <path>]` | Compile and run a Turn program |
 | `turn run <file> --sandbox` | Run with host I/O, imports, and identity grants denied |
 | `turn inspect <id> [--store <path>]` | X-ray a suspended agent's full VM state |
+| `turn effects <id> [--store <path>]` | List durable effect outcomes with payloads redacted by default |
 | `turn serve [--port <n>] [--store <path>]` | Start the HTTP server for remote agent execution |
 | `turn lsp` | Start the Language Server Protocol server (stdio) |
 | `turn add <name> <url>` | Add a package dependency |
