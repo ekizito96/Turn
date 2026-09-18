@@ -65,6 +65,24 @@ enum Commands {
         store: PathBuf,
     },
 
+    /// List durable effect journal records for an agent
+    Effects {
+        /// Agent ID whose journal should be read
+        id: String,
+
+        /// Path to store directory
+        #[arg(long, default_value = ".turn_store")]
+        store: PathBuf,
+
+        /// Include effect arguments and result/error payloads
+        #[arg(long)]
+        show_payloads: bool,
+
+        /// Emit JSON instead of the human-readable table
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Add a package dependency
     Add {
         /// Package name (e.g. "std")
@@ -345,6 +363,73 @@ fn main() -> Result<()> {
             println!("Turn {VERSION}");
             print_provider_status("Inference", &inference_provider);
             print_provider_status("Decision", &decision_provider);
+        }
+        Commands::Effects {
+            id,
+            store,
+            show_payloads,
+            json,
+        } => {
+            use turn::store::{EffectOutcome, Store};
+
+            let file_store = FileStore::new(store);
+            let records = file_store.list_effects(&id)?;
+            if json {
+                let rows = records
+                    .iter()
+                    .map(|record| {
+                        let (status, cost) = match &record.outcome {
+                            EffectOutcome::Success { cost, .. } => ("success", Some(*cost)),
+                            EffectOutcome::Failure { .. } => ("failure", None),
+                        };
+                        let mut row = serde_json::json!({
+                            "effect_id": record.effect_id,
+                            "tool_name": record.tool_name,
+                            "status": status,
+                            "cost": cost,
+                            "completed_at_ms": record.completed_at_ms,
+                        });
+                        if show_payloads {
+                            row["arg"] = serde_json::to_value(&record.arg)?;
+                            match &record.outcome {
+                                EffectOutcome::Success { value, .. } => {
+                                    row["result"] = serde_json::to_value(value)?;
+                                }
+                                EffectOutcome::Failure { error } => {
+                                    row["error"] = serde_json::json!(error);
+                                }
+                            }
+                        }
+                        Ok::<_, serde_json::Error>(row)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if records.is_empty() {
+                println!("No effects recorded for agent '{id}'.");
+            } else {
+                println!("EFFECT ID\tTOOL\tSTATUS\tCOST\tCOMPLETED (ms)");
+                for record in records {
+                    let (status, cost) = match &record.outcome {
+                        EffectOutcome::Success { cost, .. } => ("success", cost.to_string()),
+                        EffectOutcome::Failure { .. } => ("failure", "-".to_string()),
+                    };
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        record.effect_id, record.tool_name, status, cost, record.completed_at_ms
+                    );
+                    if show_payloads {
+                        println!("  arg: {}", record.arg);
+                        match record.outcome {
+                            EffectOutcome::Success { value, .. } => {
+                                println!("  result: {value}");
+                            }
+                            EffectOutcome::Failure { error } => {
+                                println!("  error: {error}");
+                            }
+                        }
+                    }
+                }
+            }
         }
         Commands::Add { name, url } => {
             let modules_dir = PathBuf::from(".turn_modules");

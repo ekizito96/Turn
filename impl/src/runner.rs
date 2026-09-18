@@ -1,13 +1,14 @@
 use crate::compiler::Compiler;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::store::Store;
+use crate::store::{EffectOutcome, EffectRecord, Store};
 use crate::tools::ToolRegistry;
 use crate::value::Value;
 use crate::vm::{Vm, VmResult};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Runner<S: Store> {
     store: S,
@@ -33,20 +34,22 @@ impl<S: Store> Runner<S> {
 
     fn resume_effect(
         &mut self,
+        agent_id: &str,
         continuation: crate::vm::VmState,
+        effect_id: String,
         tool_name: String,
         arg: Value,
         path: Option<&PathBuf>,
-    ) -> Vm {
+    ) -> Result<Vm> {
         if self.sandboxed && matches!(tool_name.as_str(), "sys_import" | "sys_grant") {
-            return Vm::resume_with_error(
+            return Ok(Vm::resume_with_error(
                 continuation,
                 format!("Sandbox denied effect: {tool_name}"),
-            );
+            ));
         }
 
         if tool_name == "sys_suspend" {
-            return Vm::resume_with_result(continuation, Value::Null);
+            return Ok(Vm::resume_with_result(continuation, Value::Null));
         }
 
         if tool_name == "sys_import" {
@@ -54,14 +57,14 @@ impl<S: Store> Runner<S> {
                 Value::Str(value) => value,
                 _ => String::new(),
             };
-            return match self.load_module(&import_path, path) {
+            return Ok(match self.load_module(&import_path, path) {
                 Ok(value) => Vm::resume_with_result(continuation, value),
                 Err(error) => Vm::resume_with_error(continuation, error.to_string()),
-            };
+            });
         }
 
         if tool_name == "sys_grant" {
-            return match arg {
+            return Ok(match arg {
                 Value::Str(provider) => {
                     Vm::resume_with_result(continuation, Value::Identity(provider))
                 }
@@ -69,11 +72,44 @@ impl<S: Store> Runner<S> {
                     continuation,
                     "sys_grant expects a provider string".to_string(),
                 ),
-            };
+            });
         }
 
-        match self.tools.call(&tool_name, arg) {
-            Ok((value, cost)) => {
+        if let Some(record) = self.store.load_effect(agent_id, &effect_id)? {
+            return Ok(match record.outcome {
+                EffectOutcome::Success { value, cost } => {
+                    let mut state = continuation;
+                    state.gas_remaining = state.gas_remaining.saturating_sub(cost);
+                    if let Value::Uncertain(_, confidence) = &value {
+                        state.runtime.last_confidence = Some(*confidence);
+                    }
+                    Vm::resume_with_result(state, value)
+                }
+                EffectOutcome::Failure { error } => Vm::resume_with_error(continuation, error),
+            });
+        }
+
+        let outcome = match self
+            .tools
+            .call_with_effect(&tool_name, &effect_id, arg.clone())
+        {
+            Ok((value, cost)) => EffectOutcome::Success { value, cost },
+            Err(error) => EffectOutcome::Failure { error },
+        };
+        let record = EffectRecord {
+            effect_id,
+            tool_name,
+            arg,
+            outcome: outcome.clone(),
+            completed_at_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        };
+        self.store.save_effect(agent_id, &record)?;
+
+        Ok(match outcome {
+            EffectOutcome::Success { value, cost } => {
                 let mut state = continuation;
                 state.gas_remaining = state.gas_remaining.saturating_sub(cost);
                 if let Value::Uncertain(_, confidence) = &value {
@@ -81,8 +117,8 @@ impl<S: Store> Runner<S> {
                 }
                 Vm::resume_with_result(state, value)
             }
-            Err(error) => Vm::resume_with_error(continuation, error),
-        }
+            EffectOutcome::Failure { error } => Vm::resume_with_error(continuation, error),
+        })
     }
 
     fn load_module(&mut self, path: &str, current_file: Option<&PathBuf>) -> Result<Value> {
@@ -331,9 +367,21 @@ impl<S: Store> Runner<S> {
     pub fn run(&mut self, id: &str, source: &str, path: Option<PathBuf>) -> Result<Value> {
         // 1. Load or Init
         // If resuming, we load from store.
-        let mut vm = if let Ok(Some(state)) = self.store.load(id) {
+        let mut vm = if let Some(state) = self.store.load(id)? {
             if let Some(pending) = state.runtime.pending_effect.clone() {
-                self.resume_effect(state, pending.tool_name, pending.arg, path.as_ref())
+                let effect_id = if pending.effect_id.is_empty() {
+                    format!("legacy:{id}:{}", pending.tool_name)
+                } else {
+                    pending.effect_id
+                };
+                self.resume_effect(
+                    id,
+                    state,
+                    effect_id,
+                    pending.tool_name,
+                    pending.arg,
+                    path.as_ref(),
+                )?
             } else {
                 Vm::resume_with_result(state, Value::Null)
             }
@@ -383,7 +431,20 @@ impl<S: Store> Runner<S> {
                         return Ok(Value::Null);
                     }
                     self.store.save(id, &continuation)?;
-                    vm = self.resume_effect(continuation, tool_name, arg, path.as_ref());
+                    let effect_id = continuation
+                        .runtime
+                        .pending_effect
+                        .as_ref()
+                        .map(|pending| pending.effect_id.clone())
+                        .unwrap_or_else(|| format!("legacy:{id}:{tool_name}"));
+                    vm = self.resume_effect(
+                        id,
+                        continuation,
+                        effect_id,
+                        tool_name,
+                        arg,
+                        path.as_ref(),
+                    )?;
                 }
                 VmResult::Error(err) => {
                     self.store.delete(id)?;
