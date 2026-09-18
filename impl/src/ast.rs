@@ -193,6 +193,11 @@ pub enum Expr {
         body: Block,
         span: Span,
     },
+    Decide {
+        state: Box<Expr>,
+        questions: Box<Expr>,
+        span: Span,
+    },
     List {
         items: Vec<Expr>,
         span: Span,
@@ -252,6 +257,7 @@ impl Expr {
             Expr::Index { span, .. } => *span,
             Expr::Turn { span, .. } => *span,
             Expr::Infer { span, .. } => *span,
+            Expr::Decide { span, .. } => *span,
             Expr::List { span, .. } => *span,
             Expr::Map { span, .. } => *span,
             Expr::Binary { span, .. } => *span,

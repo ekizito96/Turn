@@ -27,6 +27,11 @@ impl Store for MemoryStore {
     fn load(&self, id: &str) -> Result<Option<VmState>> {
         Ok(self.data.borrow().get(id).cloned())
     }
+
+    fn delete(&mut self, id: &str) -> Result<()> {
+        self.data.borrow_mut().remove(id);
+        Ok(())
+    }
 }
 
 #[test]

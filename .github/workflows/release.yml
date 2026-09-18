@@ -31,7 +31,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }}, wasm32-unknown-unknown
+
+      - name: Build bundled providers
+        shell: bash
+        run: |
+          cargo build --manifest-path providers/Cargo.toml --workspace --release --target wasm32-unknown-unknown
+          for name in anthropic azure_anthropic azure_openai azure_openai_responses gemini grok ollama openai typesafe; do
+            cp "providers/target/wasm32-unknown-unknown/release/turn_provider_${name}.wasm" "impl/assets/${name}_provider.wasm"
+          done
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
@@ -41,7 +49,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: turn-${{ matrix.target }}
-          path: impl/target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
 
   release:
     name: Create Release
@@ -63,17 +71,20 @@ jobs:
           for dir in artifacts/*/; do
             name=$(basename "$dir")
             if [[ -f "$dir/turn.exe" ]]; then
-              cp "$dir/turn.exe" "release/turn-$name.exe"
+              cp "$dir/turn.exe" "release/$name.exe"
             elif [[ -f "$dir/turn" ]]; then
-              cp "$dir/turn" "release/turn-$name"
+              cp "$dir/turn" "release/$name"
             fi
           done
+          cd release
+          sha256sum turn-* > SHA256SUMS
+          cd ..
           ls -la release/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: release/*
-          generate_release_notes: true
+          body_path: .github/releases/${{ github.ref_name }}.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

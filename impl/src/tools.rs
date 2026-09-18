@@ -5,8 +5,45 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+fn bundled_provider_bytes(provider: &str) -> Option<&'static [u8]> {
+    match provider {
+        "anthropic" => Some(include_bytes!("../assets/anthropic_provider.wasm")),
+        "azure_anthropic" => Some(include_bytes!("../assets/azure_anthropic_provider.wasm")),
+        "azure_openai" => Some(include_bytes!("../assets/azure_openai_provider.wasm")),
+        "azure_openai_responses" => Some(include_bytes!(
+            "../assets/azure_openai_responses_provider.wasm"
+        )),
+        "gemini" => Some(include_bytes!("../assets/gemini_provider.wasm")),
+        "grok" => Some(include_bytes!("../assets/grok_provider.wasm")),
+        "ollama" => Some(include_bytes!("../assets/ollama_provider.wasm")),
+        "openai" => Some(include_bytes!("../assets/openai_provider.wasm")),
+        "typesafe" => Some(include_bytes!("../assets/typesafe_provider.wasm")),
+        _ => None,
+    }
+}
+
+pub fn bundled_provider_available(provider: &str) -> bool {
+    bundled_provider_bytes(provider).is_some()
+}
+
+fn load_wasm_provider(
+    provider: &str,
+    wasm_path: &Path,
+) -> Result<crate::wasm_host::WasmProvider, String> {
+    if wasm_path.exists() {
+        return crate::wasm_host::WasmProvider::new(wasm_path)
+            .map_err(|error| format!("Failed to load WASM provider: {error}"));
+    }
+
+    let bytes = bundled_provider_bytes(provider)
+        .ok_or_else(|| format!("WASM driver not found at {}", wasm_path.display()))?;
+    crate::wasm_host::WasmProvider::from_bytes(bytes)
+        .map_err(|error| format!("Failed to load bundled WASM provider: {error}"))
+}
 
 // Update ToolHandler to return Result<Value, String>
 pub type ToolHandler = Box<dyn Fn(Value) -> Result<(Value, u64), String> + Send + Sync>;
@@ -324,7 +361,7 @@ impl ToolRegistry {
                     }
                 }
 
-                if wasm_path.exists() {
+                if wasm_path.exists() || bundled_provider_bytes(&provider).is_some() {
                     let mut params = serde_json::Map::new();
                     // for llm_generate we just wrap messages as a prompt
                     params.insert("prompt".to_string(), json_msgs);
@@ -339,7 +376,7 @@ impl ToolRegistry {
                         "id": 2
                     });
 
-                    match crate::wasm_host::WasmProvider::new(&wasm_path) {
+                    match load_wasm_provider(&provider, &wasm_path) {
                         Ok(wasm_provider) => {
                             match wasm_provider.execute_inference(&req.to_string()) {
                                 Ok(json_res) => {
@@ -573,9 +610,7 @@ impl ToolRegistry {
                         }
                     }
 
-                    if wasm_path.exists() {
-                        println!("🔌 Using WASM Inference Driver: {}", wasm_path.display());
-
+                    if wasm_path.exists() || bundled_provider_bytes(&provider).is_some() {
                         // WASM drivers expect a JSON-RPC TurnInferRequest matching the exact inputs
                         let mut params = serde_json::Map::new();
                         params.insert(
@@ -606,7 +641,7 @@ impl ToolRegistry {
                             "id": 1
                         });
 
-                        match crate::wasm_host::WasmProvider::new(&wasm_path) {
+                        match load_wasm_provider(&provider, &wasm_path) {
                             Ok(wasm_provider) => {
                                 match wasm_provider.execute_inference(&req.to_string()) {
                                     Ok(json_res) => {
@@ -659,6 +694,17 @@ impl ToolRegistry {
                                             None
                                         };
 
+                                        // Providers that can measure uncertainty return a
+                                        // `confidence` map derived from token log probabilities.
+                                        // When it is absent the value stays unwrapped: an
+                                        // unmeasured result must not be given a made-up number.
+                                        let confidence = parsed.get("confidence");
+                                        let field_confidence = |field: &str| -> Option<f64> {
+                                            confidence
+                                                .and_then(|c| c.get(field))
+                                                .and_then(|p| p.as_f64())
+                                        };
+
                                         let turn_val = if let Some(name) = struct_name {
                                             match raw_json {
                                                 serde_json::Value::Object(map) => {
@@ -667,6 +713,12 @@ impl ToolRegistry {
                                                         let tv: Value =
                                                             serde_json::from_value(v.clone())
                                                                 .unwrap_or(Value::Null);
+                                                        let tv = match field_confidence(&k) {
+                                                            Some(p) => {
+                                                                Value::Uncertain(Box::new(tv), p)
+                                                            }
+                                                            None => tv,
+                                                        };
                                                         fields.insert(k.clone(), tv);
                                                     }
                                                     Value::Struct(name, fields)
@@ -678,10 +730,12 @@ impl ToolRegistry {
                                             serde_json::from_value(raw_json).unwrap_or(Value::Null)
                                         };
 
-                                        return Ok((
-                                            Value::Uncertain(Box::new(turn_val), 0.95),
-                                            tokens,
-                                        ));
+                                        let turn_val = match field_confidence("_overall") {
+                                            Some(p) => Value::Uncertain(Box::new(turn_val), p),
+                                            None => turn_val,
+                                        };
+
+                                        return Ok((turn_val, tokens));
                                     }
                                     Err(e) => return Err(format!("WASM Execution failed: {}", e)),
                                 }
@@ -697,7 +751,207 @@ impl ToolRegistry {
             }) as ToolHandler,
         );
 
+        // ai_decide
+        tools.insert(
+            "ai_decide".to_string(),
+            Box::new(|arg| {
+                let Value::Map(request) = arg else {
+                    return Err("Invalid args for ai_decide".to_string());
+                };
+
+                let state = request.get("state").unwrap_or(&Value::Null);
+                let questions = request.get("questions").unwrap_or(&Value::Null);
+                let context = request.get("context").unwrap_or(&Value::Null);
+                let provider = env::var("TURN_DECISION_PROVIDER")
+                    .unwrap_or_else(|_| "typesafe".to_string());
+
+                if provider == "mock" {
+                    let Value::Map(question_map) = questions else {
+                        return Err("Decision questions must be a map".to_string());
+                    };
+                    let mut answers = indexmap::IndexMap::new();
+                    for (question_id, question) in question_map {
+                        let Value::Map(fields) = question else {
+                            return Err(format!("Decision question '{question_id}' must be a map"));
+                        };
+                        let question_type = match fields.get("type") {
+                            Some(Value::Str(value)) => value.as_str(),
+                            _ => {
+                                return Err(format!(
+                                    "Decision question '{question_id}' is missing its type"
+                                ))
+                            }
+                        };
+
+                        let answer = match question_type {
+                            "choice" => {
+                                let Some(Value::Map(criteria)) = fields.get("criteria") else {
+                                    return Err(format!(
+                                        "Choice question '{question_id}' requires map criteria"
+                                    ));
+                                };
+                                let Some(choice) = criteria.keys().min().cloned() else {
+                                    return Err(format!(
+                                        "Choice question '{question_id}' requires an option"
+                                    ));
+                                };
+                                let probabilities = criteria
+                                    .keys()
+                                    .map(|option| {
+                                        (
+                                            option.clone(),
+                                            Value::Num(if option == &choice { 1.0 } else { 0.0 }),
+                                        )
+                                    })
+                                    .collect();
+                                let mut answer = indexmap::IndexMap::new();
+                                answer.insert("type".to_string(), Value::Str("choice".to_string()));
+                                answer.insert("choice".to_string(), Value::Str(choice));
+                                answer.insert("probabilities".to_string(), Value::Map(probabilities));
+                                answer.insert("confidence".to_string(), Value::Num(1.0));
+                                Value::Map(answer)
+                            }
+                            "score" => {
+                                let Some(Value::List(criteria)) = fields.get("criteria") else {
+                                    return Err(format!(
+                                        "Score question '{question_id}' requires list criteria"
+                                    ));
+                                };
+                                if criteria.len() < 2 {
+                                    return Err(format!(
+                                        "Score question '{question_id}' requires at least two levels"
+                                    ));
+                                }
+                                let probabilities = criteria
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, _)| {
+                                        (
+                                            index.to_string(),
+                                            Value::Num(if index == 0 { 1.0 } else { 0.0 }),
+                                        )
+                                    })
+                                    .collect();
+                                let legend = criteria
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, value)| (index.to_string(), value.clone()))
+                                    .collect();
+                                let mut answer = indexmap::IndexMap::new();
+                                answer.insert("type".to_string(), Value::Str("score".to_string()));
+                                answer.insert("score".to_string(), Value::Num(0.0));
+                                answer.insert("probabilities".to_string(), Value::Map(probabilities));
+                                answer.insert("legend".to_string(), Value::Map(legend));
+                                answer.insert("confidence".to_string(), Value::Num(1.0));
+                                Value::Map(answer)
+                            }
+                            "noul" => {
+                                let mut answer = indexmap::IndexMap::new();
+                                answer.insert("type".to_string(), Value::Str("noul".to_string()));
+                                answer.insert("noul".to_string(), Value::Num(0.5));
+                                Value::Map(answer)
+                            }
+                            other => {
+                                return Err(format!(
+                                    "Unsupported decision question type '{other}'"
+                                ))
+                            }
+                        };
+                        answers.insert(question_id.clone(), answer);
+                    }
+
+                    let mut result = indexmap::IndexMap::new();
+                    result.insert("model".to_string(), Value::Str("mock".to_string()));
+                    result.insert("answers".to_string(), Value::Map(answers));
+                    return Ok((Value::Map(result), 0));
+                }
+
+                if provider == "typesafe"
+                    && env::var("TYPESAFE_API_KEY")
+                        .map_or(true, |key| key.trim().is_empty())
+                {
+                    return Err(
+                        "TYPESAFE_API_KEY is required when TURN_DECISION_PROVIDER=typesafe"
+                            .to_string(),
+                    );
+                }
+
+                let wasm_file = format!("{}_provider.wasm", provider);
+                let mut wasm_path = std::path::Path::new(".turn_modules").join(&wasm_file);
+
+                if !wasm_path.exists() {
+                    let mut path = std::env::current_dir().unwrap_or_default();
+                    for _ in 0..10 {
+                        let candidate = path.join(".turn_modules").join(&wasm_file);
+                        if candidate.exists() {
+                            wasm_path = candidate;
+                            break;
+                        }
+                        if !path.pop() {
+                            break;
+                        }
+                    }
+                }
+
+                let request = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "ai_decide",
+                    "params": {
+                        "state": serde_json::to_value(state).unwrap_or(serde_json::Value::Null),
+                        "questions": serde_json::to_value(questions).unwrap_or(serde_json::Value::Null),
+                        "context": serde_json::to_value(context).unwrap_or(serde_json::json!([])),
+                    },
+                    "id": 1,
+                });
+
+                let wasm_provider = load_wasm_provider(&provider, &wasm_path)?;
+                let response = wasm_provider
+                    .execute_inference(&request.to_string())
+                    .map_err(|error| format!("WASM decision execution failed: {error}"))?;
+                let parsed: serde_json::Value = serde_json::from_str(&response)
+                    .map_err(|error| format!("Decision provider returned invalid JSON: {error}"))?;
+
+                if let Some(error) = parsed.get("error").filter(|error| !error.is_null()) {
+                    return Err(format!("WASM Decision Driver Error: {error}"));
+                }
+
+                let result = parsed.get("result").cloned().ok_or_else(|| {
+                    "Decision provider response is missing a result".to_string()
+                })?;
+                let tokens = parsed
+                    .pointer("/usage/total_tokens")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                let value = serde_json::from_value(result)
+                    .map_err(|error| format!("Invalid decision result: {error}"))?;
+
+                Ok((value, tokens))
+            }) as ToolHandler,
+        );
+
         Self { tools }
+    }
+
+    pub fn playground() -> Self {
+        let mut registry = Self::new();
+        registry.tools.retain(|name, _| {
+            matches!(
+                name.as_str(),
+                "echo"
+                    | "llm_generate"
+                    | "llm_infer"
+                    | "ai_decide"
+                    | "__sys_json_parse"
+                    | "__sys_json_stringify"
+                    | "__sys_time_now"
+                    | "__sys_regex_match"
+                    | "__sys_regex_replace"
+                    | "len"
+                    | "list_push"
+                    | "list_contains"
+            )
+        });
+        registry
     }
 
     pub fn register(&mut self, name: impl Into<String>, handler: ToolHandler) {
@@ -713,5 +967,29 @@ impl ToolRegistry {
 
     pub fn has(&self, name: &str) -> bool {
         self.tools.contains_key(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_official_providers_are_valid_wasm_modules() {
+        let missing_path = Path::new("/turn/provider/does-not-exist.wasm");
+        for provider in [
+            "anthropic",
+            "azure_anthropic",
+            "azure_openai",
+            "azure_openai_responses",
+            "gemini",
+            "grok",
+            "ollama",
+            "openai",
+            "typesafe",
+        ] {
+            load_wasm_provider(provider, missing_path)
+                .unwrap_or_else(|error| panic!("{provider}: {error}"));
+        }
     }
 }

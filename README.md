@@ -5,13 +5,42 @@
   <a href="https://turn-lang.dev/#playground"><strong>Live Playground</strong></a>
 </p>
 
-Turn is the first programming language where autonomous agents are not a pattern you implement — they are the execution model. Actors, belief states, confidence-gated decisions, immutable state epochs, and crash-recoverable OODA loops are not library abstractions. They are how the VM works.
+Turn is a programming language where autonomous agents are not a pattern you implement — they are the execution model. Actors, managed context, confidence-aware decisions, durable suspension, and crash-recoverable execution are language and VM concepts rather than application-library conventions.
+
+## Decision Models Preview
+
+LLMs generate. Decision models judge. Turn coordinates both as durable effects.
+
+```turn
+let result = decide("The export button crashes in Safari", {
+    "department": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+            "billing": "Charges and refunds",
+            "technical": "Bugs and integrations"
+        }
+    }
+});
+
+return result["answers"]["department"];
+```
+
+Try the complete Choice + Score + Noul workflow without an API key:
+
+```bash
+git clone https://github.com/ekizito96/Turn.git
+cd Turn
+TURN_DECISION_PROVIDER=mock cargo run -- run examples/jev_triage.tn
+```
+
+Run the same program on TypeSafe Jev by setting `TYPESAFE_API_KEY` and removing the mock override. The TypeSafe adapter is bundled into the Turn binary.
 
 ---
 
 ## The Real Problem
 
-Production agentic software is not hard because parsing JSON is tedious. It is hard because **no general-purpose language has a runtime model that matches how agents actually work**.
+Production agentic software is not hard because parsing JSON is tedious. It is hard because general-purpose runtimes do not natively model the full lifecycle of long-running, probabilistic agents.
 
 An autonomous agent running a real workflow is:
 
@@ -19,7 +48,7 @@ An autonomous agent running a real workflow is:
 - A **belief system** — it forms hypotheses, accumulates evidence, retracts false assumptions, and updates its world model across turns
 - A **DAG scheduler** — it receives a dependency graph of tasks, tracks which steps are ready, dispatches sub-agents concurrently, and waits for results before proceeding
 - A **multi-tier memory architecture** — system context that never evicts, a sliding working memory window, and episodic storage for what overflows
-- A **probabilistic decision-maker** — every inference has a confidence attached, and whether to act, retry, or escalate depends on that confidence, not on whether the response parsed
+- A **probabilistic decision-maker** — when a model exposes confidence, whether to act, retry, or escalate depends on that signal, not only on whether the response parsed
 
 The industry solution is to bolt external infrastructure onto a general-purpose language: external stores for state, message queues for agent communication, schema validators for LLM output coercion, async runtimes for concurrency, and retry logic scattered across every layer. The larger the system, the more infrastructure you add — and none of it solves the root problem. It compensates for a language that has no concept of what an agent is.
 
@@ -31,7 +60,7 @@ The industry solution is to bolt external infrastructure onto a general-purpose 
 
 ### Actor Isolation with Linked Failure Propagation
 
-Every agent in Turn is an isolated process with its own stack, heap, and LLM context window. There is no shared state. `spawn_link` creates a dependency between two processes: when a child agent completes or fails, the parent receives an `ExitSignal` in its mailbox. The parent decides whether to retry, escalate, or compensate. This is not an async framework. It is the execution model.
+Every agent in Turn is an isolated process with its own frames, environment, managed context, memory, and mailbox. There is no shared mutable state. `spawn_link` creates a dependency between two processes: when a child agent completes or fails, the parent receives an `ExitSignal` in its mailbox. The parent decides whether to retry, escalate, or compensate. This is not an async framework. It is the execution model.
 
 ```turn
 let analyst_pid = spawn_link turn(task) {
@@ -40,15 +69,15 @@ let analyst_pid = spawn_link turn(task) {
 };
 
 let msg = receive;
-if msg["type"] == "exit" {
-    if msg["reason"] == "normal" { return msg["result"]; }
-    return handle_failure(msg["reason"]);
+if msg["type"] == "ExitSignal" {
+    if msg["reason"] != null { return handle_failure(msg["reason"]); }
+    return msg["result"];
 }
 ```
 
-### State as Immutable Epochs
+### Immutable State Values and Durable Continuations
 
-Turn enforces strict immutability. An agent's state is never mutated — every OODA cycle produces a new, complete state snapshot called an **epoch**. The struct spread operator (`..base`) makes this concise:
+Turn bindings and structured values are immutable. State evolution produces a new value, and the struct spread operator (`..base`) makes that concise:
 
 ```turn
 let next_state = WorkflowState {
@@ -58,11 +87,11 @@ let next_state = WorkflowState {
 };
 ```
 
-Because state is immutable and the VM checkpoints on every suspension, crash recovery is structural. The VM re-loads the last epoch and resumes from exactly where it left off. This is not a retry decorator. The language model makes it impossible for an agent to corrupt its own state.
+Because values are immutable and the VM checkpoints at suspension boundaries, recovery restores the last persisted continuation and replays its pending effect instead of injecting a placeholder result. Effect delivery is at-least-once, so non-idempotent tools should use idempotency keys.
 
 ### Probabilistic Control Flow
 
-Every `infer` call returns an `Uncertain(value, confidence)` — a first-class VM type. Confidence propagates through arithmetic. You gate execution on it directly:
+Inference providers that expose measured confidence return `Uncertain(value, confidence)`, a first-class VM value. Confidence propagates through arithmetic and can gate execution directly:
 
 ```turn
 let decision = infer AgentDecision {
@@ -75,11 +104,37 @@ if confidence decision < 0.85 {
 }
 ```
 
-This is not an if-statement around a try/catch. The `confidence` operator is a bytecode instruction. The VM enforces that uncertain values cannot be used as if they were certain without explicitly acknowledging the uncertainty.
+The `confidence` operator is a bytecode instruction. Values from providers without a confidence signal remain unwrapped rather than receiving a fabricated score.
 
-### Cognitive Type Safety
+### Decision Models as a Separate Effect
 
-Define a struct and call `infer`. The VM passes the schema to the LLM inference driver and guarantees the returned value matches that shape. No manual JSON parsing. No retry loop. If the value doesn't conform, the VM surfaces an error before your code ever touches the result.
+Generative inference and bounded decisions are different operations. `infer` asks a model to synthesize a typed value; `decide` evaluates explicit questions against state through a decision-model provider. The VM records each as a distinct durable effect, so applications can route them to different model classes without changing their control flow.
+
+```turn
+let questions = {
+    "department": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+            "billing": "Charges and refunds",
+            "technical": "Bugs and integrations"
+        }
+    }
+};
+
+let decision = decide(ticket, questions);
+let answer = decision["answers"]["department"];
+
+if answer["confidence"] < 0.8 {
+    send reviewer_pid, ticket;
+}
+```
+
+`decide(state, questions)` is provider-neutral. Turn ships a TypeSafe System One driver for Jev, while the language contract remains open to other bounded-decision models.
+
+### Schema-Constrained Inference
+
+Define a struct and call `infer`. The VM passes its schema to the inference driver and normalises the structured response into a Turn value. Drivers with strict structured-output support enforce the schema at the provider boundary; other drivers must report malformed responses as inference errors. Turn applications do not parse provider JSON directly.
 
 ```turn
 struct BeliefUpdate {
@@ -120,7 +175,7 @@ let agents = spawn_each(invoice_ids, turn(id: Num) {
 let results = gather agents;
 ```
 
-This is the native mass concurrency model in Turn. No Kubernetes. No message queues. No distributed systems infrastructure. The VM scheduler handles the parallelism; `gather` handles the collection.
+This is Turn's native local concurrency model. The VM scheduler handles actor execution and `gather` handles ordered collection without requiring an application-level queue abstraction.
 
 ### Compile-Time Type Enforcement
 
@@ -152,9 +207,9 @@ No instrumentation required. No code changes needed.
 
 ## Provider Agnosticism via WASM Drivers
 
-LLM provider APIs change constantly. Turn does not track them. Every provider is an isolated WebAssembly module in `.turn_modules/` — a driver that translates a standard Turn inference request into that provider's HTTP format and normalises the response back.
+LLM provider APIs change constantly. Turn isolates each provider behind a WebAssembly driver that translates a standard Turn request into the provider's HTTP format and normalises the response back.
 
-Turn ships with drivers for **Anthropic**, **OpenAI**, **Google Gemini**, **xAI Grok**, **Ollama**, **Azure OpenAI**, and **Azure Anthropic**. Set `TURN_LLM_PROVIDER` and the VM routes accordingly. If a provider changes their API, you update one `.wasm` file. The Turn compiler and VM are untouched.
+Turn bundles generative drivers for **Anthropic**, **OpenAI**, **Google Gemini**, **xAI Grok**, **Ollama**, **Azure OpenAI**, and **Azure Anthropic**, plus a decision driver for **TypeSafe System One models**. Set `TURN_LLM_PROVIDER` for `infer` and `TURN_DECISION_PROVIDER` for `decide`. Project-local drivers in `.turn_modules/` override bundled drivers, so provider upgrades and private adapters do not require compiler or VM changes.
 
 You can ship your own driver for any private or emerging model:
 
@@ -167,9 +222,9 @@ Compile to `wasm32-unknown-unknown`, drop it in `.turn_modules/`, and Turn picks
 
 ---
 
-## Compile-Time Schema Adapters
+## Experimental OpenAPI Schema Adapters
 
-When an API publishes a structured specification (OpenAPI, GraphQL, FHIR), Turn absorbs it directly into the compiler. `use schema::openapi` fetches the schema, parses it, and synthesises native bytecode closures at compile time. No SDK dependencies, no boilerplate HTTP wrappers, no "function registry."
+Turn includes an experimental OpenAPI-to-AST compiler that parses schemas and synthesises typed Turn closures. The `use schema::openapi` syntax below is the intended surface, but it is not yet wired into the stable runner path. GraphQL and FHIR adapters remain design targets rather than shipped features.
 
 ```turn
 let time = use "std/time";
@@ -181,7 +236,7 @@ let events = gcal.events.list({
 });
 ```
 
-The API's types become the actual memory layout of the Turn VM. For unstructured or undocumented data, the `infer Struct` primitive coerces raw payloads into typed memory using the LLM as a native type coercer.
+Do not depend on schema adapters for production workflows until runner integration and conformance tests land.
 
 ---
 
@@ -209,6 +264,7 @@ The `grant` keyword requests a cryptographic capability from the Turn VM host. T
 
 ```bash
 cargo install --git https://github.com/ekizito96/Turn turn
+turn doctor
 ```
 
 ### Your First Agent
@@ -263,6 +319,10 @@ export AZURE_OPENAI_KEY=your-key
 export AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 export AZURE_OPENAI_DEPLOYMENT=your-deployment-name
 
+# TypeSafe Jev for decide(...)
+export TURN_DECISION_PROVIDER=typesafe
+export TYPESAFE_API_KEY=your-key
+
 turn run hello.tn
 ```
 
@@ -275,22 +335,25 @@ The `impl/examples/` directory contains multi-agent demonstrations:
 - [**Algorithmic Trading Syndicate**](impl/examples/quant_syndicate.tn): Three agents (Technical, Sentiment, Risk) run concurrently, debate a trade via mailboxes, and a Chairman agent executes the final decision with confidence gating.
 - [**Investment Committee**](impl/examples/investment_committee.tn): Specialist agents evaluate an equity position concurrently using live Yahoo Finance data.
 - [**Marketing Agency**](impl/examples/marketing_agency.tn): An SEO Specialist, Copywriter, and Creative Director collaborate to produce ad copy using Wikipedia research.
+- [**Jev Support Triage**](examples/jev_triage.tn): A TypeSafe decision model classifies a support ticket and Turn gates autonomous routing on confidence.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `turn run <file> [--id <id>] [--store <path>]` | Compile and run a Turn program |
+| `turn run <file> --sandbox` | Run with host I/O, imports, and identity grants denied |
 | `turn inspect <id> [--store <path>]` | X-ray a suspended agent's full VM state |
 | `turn serve [--port <n>] [--store <path>]` | Start the HTTP server for remote agent execution |
 | `turn lsp` | Start the Language Server Protocol server (stdio) |
 | `turn add <name> <url>` | Add a package dependency |
+| `turn doctor` | Show selected providers, bundled-driver availability, and credential status |
 
 ---
 
 ## Documentation
 
-Full language reference, runtime model, and architecture guide at [turn-lang.dev/docs](https://turn-lang.dev/docs).
+Full language reference, runtime model, and architecture guide at [turn-lang.dev/docs](https://turn-lang.dev/docs). Release compatibility follows [Semantic Versioning](VERSIONING.md).
 
 ## License
 

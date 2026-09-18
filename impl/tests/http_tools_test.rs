@@ -91,13 +91,7 @@ fn test_http_get_error() {
     );
 
     let tools = tools::ToolRegistry::new();
-    let result = run_with_tools(&source, &tools).unwrap();
-
-    // Should return error string on error (501 or 404 or connection error)
-    match result {
-        Value::Str(s) => {
-            assert!(s.contains("HTTP request failed") || s.contains("HTTP request error"))
-        }
-        _ => panic!("Expected error string, got {:?}", result),
-    }
+    let error = run_with_tools(&source, &tools).expect_err("HTTP failure should be uncaught");
+    let message = error.to_string();
+    assert!(message.contains("HTTP request failed") || message.contains("HTTP request error"));
 }

@@ -92,3 +92,66 @@ fn test_infer_with_dynamic_prompt() {
         _ => panic!("Expected suspension, got {:?}", result),
     }
 }
+
+#[test]
+fn test_decide_suspension_flow() {
+    let source = r#"
+    context.append("Account tier: enterprise");
+    let result = decide(
+        "The customer reports duplicate charges.",
+        {
+            "department": {
+                "type": "choice",
+                "instructions": "Which team should handle this?",
+                "criteria": {
+                    "billing": "Charges and refunds",
+                    "technical": "Bugs and integrations"
+                }
+            }
+        }
+    );
+    return result;
+    "#;
+
+    let mut vm = compile_and_start(source);
+    let result = vm.run();
+
+    match result {
+        VmResult::Suspended {
+            tool_name,
+            arg,
+            continuation,
+        } => {
+            assert_eq!(tool_name, "ai_decide");
+
+            if let Value::Map(request) = arg {
+                assert_eq!(
+                    request.get("state"),
+                    Some(&Value::Str(
+                        "The customer reports duplicate charges.".to_string()
+                    ))
+                );
+                assert!(matches!(request.get("questions"), Some(Value::Map(_))));
+                assert_eq!(
+                    request.get("context"),
+                    Some(&Value::List(vec![Value::Str(
+                        "Account tier: enterprise".to_string()
+                    )]))
+                );
+            } else {
+                panic!("Expected Map arg, got {:?}", arg);
+            }
+
+            let mut answers = indexmap::IndexMap::new();
+            answers.insert("choice".to_string(), Value::Str("billing".to_string()));
+            answers.insert("confidence".to_string(), Value::Num(0.96));
+
+            let mut vm = Vm::resume_with_result(continuation, Value::Map(answers.clone()));
+            match vm.run() {
+                VmResult::Complete(value) => assert_eq!(value, Value::Map(answers)),
+                other => panic!("Expected completion, got {:?}", other),
+            }
+        }
+        other => panic!("Expected suspension, got {:?}", other),
+    }
+}

@@ -33,6 +33,7 @@ pub enum Token {
     Type, // 'type' keyword for aliases
     Return,
     Infer, // NEW
+    Decide,
     Struct,
     If,
     Else,
@@ -137,6 +138,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("return", Token::Return),
     ("gather", Token::Gather),
     ("infer", Token::Infer), // NEW
+    ("decide", Token::Decide),
     ("struct", Token::Struct),
     ("impl", Token::Impl),
     ("type", Token::Type),

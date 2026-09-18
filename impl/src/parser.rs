@@ -540,6 +540,19 @@ impl Parser {
                     span,
                 })
             }
+            Some(Token::Decide) => {
+                self.next();
+                self.expect(Token::LParen)?;
+                let state = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                let questions = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(Expr::Decide {
+                    state: Box::new(state),
+                    questions: Box::new(questions),
+                    span,
+                })
+            }
             Some(Token::Send) => {
                 self.next();
                 // send <pid>, <msg>

@@ -145,6 +145,7 @@ pub unsafe extern "C" fn transform_request(ptr: u32, len: u32) -> u64 {
     let mut body = json!({
         "model": "$env:OPENAI_MODEL:gpt-4o", // Host resolves this template
         "messages": messages,
+        "logprobs": true,
     });
 
     if req.params.schema != json!({"type": "any"}) {
@@ -180,6 +181,202 @@ struct HostHttpResponse {
     status: u16,
     body: String,
     // headers: Value
+}
+
+/// Byte span of a single sampled token, plus the log probability the model assigned it.
+struct TokenSpan {
+    start: usize,
+    end: usize,
+    logprob: f64,
+}
+
+/// `choices[0].logprobs.content` lists tokens in emission order and their byte
+/// lengths concatenate to exactly the message content, so offsets are exact.
+fn token_spans(entries: &[Value]) -> Vec<TokenSpan> {
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    for entry in entries {
+        let len = entry
+            .get("bytes")
+            .and_then(|b| b.as_array())
+            .map(|a| a.len())
+            .or_else(|| entry.get("token").and_then(|t| t.as_str()).map(|s| s.len()))
+            .unwrap_or(0);
+        let logprob = entry.get("logprob").and_then(|l| l.as_f64()).unwrap_or(0.0);
+        spans.push(TokenSpan {
+            start: offset,
+            end: offset + len,
+            logprob,
+        });
+        offset += len;
+    }
+    spans
+}
+
+/// Reads a JSON string starting at the opening quote. Returns the key and the index past the closing quote.
+fn scan_string(bytes: &[u8], mut i: usize) -> Option<(String, usize)> {
+    if *bytes.get(i)? != b'"' {
+        return None;
+    }
+    i += 1;
+    let start = i;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'"' => {
+                let raw = String::from_utf8_lossy(&bytes[start..i]).into_owned();
+                let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
+                return Some((unescaped, i + 1));
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Returns the index one past the end of the JSON value starting at `i`.
+fn scan_value(bytes: &[u8], i: usize) -> Option<usize> {
+    match *bytes.get(i)? {
+        b'"' => scan_string(bytes, i).map(|(_, end)| end),
+        b'{' | b'[' => {
+            let mut depth = 0usize;
+            let mut in_string = false;
+            let mut j = i;
+            while j < bytes.len() {
+                if in_string {
+                    match bytes[j] {
+                        b'\\' => j += 1,
+                        b'"' => in_string = false,
+                        _ => {}
+                    }
+                } else {
+                    match bytes[j] {
+                        b'"' => in_string = true,
+                        b'{' | b'[' => depth += 1,
+                        b'}' | b']' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                return Some(j + 1);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            None
+        }
+        _ => {
+            let mut j = i;
+            while j < bytes.len() && bytes[j] != b',' && bytes[j] != b'}' && bytes[j] != b']' {
+                j += 1;
+            }
+            while j > i && bytes[j - 1].is_ascii_whitespace() {
+                j -= 1;
+            }
+            Some(j)
+        }
+    }
+}
+
+/// Byte spans of each top-level field's *value* in a JSON object.
+fn top_level_field_spans(src: &str) -> Vec<(String, usize, usize)> {
+    let bytes = src.as_bytes();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] != b'{' {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return spans;
+    }
+    i += 1;
+    loop {
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] == b'}' {
+            break;
+        }
+        let (key, after_key) = match scan_string(bytes, i) {
+            Some(v) => v,
+            None => break,
+        };
+        i = after_key;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b':' {
+            break;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let start = i;
+        let end = match scan_value(bytes, i) {
+            Some(e) => e,
+            None => break,
+        };
+        spans.push((key, start, end));
+        i = end;
+    }
+    spans
+}
+
+/// Perplexity-normalised probability over the tokens overlapping `[start, end)`.
+fn span_confidence(tokens: &[TokenSpan], start: usize, end: usize) -> Option<f64> {
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for token in tokens {
+        if token.start < end && token.end > start {
+            sum += token.logprob;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    Some((sum / count as f64).exp())
+}
+
+/// Maps token log probabilities onto the fields of a structured completion.
+///
+/// Under `strict` JSON schema the braces, keys and separators are schema-forced
+/// and score near certainty, so they are excluded from every average. Only the
+/// tokens that make up field values are measured.
+fn confidence_map(content: &str, logprob_entries: &[Value]) -> Option<Value> {
+    if logprob_entries.is_empty() {
+        return None;
+    }
+    let tokens = token_spans(logprob_entries);
+    let fields = top_level_field_spans(content);
+
+    let mut map = serde_json::Map::new();
+    let mut value_sum = 0.0;
+    let mut value_count = 0usize;
+
+    for (key, start, end) in &fields {
+        if let Some(p) = span_confidence(&tokens, *start, *end) {
+            map.insert(key.clone(), json!(p));
+        }
+        for token in &tokens {
+            if token.start < *end && token.end > *start {
+                value_sum += token.logprob;
+                value_count += 1;
+            }
+        }
+    }
+
+    let overall = if value_count > 0 {
+        (value_sum / value_count as f64).exp()
+    } else {
+        let total: f64 = tokens.iter().map(|t| t.logprob).sum();
+        (total / tokens.len() as f64).exp()
+    };
+    map.insert("_overall".to_string(), json!(overall));
+
+    Some(Value::Object(map))
 }
 
 /// Phase 2: Host (HTTP Response) -> Wasm -> Host (Turn Response)
@@ -251,18 +448,110 @@ pub unsafe extern "C" fn transform_response(ptr: u32, len: u32) -> u64 {
         let content = message["content"].as_str().unwrap_or("");
         let parsed_result: Value = serde_json::from_str(content).unwrap_or_else(|_| json!(content));
 
-        pack_string(
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": parsed_result
-            })
-            .to_string(),
-        )
+        let logprob_entries = choices[0]
+            .pointer("/logprobs/content")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut response = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": parsed_result
+        });
+
+        // Absent when the model does not support logprobs. The host then treats
+        // the result as unmeasured rather than inventing a confidence.
+        if let Some(confidence) = confidence_map(content, &logprob_entries) {
+            response["confidence"] = confidence;
+        }
+
+        if let Some(usage) = gpt_json.get("usage") {
+            response["usage"] = usage.clone();
+        }
+
+        pack_string(response.to_string())
     } else {
         pack_string(
             json!({"jsonrpc": "2.0", "id": 1, "error": "Invalid structure from OpenAI"})
                 .to_string(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One token per byte, so spans line up with string indices.
+    fn tokens_per_byte(content: &str, logprob_at: impl Fn(usize) -> f64) -> Vec<Value> {
+        content
+            .bytes()
+            .enumerate()
+            .map(|(i, b)| {
+                json!({
+                    "token": String::from_utf8_lossy(&[b]).into_owned(),
+                    "logprob": logprob_at(i),
+                    "bytes": [b],
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn field_spans_cover_values_not_keys() {
+        let src = r#"{"name":"Acme","revenue":42}"#;
+        let spans = top_level_field_spans(src);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].0, "name");
+        assert_eq!(&src[spans[0].1..spans[0].2], "\"Acme\"");
+        assert_eq!(spans[1].0, "revenue");
+        assert_eq!(&src[spans[1].1..spans[1].2], "42");
+    }
+
+    #[test]
+    fn field_spans_handle_nested_objects_and_arrays() {
+        let src = r#"{"a":{"b":[1,2],"c":"}"},"d":null}"#;
+        let spans = top_level_field_spans(src);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(&src[spans[0].1..spans[0].2], r#"{"b":[1,2],"c":"}"}"#);
+        assert_eq!(&src[spans[1].1..spans[1].2], "null");
+    }
+
+    #[test]
+    fn confidence_is_per_field_and_ignores_schema_forced_tokens() {
+        let content = r#"{"name":"Acme","revenue":42}"#;
+        // Certain name, quarter-probability revenue, and deliberately terrible
+        // scores on the structural tokens the schema forced anyway.
+        let quarter = 0.25f64.ln();
+        let entries = tokens_per_byte(content, |i| match i {
+            8..=13 => 0.0,
+            25..=26 => quarter,
+            _ => -10.0,
+        });
+
+        let map = confidence_map(content, &entries).expect("logprobs present");
+        let name = map["name"].as_f64().unwrap();
+        let revenue = map["revenue"].as_f64().unwrap();
+        let overall = map["_overall"].as_f64().unwrap();
+
+        assert!((name - 1.0).abs() < 1e-9);
+        assert!((revenue - 0.25).abs() < 1e-9);
+        // Mean over the eight value tokens only, not the twenty structural ones.
+        assert!((overall - 0.25f64.powf(0.25)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn no_logprobs_means_no_confidence() {
+        assert!(confidence_map(r#"{"a":1}"#, &[]).is_none());
+    }
+
+    #[test]
+    fn non_object_result_falls_back_to_whole_sequence() {
+        let content = "\"hello\"";
+        let entries = tokens_per_byte(content, |_| 0.5f64.ln());
+        let map = confidence_map(content, &entries).expect("logprobs present");
+        assert!(map.get("_overall").is_some());
+        assert!((map["_overall"].as_f64().unwrap() - 0.5).abs() < 1e-9);
     }
 }

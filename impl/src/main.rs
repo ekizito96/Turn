@@ -35,6 +35,10 @@ enum Commands {
         /// Path to store directory
         #[arg(long, default_value = ".turn_store")]
         store: PathBuf,
+
+        /// Deny host filesystem, environment, network tools, imports, and identity grants
+        #[arg(long)]
+        sandbox: bool,
     },
 
     /// Start Turn server (HTTP API)
@@ -69,6 +73,45 @@ enum Commands {
         /// URL to source file (e.g. raw github link)
         url: String,
     },
+
+    /// Check provider availability and credentials
+    Doctor,
+}
+
+fn credential_for_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("OPENAI_API_KEY"),
+        "anthropic" => Some("ANTHROPIC_API_KEY"),
+        "gemini" => Some("GEMINI_API_KEY"),
+        "grok" => Some("XAI_API_KEY"),
+        "azure_openai" | "azure_openai_responses" => Some("AZURE_OPENAI_KEY"),
+        "azure_anthropic" => Some("AZURE_ANTHROPIC_KEY"),
+        "typesafe" => Some("TYPESAFE_API_KEY"),
+        "mock" | "ollama" => None,
+        _ => None,
+    }
+}
+
+fn print_provider_status(kind: &str, provider: &str) {
+    let source = if turn::tools::bundled_provider_available(provider) {
+        "bundled"
+    } else {
+        "external"
+    };
+    println!("{kind}: {provider} ({source} driver)");
+
+    if let Some(variable) = credential_for_provider(provider) {
+        let status = std::env::var(variable)
+            .map(|value| {
+                if value.trim().is_empty() {
+                    "missing"
+                } else {
+                    "set"
+                }
+            })
+            .unwrap_or("missing");
+        println!("  {variable}: {status}");
+    }
 }
 
 fn main() -> Result<()> {
@@ -91,16 +134,28 @@ fn main() -> Result<()> {
                 Server::new(stdin, stdout, socket).serve(service).await;
             });
         }
-        Commands::Run { file, id, store } => {
+        Commands::Run {
+            file,
+            id,
+            store,
+            sandbox,
+        } => {
             let source_content = fs::read_to_string(&file)
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {}", file.display(), e))?;
 
             // Setup Store and Tools
             let store = FileStore::new(store);
-            let tools = ToolRegistry::new();
+            let tools = if sandbox {
+                ToolRegistry::playground()
+            } else {
+                ToolRegistry::new()
+            };
 
             // Setup Runner
             let mut runner = Runner::new(store, tools);
+            if sandbox {
+                runner = runner.sandboxed();
+            }
 
             // Run
             match runner.run(&id, &source_content, Some(file.clone())) {
@@ -168,6 +223,9 @@ fn main() -> Result<()> {
                         .unwrap_or_else(|| "none".to_string());
                     println!("STATUS: Suspended (Instruction Pointer: {})", ip);
                     println!("GAS REMAINING: {} ops", state.gas_remaining);
+                    if let Some(pending) = &state.runtime.pending_effect {
+                        println!("PENDING EFFECT: {}", pending.tool_name);
+                    }
 
                     println!("\n{cyan}[1] 🧠 THE TRIPARTITE CONTEXT{reset}");
                     println!(
@@ -277,6 +335,16 @@ fn main() -> Result<()> {
                     eprintln!("Error loading state: {}", e);
                 }
             }
+        }
+        Commands::Doctor => {
+            let inference_provider =
+                std::env::var("TURN_LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
+            let decision_provider =
+                std::env::var("TURN_DECISION_PROVIDER").unwrap_or_else(|_| "typesafe".to_string());
+
+            println!("Turn {VERSION}");
+            print_provider_status("Inference", &inference_provider);
+            print_provider_status("Decision", &decision_provider);
         }
         Commands::Add { name, url } => {
             let modules_dir = PathBuf::from(".turn_modules");

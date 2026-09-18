@@ -36,6 +36,11 @@ impl Store for MemoryStore {
     fn load(&self, id: &str) -> Result<Option<VmState>> {
         Ok(self.data.borrow().get(id).cloned())
     }
+
+    fn delete(&mut self, id: &str) -> Result<()> {
+        self.data.borrow_mut().remove(id);
+        Ok(())
+    }
 }
 
 #[test]
@@ -72,19 +77,13 @@ fn test_persistence_crash_recovery() {
     let tools = ToolRegistry::new();
     let mut runner = Runner::new(new_store, tools);
 
-    // 5. Run again -> Should resume and complete
+    // 5. Run again -> Should replay the pending effect and complete
     let result = runner.run("agent1", source, None).unwrap();
 
     // 6. Verify result
-    // "step1" + "step2" = "step1step2"
-    // BUT: Since we crashed at Save 2 (before persisting "step1"), we revert to Save 1 state.
-    // Save 1 state is "suspended at Tool 1".
-    // When we resume, we inject Null (simulating tool failure/loss).
-    // So 'a' becomes Null.
-    // Then we proceed to Tool 2. 'b' becomes "step2".
-    // Result is Null + "step2" = "nullstep2".
     match result {
-        Value::Str(s) => assert_eq!(s, "nullstep2"),
+        Value::Str(s) => assert_eq!(s, "step1step2"),
         _ => panic!("Expected string, got {:?}", result),
     }
+    assert!(!store.data.borrow().contains_key("agent1"));
 }

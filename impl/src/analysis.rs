@@ -302,6 +302,7 @@ impl Analysis {
             Expr::Confidence { .. } => Some(Type::Num),
             Expr::Grant { .. } => Some(Type::Identity),
             Expr::Infer { target_ty, .. } => Some(target_ty.clone()),
+            Expr::Decide { .. } => Some(Type::Any),
             Expr::Vec { items, .. } => {
                 // Infer type as Vec.
                 // Assuming Vec<Num>.
@@ -511,11 +512,7 @@ impl Analysis {
                 }
                 Some(Type::Any)
             }
-            Expr::If {
-                then_block: _,
-                else_block: _,
-                ..
-            } => {
+            Expr::If { .. } => {
                 // To be precise we should infer type of block. For now Any.
                 Some(Type::Any)
             }
@@ -759,6 +756,12 @@ impl Analysis {
             }
             Expr::Infer { body, .. } => {
                 self.visit_block(body);
+            }
+            Expr::Decide {
+                state, questions, ..
+            } => {
+                self.visit_expr(state);
+                self.visit_expr(questions);
             }
             Expr::If {
                 cond,
