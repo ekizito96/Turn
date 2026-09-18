@@ -4,6 +4,9 @@ use anyhow::Result;
 pub trait Store {
     fn save(&mut self, id: &str, state: &VmState) -> Result<()>;
     fn load(&self, id: &str) -> Result<Option<VmState>>;
+    fn delete(&mut self, _id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub struct FileStore {
@@ -36,5 +39,13 @@ impl Store for FileStore {
         let file = std::fs::File::open(path)?;
         let state: VmState = serde_json::from_reader(file)?;
         Ok(Some(state))
+    }
+
+    fn delete(&mut self, id: &str) -> Result<()> {
+        let path = self.base_path.join(format!("{}.json", id));
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
     }
 }

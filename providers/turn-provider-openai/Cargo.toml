@@ -1,6 +1,6 @@
 [package]
 name = "turn-provider-openai"
-version = "0.5.0-alpha"
+version = "2.0.0"
 edition = "2021"
 description = "Official OpenAI Inference Driver for Turn (standard api.openai.com)"
 

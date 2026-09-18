@@ -1,4 +1,5 @@
 # Rust
+target/
 impl/target/
 .turn_store/
 

@@ -8,5 +8,6 @@ members = [
     "turn-provider-azure-anthropic",
     "turn-provider-azure-openai-responses",
     "turn-provider-gemini",
+    "turn-provider-typesafe",
 ]
 resolver = "2"

@@ -15,16 +15,17 @@ The **configuration** is the full state of the **process** at any point. It is a
 | **memory**     | Managed memory store. Key-value map plus optional semantic addressing metadata. | Per process; may be persisted across runs (implementation-defined). Updated by `remember`; read by `recall`. |
 | **mailbox**    | Queue of messages for actor-style concurrency (`send`/`receive`). | Per process. Updated by `send`; consumed by `receive`. |
 | **tool_registry** | Tool registry: map from tool name (string) to handler. | Set at startup. Used when evaluating `call(name, arg)` and `infer` (via an inference effect). |
-| **turn_state** | Current turn id (optional); pending suspension (if any). | Updated when entering a turn and when suspending/resuming on effects (`call`, `infer`, `suspend`). |
+| **turn_state** | Current turn id (optional); pending suspension (if any). | Updated when entering a turn and when suspending/resuming on effects (`call`, `infer`, `decide`, `suspend`). |
+| **pending_effect** | Suspended effect name and serialized argument, when execution is waiting at an effect boundary. | Set when the VM suspends; cleared when a result or error is injected. |
 | **program**    | Remaining program to execute (or current turn body). | For interpreter: pointer into AST or current statement. |
 
 **Notation:** We write a configuration as a tuple or record, e.g.:
 
 ```
-Config = (env, context, memory, mailbox, tool_registry, turn_state, program)
+Config = (env, context, memory, mailbox, tool_registry, turn_state, pending_effect, program)
 ```
 
-For **serialization** (checkpoint, replay, debug): we serialize `env`, `context`, `memory`, `mailbox`, and `turn_state`. We do **not** serialize `tool_registry` (it is runtime setup) or the full `program` (we can store program source or AST separately). So the "serializable state" is `(env, context, memory, mailbox, turn_state)`.
+For **serialization** (checkpoint, replay, debug): we serialize `env`, `context`, `memory`, `mailbox`, `turn_state`, and `pending_effect`. We do **not** serialize `tool_registry` (it is runtime setup) or the full `program` (we can store program source or AST separately). So the "serializable state" is `(env, context, memory, mailbox, turn_state, pending_effect)`.
 
 ### Invariants (preserved by every transition)
 
@@ -32,7 +33,7 @@ The following must hold at **every** step (and the runtime must enforce them so 
 
 1. **Context bound:** |context| ≤ N (or total context size ≤ M, if the runtime measures in tokens or bytes). On `context.append(expr)` when at the bound, the runtime either evicts (e.g. drop oldest) or fails (see error model); it does **not** allow context to grow beyond N.
 2. **Configuration well-formedness:** `env` is a finite map; `context` is a sequence of values; `memory` is a key-value map; `tool_registry` is a map from tool names to handlers; `program` is a valid remaining program (or the empty program). No component is undefined or malformed.
-3. **Serializable state:** The tuple `(env, context, memory, mailbox, turn_state)` is sufficient to restore execution (with program and tool_registry provided separately). So checkpointing does not lose information needed to resume.
+3. **Serializable state:** The tuple `(env, context, memory, mailbox, turn_state, pending_effect)` is sufficient to restore execution (with program and tool_registry provided separately). Checkpointing retains the effect request needed to resume.
 
 Implementations must maintain these invariants. The transition relation is defined so that every step preserves them (context bound by eviction or fail on append; well-formedness by construction; serializable state unchanged by step).
 
@@ -56,7 +57,7 @@ We define a **small-step** transition: one step takes the configuration to a new
 **Step relation:**  
 `Config → Config'`  or  `Config → Suspension(effect_name, arg, continuation)`
 
-**Suspension** means: the program has evaluated to an **effect boundary** (`call`, `infer`, or `suspend`) and the runtime must perform an external action or durable commit. The **continuation** is the rest of the program (and env, etc.) that will run when we resume with the effect result (or a null result for `suspend`).
+**Suspension** means: the program has evaluated to an **effect boundary** (`call`, `infer`, `decide`, or `suspend`) and the runtime must perform an external action or durable commit. The **continuation** is the rest of the program (and env, etc.) that will run when we resume with the effect result (or a null result for `suspend`).
 
 **Rules (informal):**
 
@@ -73,11 +74,15 @@ We define a **small-step** transition: one step takes the configuration to a new
    - If `stmt` is `expr;`: evaluate `expr`; discard result; continue with `rest`.
    - If `stmt` is `turn block`: enter the turn—next program is the block body; turn_state updated (e.g. turn_id incremented). Continue.
 
-2. **Resumption:** When the runtime has a **Suspension(tool_name, arg, cont)** and the tool handler has produced a result `res`, we **resume**: replace the configuration with the continuation and a synthetic "result" value, and continue from the point after the `call`. (The exact way the result is fed back—e.g. a special variable or stack slot—is implementation detail; the spec only requires that the program can use the result.)
+2. **Resumption:** When the runtime has a **Suspension(tool_name, arg, cont)** and the tool handler has produced a result `res`, we **resume**: clear `pending_effect`, replace the configuration with the continuation and a synthetic "result" value, and continue from the point after the `call`. (The exact way the result is fed back—e.g. a special variable or stack slot—is implementation detail; the spec only requires that the program can use the result.)
 
 3. **Expression evaluation:** Expressions (in let, append, remember, call, return, if condition) are evaluated in the current env to a value. No side effects during expression evaluation except that we might eventually hit a `call` in a nested statement.
 
 **One turn:** A **turn** is the execution of a `turn { body }` from start until (a) the body runs to completion (e.g. `return` or end of block), or (b) the body suspends on an effect boundary (`call`, `infer`, `suspend`). So "one turn" is the maximal sequence of steps that starts with entering a turn and ends with either turn completion or suspension.
+
+### Effect delivery after restart
+
+Before invoking an external effect, the runner persists the continuation together with `tool_name` and `arg`. If the process restarts while that checkpoint exists, the runner replays the pending effect and resumes with its result. Delivery is **at-least-once**: a crash after an external system accepts an effect but before Turn persists later progress may cause that effect to run again. Non-idempotent tools must accept or derive an idempotency key.
 
 **Big-step (optional):** We can also define a **big-step** relation for a whole turn: `(config, turn_body) ⇓ (config', result)` or `(config, turn_body) ⇓ Suspension(...)`. The small-step relation defines the same behavior; big-step is a convenient abstraction for "run this turn to completion or suspension."
 
@@ -95,7 +100,7 @@ Turn's core language is **deterministic**: given a configuration and a sequence 
 - **Testing:** Provide deterministic inputs → test agent behavior.
 - **Physics/math:** Execution is a function \(S_{t+1} = F(S_t, e_t)\) where \(e_t\) are external events. This is **well-defined** and **reproducible**.
 
-**Implementation:** The runtime must log external inputs (tool results) as part of the trace. Replay = restore configuration + replay input sequence.
+**Current implementation boundary:** The runner persists pending effect requests and re-executes them after restart. It does not yet persist a complete effect-result journal for automatic offline replay. Deterministic tests and reproductions supply recorded or mocked effect results explicitly.
 
 ---
 
@@ -125,9 +130,9 @@ So "run this Turn program" means: create one **process** with env (empty), conte
 
 ## 6. Summary
 
-- **Configuration** = process state = (env, context, memory, mailbox, tool_registry, turn_state, program).
+- **Configuration** = process state = (env, context, memory, mailbox, tool_registry, turn_state, pending_effect, program).
 - **One step** = small-step transition or suspension. **One turn** = run a turn body to completion or suspension.
-- **Serializable state** = (env, context, memory, turn_state) for checkpoint/replay of the agent.
+- **Serializable state** = (env, context, memory, mailbox, turn_state, pending_effect) for checkpoint/replay of the agent.
 - **Default runtime** = one agent with in-memory context object (bounded), in-memory memory object, at least `echo` tool.
 
 This document is the single source of truth for the runtime. Implementations (interpreter, debugger, trace viewer) must conform to this model.
@@ -140,9 +145,9 @@ To achieve the "Universal Agent" capability (durable, pausable, resumable), impl
 2.  **Run:** Execute until `Complete` or `Suspended`.
 3.  **Handle Suspension:**
     *   If `Suspended(tool, arg, continuation)`:
-    *   **Persist:** Save `continuation` to durable storage (mechanism implementation-defined).
+    *   **Persist:** Save `continuation` and the pending effect request to durable storage (mechanism implementation-defined).
     *   **Execute:** Run the tool (async, human-in-the-loop, etc.).
-    *   **Resume:** Load `continuation`, inject `result`, and goto Step 2.
+    *   **Resume:** Load `continuation`; after restart, replay any pending effect; inject `result`; and go to Step 2.
 4.  **Complete:** Return final value.
 
 This loop ensures that the agent is never "blocked" on a thread, but rather "suspended" in state. This is the key to scalable, long-running agentic software.

@@ -7,6 +7,45 @@ on:
     branches: [main]
 
 jobs:
+  providers:
+    name: Provider drivers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: providers
+
+      - name: Check TypeSafe driver format
+        run: cargo fmt -p turn-provider-typesafe -- --check
+        working-directory: providers
+
+      - name: Test providers
+        run: cargo test --workspace
+        working-directory: providers
+
+      - name: Build WASM providers
+        run: cargo build --workspace --release --target wasm32-unknown-unknown
+        working-directory: providers
+
+      - name: Verify provider artifacts
+        run: |
+          for name in anthropic azure_anthropic azure_openai azure_openai_responses gemini grok ollama openai typesafe; do
+            test -s "providers/target/wasm32-unknown-unknown/release/turn_provider_${name}.wasm"
+            test -s "impl/assets/${name}_provider.wasm"
+          done
+
+      - name: Load bundled providers
+        run: cargo test --manifest-path impl/Cargo.toml --lib bundled_official_providers_are_valid_wasm_modules
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -60,6 +99,5 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build and run hello_turn
-        run: |
-          cd impl && cargo run --quiet -- run tests/hello_turn.tn
-        working-directory: .
+        run: cargo run --quiet -- run tests/hello_turn.tn
+        working-directory: impl

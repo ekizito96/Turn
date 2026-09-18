@@ -14,18 +14,6 @@ use turn::parser::Parser;
 use turn::value::Value;
 use turn::vm::{Vm, VmResult};
 
-fn compile_and_run(source: &str) -> Value {
-    let tokens = Lexer::new(source).tokenize().unwrap();
-    let program = Parser::new(tokens).parse().unwrap();
-    let mut compiler = Compiler::new();
-    let code = compiler.compile(&program);
-    let mut vm = Vm::new(&code);
-    match vm.run() {
-        VmResult::Complete(v) => v,
-        _ => Value::Null,
-    }
-}
-
 fn compile_bytecode(source: &str) -> Vec<turn::bytecode::Instr> {
     let tokens = Lexer::new(source).tokenize().unwrap();
     let program = Parser::new(tokens).parse().unwrap();

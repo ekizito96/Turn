@@ -2,9 +2,19 @@
 
 All notable changes to the Turn Language will be documented in this file.
 
+This project follows [Semantic Versioning](VERSIONING.md).
+
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-17
+
 ### Added
+- **Decision Models Preview (`decide`)**: A provider-neutral language effect for evaluating typed Choice, Score, and Noul questions against application state.
+- **TypeSafe System One Driver**: First-party WASM adapter for Jev with full probability distributions, confidence, model metadata, and usage preserved.
+- **Bundled Provider Drivers**: Official WASM adapters now ship inside the Turn binary while `.turn_modules/` remains the override path.
+- **`turn doctor`**: Reports selected providers, bundled-driver availability, and credential status without exposing secret values.
+- **Playground Sandbox**: `turn run --sandbox` uses a reduced tool registry and denies host filesystem, environment, arbitrary HTTP, imports, identity grants, and sleep effects.
+- **Jev Support Triage Example**: A runnable mixed-question workflow with confidence-gated routing.
 - **Native List Primitives (`map`, `filter`)**: `map(list, closure)` and `filter(list, closure)` are now native compiler keywords, expanded directly into inline bytecode `while` loops. No imports, no recursive stdlib patterns required.
 - **Struct Spread Syntax (`..base`)**: Concise immutable struct evolution. `let next = State { field: new_value, ..current }` creates a new epoch without copying every field manually.
 - **Expression `if` / Block Yielding**: `if/else` can now return values, enabling pure functional expressions without helper functions.
@@ -16,11 +26,17 @@ All notable changes to the Turn Language will be documented in this file.
 - **WASM Drivers — Ollama**: New `ollama_provider.wasm` driver for local Ollama inference (no API key required).
 
 ### Changed
+- **Runtime Error Semantics**: Uncaught provider and tool failures now exit as VM errors instead of being returned as successful strings.
+- **Provider CI and Releases**: Provider tests and WASM builds are part of CI; release builds regenerate embedded adapters from source.
+- **Durable Effect Replay**: Checkpoints now retain pending effect requests and replay them with documented at-least-once delivery after restart.
 - **WASM Driver Model hardened**: `llm_infer` and `llm_generate` now strictly route through WASM drivers. The Turn compiler and VM contain zero knowledge of any LLM vendor API.
 - **AWS Anthropic provider removed**: The `turn-provider-aws-anthropic` crate and its `.wasm` binary have been removed. Use `turn-provider-anthropic` for direct Anthropic access.
 - **Removed hardcoded API parameters**: Removed `temperature` and `max_output_tokens` from all provider payloads for compatibility with O1/O3-series and Responses API models.
 
 ### Fixed
+- Removed unconditional provider-response logging from the WASM host.
+- Replaced the `curl` subprocess transport with in-process `reqwest`, keeping provider credentials out of process arguments and removing a hidden runtime dependency.
+- Serialized environment-sensitive runner tests to prevent provider-selection races.
 - Resolved `generics_test.rs` conflict where a local variable named `map` clashed with the new native `map` keyword.
 - Fixed clippy warnings (`collapsible_else_if`, `needless_return`) across `parser.rs`, `runner.rs`, and `tools.rs`.
 

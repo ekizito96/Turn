@@ -13,6 +13,7 @@ pub struct Runner<S: Store> {
     store: S,
     tools: ToolRegistry,
     module_cache: HashMap<String, Value>,
+    sandboxed: bool,
 }
 
 impl<S: Store> Runner<S> {
@@ -21,6 +22,66 @@ impl<S: Store> Runner<S> {
             store,
             tools,
             module_cache: HashMap::new(),
+            sandboxed: false,
+        }
+    }
+
+    pub fn sandboxed(mut self) -> Self {
+        self.sandboxed = true;
+        self
+    }
+
+    fn resume_effect(
+        &mut self,
+        continuation: crate::vm::VmState,
+        tool_name: String,
+        arg: Value,
+        path: Option<&PathBuf>,
+    ) -> Vm {
+        if self.sandboxed && matches!(tool_name.as_str(), "sys_import" | "sys_grant") {
+            return Vm::resume_with_error(
+                continuation,
+                format!("Sandbox denied effect: {tool_name}"),
+            );
+        }
+
+        if tool_name == "sys_suspend" {
+            return Vm::resume_with_result(continuation, Value::Null);
+        }
+
+        if tool_name == "sys_import" {
+            let import_path = match arg {
+                Value::Str(value) => value,
+                _ => String::new(),
+            };
+            return match self.load_module(&import_path, path) {
+                Ok(value) => Vm::resume_with_result(continuation, value),
+                Err(error) => Vm::resume_with_error(continuation, error.to_string()),
+            };
+        }
+
+        if tool_name == "sys_grant" {
+            return match arg {
+                Value::Str(provider) => {
+                    Vm::resume_with_result(continuation, Value::Identity(provider))
+                }
+                _ => Vm::resume_with_error(
+                    continuation,
+                    "sys_grant expects a provider string".to_string(),
+                ),
+            };
+        }
+
+        match self.tools.call(&tool_name, arg) {
+            Ok((value, cost)) => {
+                let mut state = continuation;
+                state.gas_remaining = state.gas_remaining.saturating_sub(cost);
+                if let Value::Uncertain(_, confidence) = &value {
+                    state.runtime.last_confidence = Some(*confidence);
+                }
+                Vm::resume_with_result(state, value)
+            }
+            Err(error) => Vm::resume_with_error(continuation, error),
         }
     }
 
@@ -271,10 +332,11 @@ impl<S: Store> Runner<S> {
         // 1. Load or Init
         // If resuming, we load from store.
         let mut vm = if let Ok(Some(state)) = self.store.load(id) {
-            // Check if state is valid?
-            // Resume with Null as "last result" - technically incorrect if we crashed mid-tool-return?
-            // But good enough for now.
-            Vm::resume_with_result(state, Value::Null)
+            if let Some(pending) = state.runtime.pending_effect.clone() {
+                self.resume_effect(state, pending.tool_name, pending.arg, path.as_ref())
+            } else {
+                Vm::resume_with_result(state, Value::Null)
+            }
         } else {
             let lexer = Lexer::new(source);
             let tokens = lexer
@@ -307,9 +369,7 @@ impl<S: Store> Runner<S> {
         loop {
             match vm.run() {
                 VmResult::Complete(v) => {
-                    // Clear store on successful completion?
-                    // self.store.delete(id)?;
-                    // Keeping it allows inspecting final state or re-running?
+                    self.store.delete(id)?;
                     return Ok(v);
                 }
                 VmResult::Suspended {
@@ -322,76 +382,11 @@ impl<S: Store> Runner<S> {
                         self.store.save(id, &continuation)?;
                         return Ok(Value::Null);
                     }
-
-                    // Handle Import
-                    if tool_name == "sys_import" {
-                        // 3a. Save state (checkpoint)
-                        self.store.save(id, &continuation)?;
-
-                        // 3b. Load Module
-                        let import_path = match arg {
-                            Value::Str(s) => s.clone(),
-                            _ => "".to_string(),
-                        };
-
-                        // Use the provided path as base, or CWD
-                        let base_path = path.as_ref();
-
-                        match self.load_module(&import_path, base_path) {
-                            Ok(val) => {
-                                vm = Vm::resume_with_result(continuation, val);
-                            }
-                            Err(e) => {
-                                vm = Vm::resume_with_error(continuation, e.to_string());
-                            }
-                        }
-                        continue;
-                    }
-
-                    if tool_name == "sys_grant" {
-                        if let Value::Str(provider) = arg {
-                            vm = Vm::resume_with_result(continuation, Value::Identity(provider));
-                        } else {
-                            vm = Vm::resume_with_error(
-                                continuation,
-                                "sys_grant expects a provider string".to_string(),
-                            );
-                        }
-                        continue;
-                    }
-
-                    if tool_name == "sys_grant" {
-                        let provider_id = match arg {
-                            Value::Str(s) => s,
-                            _ => "unknown".to_string(),
-                        };
-                        let identity_cap = Value::Identity(provider_id);
-                        vm = Vm::resume_with_result(continuation, identity_cap);
-                        continue;
-                    }
-
-                    // 3. Save state (checkpoint)
                     self.store.save(id, &continuation)?;
-
-                    // 4. Execute tool
-                    match self.tools.call(&tool_name, arg) {
-                        Ok((val, cost)) => {
-                            let mut state = continuation;
-                            state.gas_remaining = state.gas_remaining.saturating_sub(cost);
-
-                            // Capture inference confidence for telemetry
-                            if let Value::Uncertain(_, p) = &val {
-                                state.runtime.last_confidence = Some(*p);
-                            }
-
-                            vm = Vm::resume_with_result(state, val);
-                        }
-                        Err(e) => {
-                            vm = Vm::resume_with_error(continuation, e);
-                        }
-                    }
+                    vm = self.resume_effect(continuation, tool_name, arg, path.as_ref());
                 }
                 VmResult::Error(err) => {
+                    self.store.delete(id)?;
                     return Err(std::io::Error::other(err).into());
                 }
                 VmResult::Yielded => unreachable!("VM should handle yields internally"),

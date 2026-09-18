@@ -1,0 +1,45 @@
+let ticket = "The export button crashes in Safari and I need the report today.";
+
+let questions = {
+    "department": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+            "billing": "Charges, invoices, and refunds",
+            "technical": "Bugs, outages, and integrations",
+            "sales": "Pricing, upgrades, and new accounts"
+        }
+    },
+    "severity": {
+        "type": "score",
+        "instructions": "How severe is the reported issue?",
+        "criteria": [
+            "Cosmetic; no impact to functionality",
+            "Broken or degraded feature, but a workaround exists",
+            "Blocking issue; no workaround exists"
+        ]
+    },
+    "is_urgent": {
+        "type": "noul",
+        "instructions": "Does this request require urgent attention?"
+    }
+};
+
+let decision = decide(ticket, questions);
+let department = decision["answers"]["department"];
+
+if department["confidence"] < 0.8 {
+    call("echo", "Escalating to manual triage");
+    return {
+        "route": "manual_review",
+        "severity": decision["answers"]["severity"]["score"],
+        "urgent_probability": decision["answers"]["is_urgent"]["noul"]
+    };
+}
+
+call("echo", "Routing to " + department["choice"]);
+return {
+    "route": department["choice"],
+    "severity": decision["answers"]["severity"]["score"],
+    "urgent_probability": decision["answers"]["is_urgent"]["noul"]
+};

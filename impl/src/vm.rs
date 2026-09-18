@@ -1,6 +1,6 @@
 use crate::ast::Type;
 use crate::bytecode::Instr;
-use crate::runtime::Runtime;
+use crate::runtime::{PendingEffect, Runtime};
 use crate::value::Value;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -161,6 +161,7 @@ impl Vm {
             gas_remaining: state.gas_remaining,
         };
 
+        process.runtime.pending_effect = None;
         process.stack.push(tool_result);
 
         let mut scheduler = state.scheduler;
@@ -183,6 +184,8 @@ impl Vm {
             gas_remaining: state.gas_remaining,
         };
 
+        let mut process = process;
+        process.runtime.pending_effect = None;
         let mut scheduler = state.scheduler;
         scheduler.push_back(process);
 
@@ -197,8 +200,15 @@ impl Vm {
         if let Some(p) = vm.scheduler.front_mut() {
             loop {
                 if p.frames.is_empty() {
-                    // No frames left, push error to stack (uncaught)
+                    // Re-enter through Throw so the scheduler reports an uncaught
+                    // effect failure as VmResult::Error rather than a successful value.
                     p.stack.push(err);
+                    p.frames.push(Frame {
+                        code: Arc::new(vec![Instr::Throw]),
+                        ip: 0,
+                        env: p.runtime.env.clone(),
+                        handlers: Vec::new(),
+                    });
                     break;
                 }
 
@@ -267,6 +277,10 @@ impl Vm {
                 } => {
                     let _ = no_progress_count; // clear warning
                                                // Reconstruct VmState for legacy support
+                    process.runtime.pending_effect = Some(PendingEffect {
+                        tool_name: tool_name.clone(),
+                        arg: arg.clone(),
+                    });
                     let state = VmState {
                         pid: process.pid,
                         parent_pid: process.parent_pid,
@@ -651,6 +665,36 @@ impl Vm {
                         continuation: state,
                     };
                 }
+                Instr::Decide => {
+                    let questions = process.stack.pop().unwrap_or(Value::Null);
+                    let decision_state = process.stack.pop().unwrap_or(Value::Null);
+
+                    let mut map = IndexMap::new();
+                    map.insert("state".to_string(), decision_state);
+                    map.insert("questions".to_string(), questions);
+                    map.insert(
+                        "context".to_string(),
+                        Value::List(process.runtime.context.to_flat_vec()),
+                    );
+
+                    process.frames[frame_idx].env = process.runtime.env.clone();
+                    let state = VmState {
+                        pid: process.pid,
+                        parent_pid: process.parent_pid,
+                        frames: process.frames.clone(),
+                        stack: process.stack.clone(),
+                        runtime: process.runtime.clone(),
+                        mailbox: process.mailbox.clone(),
+                        scheduler: self.scheduler.clone(),
+                        next_pid: self.next_pid,
+                        gas_remaining: process.gas_remaining,
+                    };
+                    return VmResult::Suspended {
+                        tool_name: "ai_decide".to_string(),
+                        arg: Value::Map(map),
+                        continuation: state,
+                    };
+                }
                 Instr::DefineStruct(name, fields) => {
                     process.runtime.register_struct(name, fields);
                 }
@@ -789,7 +833,7 @@ impl Vm {
                     let err = process.stack.pop().unwrap_or(Value::Null);
                     loop {
                         if process.frames.is_empty() {
-                            return VmResult::Complete(err);
+                            return VmResult::Error(err.to_string());
                         }
                         let f_idx = process.frames.len() - 1;
                         if let Some(h_off) = process.frames[f_idx].handlers.pop() {

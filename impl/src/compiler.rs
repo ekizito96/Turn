@@ -265,6 +265,13 @@ impl Compiler {
                 self.compile_block_yield(body);
                 self.emit(Instr::Infer(target_ty.clone()));
             }
+            Expr::Decide {
+                state, questions, ..
+            } => {
+                self.compile_expr(state);
+                self.compile_expr(questions);
+                self.emit(Instr::Decide);
+            }
             Expr::If {
                 cond,
                 then_block,

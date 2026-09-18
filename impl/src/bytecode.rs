@@ -67,7 +67,8 @@ pub enum Instr {
     Gather,      // NEW
     Confidence,  // NEW
     Infer(Type), // NEW
-    Suspend,     // NEW
+    Decide,
+    Suspend, // NEW
 
     // Control flow
     Jump(u32),

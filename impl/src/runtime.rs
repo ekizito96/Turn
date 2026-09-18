@@ -9,6 +9,12 @@ use indexmap::IndexMap;
 
 const MAX_CONTEXT_SIZE: usize = 100;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingEffect {
+    pub tool_name: String,
+    pub arg: Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StructuredContext {
     pub p0_system: Vec<Value>,
@@ -58,6 +64,8 @@ pub struct Runtime {
     pub structs: HashMap<String, IndexMap<String, Type>>,
     #[serde(default)]
     pub last_confidence: Option<f64>,
+    #[serde(default)]
+    pub pending_effect: Option<PendingEffect>,
 }
 
 impl Runtime {
@@ -68,6 +76,7 @@ impl Runtime {
             memory: HashMap::new(),
             structs: HashMap::new(),
             last_confidence: None,
+            pending_effect: None,
         }
     }
 

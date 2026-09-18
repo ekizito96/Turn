@@ -54,11 +54,13 @@ Primary      := Literal
             | Id
             | RecallExpr
             | InferExpr
+            | DecideExpr
             | TurnExpr
             | "(" Expr ")"
 
 RecallExpr   := "recall" "(" Expr ")"
 InferExpr    := "infer" Type "{" Expr ";" "}"
+DecideExpr   := "decide" "(" Expr "," Expr ")"
 TurnExpr     := "turn" "(" ParamList? ")" ("->" Type)? Block
 ParamList    := Param ("," Param)*
 Param        := Id ":" Type
@@ -72,7 +74,7 @@ Id           := identifier
 
 ## 3. Terminals
 
-- **Keywords:** `struct`, `use`, `turn`, `spawn`, `suspend`, `infer`, `let`, `context`, `append`, `remember`, `recall`, `call`, `return`, `if`, `else`, `while`, `and`, `or`, `true`, `false`, `null`.
+- **Keywords:** `struct`, `use`, `turn`, `spawn`, `suspend`, `infer`, `decide`, `let`, `context`, `append`, `remember`, `recall`, `call`, `return`, `if`, `else`, `while`, `and`, `or`, `true`, `false`, `null`.
 - **Operators:** `+`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `!`, `->`, `:`.
 - **identifier:** non-keyword, letter or `_` then alphanumeric or `_`.
 - **Num:** integer or decimal number.
